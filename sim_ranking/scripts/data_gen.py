@@ -10,6 +10,8 @@ from empirical.util.classdef import TectType, GMM
 from IM_calculation.source_site_dist import src_site_dist
 from qcore import srf
 
+import sim_ranking as sr
+
 app = typer.Typer()
 
 TECT_CLASS_MAPPING = {
@@ -46,41 +48,6 @@ COLUMN_MAPPING = {
     "r_x": "rx",
     "ev_depth": "hypo_depth",
 }
-
-IMs = ["PGA", "pSA"]
-PERIODS = [
-    0.01,
-    0.02,
-    0.03,
-    0.04,
-    0.05,
-    0.075,
-    0.1,
-    0.12,
-    0.15,
-    0.17,
-    0.2,
-    0.25,
-    0.3,
-    0.4,
-    0.5,
-    0.6,
-    0.7,
-    0.75,
-    0.8,
-    0.9,
-    1.0,
-    1.25,
-    1.5,
-    2.0,
-    2.5,
-    3.0,
-    4.0,
-    5.0,
-    6.0,
-    7.5,
-    10.0,
-]
 
 GMM_MAPPING = {
     TectType.ACTIVE_SHALLOW: GMM.Br_10,
@@ -192,7 +159,7 @@ def get_gmm_params(
                 cur_tect_type,
                 data_df.loc[cur_tect_mask, OQ_INPUT_COLUMNS],
                 "pSA",
-                PERIODS,
+                sr.constants.PERIODS,
             )
 
             cur_df = pd.concat((pga_result, psa_result), axis=1)
