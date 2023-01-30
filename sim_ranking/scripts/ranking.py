@@ -32,7 +32,7 @@ def conditional_mvn_ranking(
      - Support for specifying sites of interest
      - Support for setting IM weights
     """
-    # assert len(list(output_dir.iterdir())) == 0, "Output directory has to be empty"
+    assert len(list(output_dir.iterdir())) == 0, "Output directory has to be empty"
 
     # Load the station data
     stations_df = pd.read_csv(
@@ -83,22 +83,25 @@ def conditional_mvn_ranking(
         ) ** 2
 
         # Aggregate along IM axis
-        site_misfits.append(pd.Series(index=cur_sim_df.index, data=cur_misfit.sum(axis=1), name=cur_site))
+        site_misfits.append(
+            pd.Series(
+                index=cur_sim_df.index, data=cur_misfit.sum(axis=1), name=cur_site
+            )
+        )
 
     # Combine
     site_misfits_df = pd.concat(site_misfits, axis=1)
 
     # Select the best realisation for each site
-    print(f"wtf")
-
+    best_sim_id = pd.Series(
+        data=site_misfits_df.index[np.argmin(site_misfits_df.values, axis=0)],
+        index=site_misfits_df.columns,
+    )
 
     # Save the results
     cMVNs_result.save(output_dir / "cMVN_distributions.pickle")
     site_misfits_df.to_csv(output_dir / "site_misfits.csv")
-
-    # (misfit_out_dir := output_dir / "misfits").mkdir()
-    # for cur_site, cur_misfit in site_misfits.items():
-    #     cur_misfit.to_csv(misfit_out_dir / f"{cur_site}_misfit.csv")
+    best_sim_id.to_csv(output_dir / "best_sim_ids.csv")
 
 
 if __name__ == "__main__":
