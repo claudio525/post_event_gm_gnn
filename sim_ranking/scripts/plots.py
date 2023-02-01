@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+from typing import List, Sequence
 
 import pandas as pd
 import numpy as np
@@ -9,17 +9,24 @@ import matplotlib.pyplot as plt
 
 import gmhazard_calc as gc
 import sim_ranking as sr
+from qcore.timeseries import BBSeis, read_ascii
 
 app = typer.Typer()
 
-@app.command()
-def gen_cMVN_site_plots(
+
+@app.command("cmvn-result-plots")
+def gen_cMVN_plots(
     results_dir: Path,
     sim_imdb_ffp: Path,
     obs_data_ffp: Path,
     sites: List[str] = None,
     show_all_sims: bool = False,
 ):
+    """
+    Generates
+      - response spectrum plot for each site
+      - summary residual plots
+    """
     (output_dir := results_dir / "plots").mkdir(exist_ok=True)
 
     # Load the conditional MVN & site misfit data
@@ -27,7 +34,6 @@ def gen_cMVN_site_plots(
         results_dir / "cMVN_distributions.pickle"
     )
     best_sim_ids = pd.read_csv(results_dir / "best_sim_ids.csv", index_col=0).squeeze()
-    # site_misfits_df = pd.read_csv(results_dir / "site_misfits.csv", index_col=0)
     sites = cMVN_result.stations if len(sites) == 0 else np.asarray(sites)
 
     # Load the observation & simulation data
@@ -84,8 +90,13 @@ def gen_cMVN_site_plots(
     best_sim_df.index = sites
 
     obs_sim_ln_ratio = np.log(obs_df.loc[sites, pSA_keys]) - np.log(best_sim_df)
-    obs_cmvn_ln_ratio = np.log(obs_df.loc[sites, pSA_keys]) - cMVN_result.cond_lnIM_mean_df.loc[sites, pSA_keys]
-    cmvn_sim_ln_ratio = cMVN_result.cond_lnIM_mean_df.loc[sites, pSA_keys] - np.log(best_sim_df)
+    obs_cmvn_ln_ratio = (
+        np.log(obs_df.loc[sites, pSA_keys])
+        - cMVN_result.cond_lnIM_mean_df.loc[sites, pSA_keys]
+    )
+    cmvn_sim_ln_ratio = cMVN_result.cond_lnIM_mean_df.loc[sites, pSA_keys] - np.log(
+        best_sim_df
+    )
 
     # All sites
     sr.plot_response_spectrum_residual(
@@ -145,7 +156,6 @@ def gen_cMVN_site_plots(
         title="cMVN - Simulation Residual ($R_{Rup}$ < 30)",
         ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
     )
-
 
     cur_sites = sites[
         (obs_df.loc[sites, "r_rup"].values > 30)
@@ -238,7 +248,6 @@ def gen_cMVN_site_plots(
         ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
     )
 
-
     cur_sites = sites[
         (obs_df.loc[sites, "Vs30"].values > 300)
         & (obs_df.loc[sites, "Vs30"].values < 500)
@@ -300,6 +309,92 @@ def gen_cMVN_site_plots(
         ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
     )
 
+
+@app.command("cmvn-waveform-plots")
+def gen_cMVN_waveform_plots(
+    results_dir: Path,
+    sim_rupture_dir: Path = typer.Argument(
+        ..., help="The event directory in the Runs folder"
+    ),
+    obs_waveform_dir: Path = typer.Argument(
+        ..., help="Path to the acceleration waveform directory for this rupture"
+    ),
+    obs_data_ffp: Path = typer.Argument(..., help="Path the NZ-GMDB IM flat file"),
+):
+    """
+    Generates waveform plots for each site
+    """
+    best_sim_ids = pd.read_csv(results_dir / "best_sim_ids.csv", index_col=0).squeeze()
+    sites = best_sim_ids.index.values.astype(str)
+    rupture = sr.ConditionalMVNDistribution.load(
+        results_dir / "cMVN_distributions.pickle"
+    ).rupture
+
+    obs_df = sr.load_obs_rupture_data(obs_data_ffp, rupture)
+
+    (output_dir := results_dir / "plots" / "site_plots").mkdir(
+        exist_ok=True, parents=True
+    )
+    for ix, cur_site in enumerate(sites):
+        print(f"Processing site {cur_site}, {ix + 1}/{sites.size}")
+
+        cur_sim_id = best_sim_ids.loc[cur_site]
+
+        # Get the BB file
+        if not (
+            cur_bb_ffp := sim_rupture_dir / cur_sim_id / "BB" / "Acc" / "BB.bin"
+        ).exists():
+            print(f"Can't find BB file for {cur_site} - {cur_sim_id}")
+            continue
+
+        bb = BBSeis(str(cur_bb_ffp))
+        sim_acc = bb.acc(cur_site)
+        sim_t = bb.dt * np.arange(sim_acc.shape[0])
+
+        if bb.start_sec < 0:
+            sim_mask = sim_t > np.abs(bb.start_sec)
+            sim_acc = sim_acc[sim_mask, :]
+            sim_t = bb.dt * np.arange(sim_acc.shape[0])
+        else:
+            raise NotImplementedError()
+
+        # Get the observed waveforms
+        if not all(
+            [
+                (obs_waveform_dir / f"{cur_site}.{cur_comp}").exists()
+                for cur_comp in sr.constants.COMPONENTS
+            ]
+        ):
+            print(f"Can't find all acceleration waveform files for {cur_site}")
+            continue
+
+        obs_acc = []
+        meta = None
+        for cur_comp in sr.constants.COMPONENTS:
+            cur_acc, cur_meta = read_ascii(
+                str(obs_waveform_dir / f"{cur_site}.{cur_comp}"), meta=True
+            )
+            if meta is None:
+                meta = cur_meta
+            else:
+                assert meta["dt"] == cur_meta["dt"]
+            obs_acc.append(cur_acc)
+
+        obs_acc = np.stack(obs_acc, axis=1)
+        obs_t = meta["dt"] * np.arange(obs_acc.shape[0])
+
+        fig = plt.figure(figsize=(16, 10))
+
+        sr.draw_waveforms(fig, [sim_acc, obs_acc], [sim_t, obs_t], ["r", "k"])
+
+        fig.suptitle(
+            f"{cur_site}, {r'$R_{rup}$'} = {obs_df.loc[cur_site, 'r_rup']:.0f} (km), "
+            f"{'$V_{S30}$'} = {obs_df.loc[cur_site, 'Vs30']:.0f} (m/s)"
+        )
+        fig.tight_layout()
+
+        plt.savefig(output_dir / f"{cur_site}_waveform.png")
+        plt.close()
 
 
 if __name__ == "__main__":

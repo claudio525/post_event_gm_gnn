@@ -31,3 +31,5 @@ PERIODS = [
     7.5,
     10.0,
 ]
+
+COMPONENTS = ["090", "000", "ver"]

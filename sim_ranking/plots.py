@@ -139,6 +139,7 @@ def plot_response_spectrum_residual(
     title: str = None,
     ylabel: str = None
 ):
+    """Generates a response spectrum residual plot"""
     fig = plt.figure(figsize=(16, 10))
 
     for ix, cur_site in enumerate(sites):
@@ -181,3 +182,102 @@ def plot_response_spectrum_residual(
 
     plt.savefig(output_ffp)
     plt.close()
+
+
+def draw_waveforms(
+    fig: plt.Figure,
+    acc_data: Sequence[np.ndarray],
+    time_data: Sequence[np.ndarray],
+    colors: Sequence[str] = None,
+):
+    """
+    Draws the waveforms on the specified figure
+
+    Note: len(acc_data) == len(time_data) == len(colors)
+
+
+    Parameters
+    ----------
+    fig: Figure
+    acc_data: sequence of numpy arrays
+        Each array corresponds to one set
+        of acceleration data
+        Expected to have shape [nt, 3] with
+        the components in order 090, 000, Ver
+        Arrays must be in the same order as the
+        time arrays
+    time_data: sequence of numpy arrays
+        The matching time arrays for the
+        acceleration data
+    colors: sequence of strings, optional
+        The colors to use for each
+        set of waveform data (i.e. record)
+    """
+    n_records = len(acc_data)
+
+    y_lim_min = min([cur_acc.min() for cur_acc in acc_data])
+    y_lim_max = max([cur_acc.max() for cur_acc in acc_data])
+    x_lim_min = min([cur_t.min() for cur_t in time_data])
+    x_lim_max = max([cur_t.max() for cur_t in time_data])
+
+    ax1 = None
+    for record_ix, (cur_t, cur_waveform) in enumerate(zip(time_data, acc_data)):
+        cur_ax1 = fig.add_subplot(
+            n_records, 3, (record_ix * 3) + 1, sharex=ax1, sharey=ax1
+        )
+        cur_ax1.plot(
+            cur_t,
+            cur_waveform[:, 0],
+            c=None if colors is None else colors[record_ix],
+            linewidth=1.0,
+        )
+        cur_ax1.text(
+            0.1,
+            0.93,
+            "090",
+            horizontalalignment="right",
+            verticalalignment="bottom",
+            transform=cur_ax1.transAxes,
+            size="large",
+        )
+
+        if record_ix == 0:
+            cur_ax1.set_xlim(x_lim_min, x_lim_max)
+            cur_ax1.set_ylim(y_lim_min, y_lim_max)
+            ax1 = cur_ax1
+
+        cur_ax2 = fig.add_subplot(
+            n_records, 3, (record_ix * 3) + 2, sharex=ax1, sharey=ax1
+        )
+        cur_ax2.plot(
+            cur_t,
+            cur_waveform[:, 1],
+            c=None if colors is None else colors[record_ix],
+            linewidth=1.0,
+        )
+        cur_ax2.text(
+            0.1,
+            0.93,
+            "000",
+            horizontalalignment="right",
+            verticalalignment="bottom",
+            transform=cur_ax2.transAxes,
+            size="large",
+        )
+
+        cur_ax3 = fig.add_subplot(2, 3, (record_ix * 3) + 3, sharex=ax1, sharey=ax1)
+        cur_ax3.plot(
+            cur_t,
+            cur_waveform[:, 2],
+            c=None if colors is None else colors[record_ix],
+            linewidth=1.0,
+        )
+        cur_ax3.text(
+            0.1,
+            0.93,
+            "Ver",
+            horizontalalignment="right",
+            verticalalignment="bottom",
+            transform=cur_ax3.transAxes,
+            size="large",
+        )
