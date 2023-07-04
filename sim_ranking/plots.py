@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from .conditional_MVN import ConditionalMVNDistribution
+from . import constants
 
 
 def plot_response_spectrum(
@@ -50,7 +51,7 @@ def plot_response_spectrum(
         realisations are plotted, not just
         the best one
     """
-    fig = plt.figure(figsize=(16, 10))
+    fig = plt.figure(figsize=constants.FIG_SIZE)
 
     # All other simulations
     if show_all_sims:
@@ -126,7 +127,7 @@ def plot_response_spectrum(
     plt.legend()
     fig.tight_layout()
 
-    plt.savefig(output_dir / f"{site}_response_spectra.png")
+    plt.savefig(output_dir / f"{site}_response_spectra.{constants.FIG_FORMAT}")
     plt.close()
 
 
@@ -137,10 +138,10 @@ def plot_response_spectrum_residual(
     ratio_df: pd.DataFrame,
     output_ffp: Path,
     title: str = None,
-    ylabel: str = None
+    ylabel: str = None,
 ):
     """Generates a response spectrum residual plot"""
-    fig = plt.figure(figsize=(16, 10))
+    fig = plt.figure(figsize=constants.FIG_SIZE)
 
     for ix, cur_site in enumerate(sites):
         plt.plot(
@@ -189,6 +190,7 @@ def draw_waveforms(
     acc_data: Sequence[np.ndarray],
     time_data: Sequence[np.ndarray],
     colors: Sequence[str] = None,
+    add_comp_text: bool = True
 ):
     """
     Draws the waveforms on the specified figure
@@ -220,6 +222,8 @@ def draw_waveforms(
     x_lim_min = min([cur_t.min() for cur_t in time_data])
     x_lim_max = max([cur_t.max() for cur_t in time_data])
 
+    axes = []
+
     ax1 = None
     for record_ix, (cur_t, cur_waveform) in enumerate(zip(time_data, acc_data)):
         cur_ax1 = fig.add_subplot(
@@ -231,15 +235,16 @@ def draw_waveforms(
             c=None if colors is None else colors[record_ix],
             linewidth=1.0,
         )
-        cur_ax1.text(
-            0.1,
-            0.93,
-            "090",
-            horizontalalignment="right",
-            verticalalignment="bottom",
-            transform=cur_ax1.transAxes,
-            size="large",
-        )
+        if add_comp_text:
+            cur_ax1.text(
+                0.1,
+                0.93,
+                "090",
+                horizontalalignment="right",
+                verticalalignment="bottom",
+                transform=cur_ax1.transAxes,
+                size="large",
+            )
 
         if record_ix == 0:
             cur_ax1.set_xlim(x_lim_min, x_lim_max)
@@ -255,29 +260,36 @@ def draw_waveforms(
             c=None if colors is None else colors[record_ix],
             linewidth=1.0,
         )
-        cur_ax2.text(
-            0.1,
-            0.93,
-            "000",
-            horizontalalignment="right",
-            verticalalignment="bottom",
-            transform=cur_ax2.transAxes,
-            size="large",
-        )
+        if add_comp_text:
+            cur_ax2.text(
+                0.1,
+                0.93,
+                "000",
+                horizontalalignment="right",
+                verticalalignment="bottom",
+                transform=cur_ax2.transAxes,
+                size="large",
+            )
 
-        cur_ax3 = fig.add_subplot(2, 3, (record_ix * 3) + 3, sharex=ax1, sharey=ax1)
+        cur_ax3 = fig.add_subplot(
+            n_records, 3, (record_ix * 3) + 3, sharex=ax1, sharey=ax1
+        )
         cur_ax3.plot(
             cur_t,
             cur_waveform[:, 2],
             c=None if colors is None else colors[record_ix],
             linewidth=1.0,
         )
-        cur_ax3.text(
-            0.1,
-            0.93,
-            "Ver",
-            horizontalalignment="right",
-            verticalalignment="bottom",
-            transform=cur_ax3.transAxes,
-            size="large",
-        )
+        if add_comp_text:
+            cur_ax3.text(
+                0.1,
+                0.93,
+                "Ver",
+                horizontalalignment="right",
+                verticalalignment="bottom",
+                transform=cur_ax3.transAxes,
+                size="large",
+            )
+
+        axes.extend([cur_ax1, cur_ax2, cur_ax3])
+    return axes

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import List, Sequence
 
@@ -11,8 +12,9 @@ import gmhazard_calc as gc
 import sim_ranking as sr
 from qcore.timeseries import BBSeis, read_ascii
 
-app = typer.Typer()
+from sim_ranking import constants
 
+app = typer.Typer()
 
 @app.command("cmvn-result-plots")
 def gen_cMVN_plots(
@@ -21,13 +23,15 @@ def gen_cMVN_plots(
     obs_data_ffp: Path,
     sites: List[str] = None,
     show_all_sims: bool = False,
+    output_dir: Path = None,
 ):
     """
     Generates
       - response spectrum plot for each site
       - summary residual plots
     """
-    (output_dir := results_dir / "plots").mkdir(exist_ok=True)
+    if output_dir is None:
+        (output_dir := results_dir / "plots").mkdir(exist_ok=True)
 
     # Load the conditional MVN & site misfit data
     cMVN_result = sr.ConditionalMVNDistribution.load(
@@ -104,7 +108,7 @@ def gen_cMVN_plots(
         pSA_keys,
         sites,
         obs_sim_ln_ratio,
-        output_dir / "obs_sim_residuals.png",
+        output_dir / f"obs_sim_residuals.{constants.FIG_FORMAT}",
         title="Observation - Simulation Residual",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
@@ -113,7 +117,7 @@ def gen_cMVN_plots(
         pSA_keys,
         sites,
         obs_cmvn_ln_ratio,
-        output_dir / "obs_cmvn_residuals.png",
+        output_dir / f"obs_cmvn_residuals.{constants.FIG_FORMAT}",
         title="Observation - cMVN Residual",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
@@ -122,7 +126,7 @@ def gen_cMVN_plots(
         pSA_keys,
         sites,
         cmvn_sim_ln_ratio,
-        output_dir / "cmvn_sim_residuals.png",
+        output_dir / f"cmvn_sim_residuals.{constants.FIG_FORMAT}",
         title="cMVN - Simulation Residual",
         ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
     )
@@ -134,7 +138,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / "obs_sim_residuals_rrup_0_30.png",
+        output_dir / f"obs_sim_residuals_rrup_0_30.{constants.FIG_FORMAT}",
         title="Observation - Simulation Residual ($R_{Rup}$ < 30)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
@@ -143,7 +147,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / "obs_cmvn_residuals_rrup_0_30.png",
+        output_dir / f"obs_cmvn_residuals_rrup_0_30.{constants.FIG_FORMAT}",
         title="Observation - cMVN Residual ($R_{Rup}$ < 30)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
@@ -152,7 +156,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / "cmvn_sim_residuals_rrup_0_30.png",
+        output_dir / f"cmvn_sim_residuals_rrup_0_30.{constants.FIG_FORMAT}",
         title="cMVN - Simulation Residual ($R_{Rup}$ < 30)",
         ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
     )
@@ -166,7 +170,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / "obs_sim_residuals_rrup_30_75.png",
+        output_dir / f"obs_sim_residuals_rrup_30_75.{constants.FIG_FORMAT}",
         title="Observation - Simulation Residual (30 < $R_{Rup}$ < 75)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
@@ -175,7 +179,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / "obs_cmvn_residuals_rrup_30_75.png",
+        output_dir / f"obs_cmvn_residuals_rrup_30_75.{constants.FIG_FORMAT}",
         title="Observation - cMVN Residual (30 < $R_{Rup}$ < 75)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
@@ -184,7 +188,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / "cmvn_sim_residuals_rrup_30_75.png",
+        output_dir / f"cmvn_sim_residuals_rrup_30_75.{constants.FIG_FORMAT}",
         title="cMVN - Simulation Residual (30 < $R_{Rup}$ < 75)",
         ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
     )
@@ -195,7 +199,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / "obs_sim_residuals_rrup_75.png",
+        output_dir / f"obs_sim_residuals_rrup_75.{constants.FIG_FORMAT}",
         title="Observation - Simulation Residual (75 < $R_{Rup}$)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
@@ -204,7 +208,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / "obs_cmvn_residuals_rrup_75.png",
+        output_dir / f"obs_cmvn_residuals_rrup_75.{constants.FIG_FORMAT}",
         title="Observation - cMVN Residual (75 < $R_{Rup}$)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
@@ -213,7 +217,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / "cmvn_sim_residuals_rrup_75.png",
+        output_dir / f"cmvn_sim_residuals_rrup_75.{constants.FIG_FORMAT}",
         title="cMVN - Simulation Residual (75 < $R_{Rup}$)",
         ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
     )
@@ -225,7 +229,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / "obs_sim_residuals_vs30_0_300.png",
+        output_dir / f"obs_sim_residuals_vs30_0_300.{constants.FIG_FORMAT}",
         title="Observation - Simulation Residual ($V_{S30}$ < 300)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
@@ -234,7 +238,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / "obs_cmvn_residuals_vs30_0_300.png",
+        output_dir / f"obs_cmvn_residuals_vs30_0_300.{constants.FIG_FORMAT}",
         title="Observation - cMVN Residual ($V_{S30}$ < 300)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
@@ -243,7 +247,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / "cmvn_sim_residuals_vs30_0_300.png",
+        output_dir / f"cmvn_sim_residuals_vs30_0_300.{constants.FIG_FORMAT}",
         title="cMVN - Simulation Residual ($V_{S30}$ < 300)",
         ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
     )
@@ -257,7 +261,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / "obs_sim_residuals_vs30_300_500.png",
+        output_dir / f"obs_sim_residuals_vs30_300_500.{constants.FIG_FORMAT}",
         title="Observation - Simulation Residual (300 < $V_{S30}$ < 500)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
@@ -266,7 +270,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / "obs_cmvn_residuals_vs30_300_500.png",
+        output_dir / f"obs_cmvn_residuals_vs30_300_500.{constants.FIG_FORMAT}",
         title="Observation - cMVN Residual (300 < $V_{S30}$ < 500)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
@@ -275,7 +279,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / "cmvn_sim_residuals_vs30_300_500.png",
+        output_dir / f"cmvn_sim_residuals_vs30_300_500.{constants.FIG_FORMAT}",
         title="cMVN - Simulation Residual (300 < $V_{S30}$ < 500)",
         ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
     )
@@ -286,7 +290,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / "obs_sim_residuals_vs30_500.png",
+        output_dir / f"obs_sim_residuals_vs30_500.{constants.FIG_FORMAT}",
         title="Observation - Simulation Residual (500 < $V_{S30}$)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
@@ -295,7 +299,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / "obs_cmvn_residuals_vs30_500.png",
+        output_dir / f"obs_cmvn_residuals_vs30_500.{constants.FIG_FORMAT}",
         title="Observation - cMVN Residual (500 < $V_{S30}$)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
@@ -304,7 +308,7 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / "cmvn_sim_residuals_vs30_500.png",
+        output_dir / f"cmvn_sim_residuals_vs30_500.{constants.FIG_FORMAT}",
         title="cMVN Residual - Simulation (500 < $V_{S30}$)",
         ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
     )
@@ -338,52 +342,13 @@ def gen_cMVN_waveform_plots(
     for ix, cur_site in enumerate(sites):
         print(f"Processing site {cur_site}, {ix + 1}/{sites.size}")
 
-        cur_sim_id = best_sim_ids.loc[cur_site]
-
         # Get the BB file
-        if not (
-            cur_bb_ffp := sim_rupture_dir / cur_sim_id / "BB" / "Acc" / "BB.bin"
-        ).exists():
-            print(f"Can't find BB file for {cur_site} - {cur_sim_id}")
-            continue
-
-        bb = BBSeis(str(cur_bb_ffp))
-        sim_acc = bb.acc(cur_site)
-        sim_t = bb.dt * np.arange(sim_acc.shape[0])
-
-        if bb.start_sec < 0:
-            sim_mask = sim_t > np.abs(bb.start_sec)
-            sim_acc = sim_acc[sim_mask, :]
-            sim_t = bb.dt * np.arange(sim_acc.shape[0])
-        else:
-            raise NotImplementedError()
+        sim_t, sim_acc = sr.load_sim_waveform(sim_rupture_dir, best_sim_ids.loc[cur_site], cur_site)
 
         # Get the observed waveforms
-        if not all(
-            [
-                (obs_waveform_dir / f"{cur_site}.{cur_comp}").exists()
-                for cur_comp in sr.constants.COMPONENTS
-            ]
-        ):
-            print(f"Can't find all acceleration waveform files for {cur_site}")
-            continue
+        obs_t, obs_acc = sr.load_obs_waveform(obs_waveform_dir, cur_site)
 
-        obs_acc = []
-        meta = None
-        for cur_comp in sr.constants.COMPONENTS:
-            cur_acc, cur_meta = read_ascii(
-                str(obs_waveform_dir / f"{cur_site}.{cur_comp}"), meta=True
-            )
-            if meta is None:
-                meta = cur_meta
-            else:
-                assert meta["dt"] == cur_meta["dt"]
-            obs_acc.append(cur_acc)
-
-        obs_acc = np.stack(obs_acc, axis=1)
-        obs_t = meta["dt"] * np.arange(obs_acc.shape[0])
-
-        fig = plt.figure(figsize=(16, 10))
+        fig = plt.figure(figsize=constants.FIG_SIZE)
 
         sr.draw_waveforms(fig, [sim_acc, obs_acc], [sim_t, obs_t], ["r", "k"])
 

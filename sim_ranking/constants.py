@@ -1,3 +1,5 @@
+import os
+
 PERIODS = [
     0.01,
     0.02,
@@ -33,3 +35,13 @@ PERIODS = [
 ]
 
 COMPONENTS = ["090", "000", "ver"]
+
+CANTERBURY_REGION = [171.54, 173.12, -43.95, -43.22]
+
+FIG_SIZE = (16, 10)
+if (env_figsize := os.environ.get("fig_size")) is not None:
+    FIG_SIZE = [float(x) for x in env_figsize.split(",")]
+
+FIG_FORMAT = "png"
+if (env_fig_format := os.environ.get("fig_format")) is not None:
+    FIG_FORMAT = env_fig_format

@@ -133,6 +133,7 @@ def get_gmm_params(
     data_df = pd.concat(data_dfs, axis=0)
     data_df["vs30measured"] = False
 
+    # Run predictions
     dfs = []
     sites = np.unique(data_df.site)
     for site_ix, cur_site in enumerate(sites):
