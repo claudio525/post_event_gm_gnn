@@ -15,7 +15,7 @@ app = typer.Typer()
 @app.command("cmvn")
 def conditional_mvn_ranking(
     rupture: str,
-    gmm_params_ffp: Path,
+    gm_params_ffp: Path,
     obs_data_ffp: Path,
     stations_ll_ffp: Path,
     sim_imdb_ffp: Path,
@@ -51,7 +51,7 @@ def conditional_mvn_ranking(
     IMs_str = [str(cur_im) for cur_im in IMs]
 
     # Get GMM parameters
-    gmm_params_df = pd.read_csv(gmm_params_ffp, index_col=0, dtype={"event": str})
+    gmm_params_df = pd.read_csv(gm_params_ffp, index_col=0, dtype={"event": str})
     gmm_params_df = gmm_params_df.loc[gmm_params_df.event == rupture]
     gmm_params_df = gmm_params_df.set_index("site").sort_index()
 
@@ -66,7 +66,7 @@ def conditional_mvn_ranking(
 
     # Commpute the conditional MVN distributions for each IM
     cMVNs_result = sr.compute_cond_MVN_distributions(
-        IMs, obs_df, gmm_params_df, stations_df, sim_data, int_stations
+        IMs, obs_df, gmm_params_df, stations_df, int_stations
     )
 
     # Compute the misfit for each site of interest

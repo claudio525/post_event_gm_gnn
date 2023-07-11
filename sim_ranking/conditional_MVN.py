@@ -34,7 +34,6 @@ def compute_cond_MVN_distributions(
     obs_df: pd.DataFrame,
     gmm_params_df: pd.DataFrame,
     stations_df: pd.DataFrame,
-    sim_data: Dict[str, pd.DataFrame],
     int_stations: Sequence[str],
 ):
     # Sanity checks

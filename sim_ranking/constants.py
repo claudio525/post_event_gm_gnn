@@ -38,6 +38,8 @@ COMPONENTS = ["090", "000", "ver"]
 
 CANTERBURY_REGION = [171.54, 173.12, -43.95, -43.22]
 
+STATION_FN_NAME = "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land"
+
 FIG_SIZE = (16, 10)
 if (env_figsize := os.environ.get("fig_size")) is not None:
     FIG_SIZE = [float(x) for x in env_figsize.split(",")]
@@ -45,3 +47,4 @@ if (env_figsize := os.environ.get("fig_size")) is not None:
 FIG_FORMAT = "png"
 if (env_fig_format := os.environ.get("fig_format")) is not None:
     FIG_FORMAT = env_fig_format
+

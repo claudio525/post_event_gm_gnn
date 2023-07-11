@@ -10,10 +10,18 @@ from qcore.timeseries import BBSeis, read_ascii
 from . import constants
 
 
-def load_sim_data(sim_imdb_ffp: Path, sites: Sequence[str]):
+def load_sim_data(sim_imdb_ffp: Path, sites: Sequence[str] = None):
     """Loads the simulation IM values for the specified sites"""
     sim_data = {}
     with gc.dbs.IMDB.get_imdb(str(sim_imdb_ffp)) as db:
+        # Bit of a hack
+        if sites is None:
+            sites = [
+                cur_key.split("/")[-1].split("_")[-1]
+                for cur_key in db._db.keys()
+                if cur_key not in ["/simulations", "/sites"]
+            ]
+
         for cur_site in sites:
             if (cur_im_df := db.im_data(cur_site)) is not None:
                 sim_data[cur_site] = cur_im_df.droplevel(0, 0)
@@ -72,6 +80,7 @@ def load_sim_waveform(sim_rupture_dir: Path, rel_id: str, site: str):
 
     return sim_t, sim_acc
 
+
 def load_obs_waveform(obs_waveform_dir: Path, site: str):
     """
     Loads the observation waveform data from the
@@ -96,10 +105,10 @@ def load_obs_waveform(obs_waveform_dir: Path, site: str):
         in the order 090, 000, Ver
     """
     if not all(
-            [
-                (obs_waveform_dir / f"{site}.{cur_comp}").exists()
-                for cur_comp in constants.COMPONENTS
-            ]
+        [
+            (obs_waveform_dir / f"{site}.{cur_comp}").exists()
+            for cur_comp in constants.COMPONENTS
+        ]
     ):
         print(f"Can't find all acceleration waveform files for {site}")
         return None, None
