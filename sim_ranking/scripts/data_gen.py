@@ -5,7 +5,6 @@ import numpy as np
 import typer
 
 
-
 from IM_calculation.source_site_dist import src_site_dist
 from qcore import srf
 
@@ -33,16 +32,37 @@ RJB_MAX = 200
 
 @app.command("get-emp-gm-params")
 def get_emp_gmm_params(
-    output_ffp: Path, site_dir: Path, srf_dir: Path, nz_gmdb_source_ffp: Path, rjb_max: float = RJB_MAX
+    output_ffp: Path,
+    site_dir: Path,
+    srf_dir: Path,
+    nz_gmdb_source_ffp: Path,
+    rjb_max: float = RJB_MAX,
 ):
     """Computes the GM parameters using empirical GMMs"""
     sr.data.run_emp_gmms(output_ffp, site_dir, srf_dir, nz_gmdb_source_ffp, rjb_max)
 
-@app.command("compute-sim-gm-params")
-def get_sim_gmm_params(simulation_imdb_ffp: Path, ):
-    """Computes the GM parameters from the simulation data directly"""
-    sim_data =  sr.data.compute_sim_gm_parameters(simulation_imdb_ffp)
 
+@app.command("compute-sim-gm-params")
+def get_sim_gm_params(output_ffp: Path, simulation_imdb_ffp: Path):
+    """Computes the GM parameters from the simulation data directly"""
+    sim_gm_params = sr.data.compute_sim_gm_parameters(simulation_imdb_ffp)
+
+    sim_gm_params.to_csv(output_ffp)
+
+
+@app.command("compute-sim-site-correlations")
+def compute_sim_site_correlations(
+    output_dir: Path, simulation_imdb_ffp: Path, obs_data_ffp: Path
+):
+    """Computes the site correlations from the simulation data directly"""
+    site_correlations = sr.data.compute_sim_site_correlations(
+        simulation_imdb_ffp, obs_data_ffp
+    )
+
+    for cur_event, cur_im_dict in site_correlations.items():
+        (cur_out_dir := output_dir / cur_event).mkdir(exist_ok=True)
+        for cur_im, cur_site_corr in cur_im_dict.items():
+            cur_site_corr.to_csv(cur_out_dir / f"{cur_im}.csv")
 
 if __name__ == "__main__":
     app()

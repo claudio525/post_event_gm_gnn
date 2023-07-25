@@ -1,5 +1,7 @@
 from pathlib import Path
+from typing import Sequence
 
+import gmhazard_calc as gc
 import pandas as pd
 import numpy as np
 
@@ -7,6 +9,7 @@ from empirical.util.openquake_wrapper_vectorized import oq_run
 from empirical.util.classdef import TectType, GMM
 from IM_calculation.source_site_dist import src_site_dist
 from qcore import srf
+from qcore.timeseries import BBSeis, read_ascii
 
 from . import constants
 from . import utils
@@ -179,26 +182,224 @@ def run_emp_gmms(
             dfs.append(cur_df)
 
     result_df = pd.concat(dfs, axis=0)
-
-    # Rename the columns
-    print(f"wtf")
-
     result_df.to_csv(output_ffp, index_label="id")
 
 
-def compute_sim_gm_parameters(simulation_imdb_ffp: Path):
+def compute_sim_site_correlations(simulation_imdb_ffp: Path, obs_data_ffp: Path):
+    """Computes the site correlations based on the simulation data"""
     # Get the simulation data
-    sim_data = utils.load_sim_data(simulation_imdb_ffp)
+    sim_data = load_sim_data(simulation_imdb_ffp, include_event=True)
+
+    events = np.unique(list(sim_data.values())[0].index.get_level_values(0))
+    ims = list(sim_data.values())[0].columns.values.astype(str)
+
+    site_correlations = {}
+    for cur_event in events:
+        ### Compute the residuals per IM
+        im_residuals = {cur_im: {} for cur_im in ims}
+
+        # Get the observed data
+        obs_df = load_obs_rupture_data(obs_data_ffp, cur_event)
+        for cur_site, cur_im_data in sim_data.items():
+            # No observed data
+            if cur_site not in obs_df.index:
+                continue
+
+            # Compute the residual (which is the
+            # within-event residual as simulations are event
+            # specific models and there between-event
+            # residual is zero)
+            cur_residuals = np.log(cur_im_data.loc[cur_event, ims]) - np.log(
+                obs_df.loc[cur_site, ims].astype(float)
+            )
+
+            for cur_im in cur_residuals.columns:
+                im_residuals[cur_im][cur_site] = cur_residuals[cur_im]
+
+        im_residuals = {cur_im: pd.DataFrame(v).T for cur_im, v in im_residuals.items()}
+
+        ### Compute the site correlations
+        cur_site_correlations = {
+            cur_im: pd.DataFrame(
+                data=np.corrcoef(cur_residuals),
+                index=cur_residuals.index,
+                columns=cur_residuals.index,
+            )
+            for cur_im, cur_residuals in im_residuals.items()
+        }
+
+        site_correlations[cur_event] = cur_site_correlations
+
+    return site_correlations
+
+
+def compute_sim_gm_parameters(simulation_imdb_ffp: Path):
+    """Computes the parametric IM distributions based on the simulation data"""
+    # Get the simulation data
+    sim_data = load_sim_data(simulation_imdb_ffp, include_event=True)
 
     # Compute the GM parameters for each site
     results = {}
     for cur_site, cur_im_data in sim_data.items():
-        # Compute mean and sigma
+        for cur_event in np.unique(cur_im_data.index.get_level_values(0)):
+            # Compute the mean
+            cur_mean = np.log(cur_im_data.loc[cur_event]).mean(axis=0)
+            cur_mean.index = np.char.add(cur_mean.index.values.astype(str), "_mean")
+            cur_result = cur_mean.to_dict()
+
+            # Compute the standard deviation
+            cur_std = np.log(cur_im_data.loc[cur_event]).std(axis=0)
+
+            cur_within_std = cur_std.copy()
+            cur_within_std.index = np.char.add(
+                cur_within_std.index.values.astype(str), "_std_Intra"
+            )
+            cur_result.update(cur_within_std.to_dict())
+
+            cur_between_std = cur_std.copy()
+            cur_between_std.index = np.char.add(
+                cur_between_std.index.values.astype(str), "_std_Inter"
+            )
+            # Between event standard deviation is zero for simulations
+            # as the model is event-specific
+            cur_between_std.iloc[:] = 0
+            cur_result.update(cur_between_std.to_dict())
+
+            cur_total_std = cur_std.copy()
+            cur_total_std.index = np.char.add(
+                cur_total_std.index.values.astype(str), "_std_Total"
+            )
+            cur_result.update(cur_total_std.to_dict())
+
+            cur_result["event"] = cur_event
+            cur_result["site"] = cur_site
+
+            results[f"{cur_event}_{cur_site}"] = cur_result
+
+    sim_params_df = pd.DataFrame(results).T
+    return sim_params_df
 
 
+def load_sim_data(
+    sim_imdb_ffp: Path, sites: Sequence[str] = None, include_event: bool = False
+):
+    """Loads the simulation IM values for the specified sites"""
+    sim_data = {}
+    with gc.dbs.IMDB.get_imdb(str(sim_imdb_ffp)) as db:
+        if sites is None:
+            # Bit of a hack
+            sites = [
+                cur_key.split("/")[-1].split("_")[-1]
+                for cur_key in db._db.keys()
+                if cur_key not in ["/simulations", "/sites"]
+            ]
 
-        print(f"wtf")
+        for cur_site in sites:
+            if (cur_im_df := db.im_data(cur_site)) is not None:
+                sim_data[cur_site] = (
+                    cur_im_df if include_event else cur_im_df.droplevel(0, 0)
+                )
+
+    return sim_data
 
 
+def load_obs_rupture_data(obs_data_ffp: Path, rupture: str):
+    """
+    Loads the observation data for the specified
+    data from the NZ-GMDB IM flat file
+    """
+    obs_df = pd.read_csv(obs_data_ffp, index_col=0, low_memory=False)
+    obs_df = obs_df.loc[obs_df.evid == rupture]
+    obs_df = obs_df.set_index("sta").sort_index()
 
-    print(f"wtf")
+    return obs_df
+
+
+def load_sim_waveform(sim_rupture_dir: Path, rel_id: str, site: str):
+    """
+    Loads the acceleration time-series data
+    for the specified simulation id and site
+
+    Parameters
+    ----------
+    sim_rupture_dir: Path
+        Path to the event simulation directory
+        i.e. Runs/{event_id}
+    rel_id: string
+    site: string
+
+    Returns
+    -------
+    sim_t: array of floats
+        The time values
+    sim_acc: array of floats
+        Acceleration data,
+        shape [nt, 3] with the components
+        in the order 090, 000, Ver
+    """
+    if not (cur_bb_ffp := sim_rupture_dir / rel_id / "BB" / "Acc" / "BB.bin").exists():
+        print(f"Can't find BB file for {site} - {rel_id}")
+        return None, None
+
+    bb = BBSeis(str(cur_bb_ffp))
+    sim_acc = bb.acc(site)
+    sim_t = bb.dt * np.arange(sim_acc.shape[0])
+
+    if bb.start_sec < 0:
+        sim_mask = sim_t > np.abs(bb.start_sec)
+        sim_acc = sim_acc[sim_mask, :]
+        sim_t = bb.dt * np.arange(sim_acc.shape[0])
+    else:
+        raise NotImplementedError()
+
+    return sim_t, sim_acc
+
+
+def load_obs_waveform(obs_waveform_dir: Path, site: str):
+    """
+    Loads the observation waveform data from the
+    NZ-GMDB waveforms
+
+    Note: Does not perform any time-shifting
+
+    Parameters
+    ----------
+    obs_waveform_dir: path
+        Path to the accBB folder in the
+        NZ-GMDB waveforms
+    site: string
+
+    Returns
+    -------
+    obs_t: array of floats
+        The time values
+    obs_acc: array of floats
+        Acceleration data,
+        shape [nt, 3] with the components
+        in the order 090, 000, Ver
+    """
+    if not all(
+        [
+            (obs_waveform_dir / f"{site}.{cur_comp}").exists()
+            for cur_comp in constants.COMPONENTS
+        ]
+    ):
+        print(f"Can't find all acceleration waveform files for {site}")
+        return None, None
+
+    obs_acc = []
+    meta = None
+    for cur_comp in constants.COMPONENTS:
+        cur_acc, cur_meta = read_ascii(
+            str(obs_waveform_dir / f"{site}.{cur_comp}"), meta=True
+        )
+        if meta is None:
+            meta = cur_meta
+        else:
+            assert meta["dt"] == cur_meta["dt"]
+        obs_acc.append(cur_acc)
+
+    obs_acc = np.stack(obs_acc, axis=1)
+    obs_t = meta["dt"] * np.arange(obs_acc.shape[0])
+
+    return obs_t, obs_acc

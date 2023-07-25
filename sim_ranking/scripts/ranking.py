@@ -22,7 +22,8 @@ def conditional_mvn_ranking(
     output_dir: Path,
     IMs: List[str] = None,
 ):
-    """Performs simulation ranking based on the
+    """
+    Performs simulation ranking based on the
     conditional MVN
 
     Note: Currently computes it for all given
@@ -56,16 +57,16 @@ def conditional_mvn_ranking(
     gmm_params_df = gmm_params_df.set_index("site").sort_index()
 
     # Loading Observations
-    obs_df = sr.load_obs_rupture_data(obs_data_ffp, rupture)
+    obs_df = sr.data.load_obs_rupture_data(obs_data_ffp, rupture)
 
     # Use all available observation stations
     int_stations = obs_df.index.values.astype(str)
 
     # Load the simulation IM data
-    sim_data = sr.load_sim_data(sim_imdb_ffp, int_stations)
+    sim_data = sr.data.load_sim_data(sim_imdb_ffp, int_stations)
 
-    # Commpute the conditional MVN distributions for each IM
-    cMVNs_result = sr.compute_cond_MVN_distributions(
+    # Compute the conditional MVN distributions for each IM
+    cMVNs_result = sr.cmvn.compute_cond_MVN_distributions(
         IMs, obs_df, gmm_params_df, stations_df, int_stations
     )
 

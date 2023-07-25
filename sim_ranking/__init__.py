@@ -3,3 +3,4 @@ from . import data
 from . import plots
 from . import conditional_MVN as cmvn
 from . import utils
+from . import similarity_score
