@@ -17,8 +17,10 @@ def plot_response_spectrum(
     obs_data: pd.Series,
     site: str,
     best_sim_id: str,
-    output_dir: Path,
+    gm_params: pd.Series = None,
+    output_dir: Path = None,
     show_all_sims: bool = False,
+    fig: plt.Figure = None,
 ):
     """
     Generates a response spectrum plot
@@ -45,13 +47,18 @@ def plot_response_spectrum(
         Site of interest
     best_sim_id: string
         Id of the best simulation realisation
+    gm_params: series, optional
+        The ground motion parameters
+        for the site of interest
     output_dir: Path
     show_all_sims: bool, optional
         If true, then all simulation
         realisations are plotted, not just
         the best one
+    fig: matplotlib figure, optional
     """
-    fig = plt.figure(figsize=constants.FIG_SIZE)
+    if fig is None:
+        fig = plt.figure(figsize=constants.FIG_SIZE)
 
     # All other simulations
     if show_all_sims:
@@ -86,33 +93,10 @@ def plot_response_spectrum(
     )
 
     # Conditional MVN
-    plt.plot(
-        periods,
-        np.exp(cMVN_result.cond_lnIM_mean_df.loc[site, pSA_keys].values.astype(float)),
-        c="b",
-        linewidth=1.2,
-        label=r"Conditional MVN",
-    )
-    plt.plot(
-        periods,
-        np.exp(
-            cMVN_result.cond_lnIM_mean_df.loc[site, pSA_keys].values.astype(float)
-            + cMVN_result.cond_lnIM_std_df.loc[site, pSA_keys].values.astype(float)
-        ),
-        c="b",
-        linewidth=1.0,
-        linestyle="--",
-    )
-    plt.plot(
-        periods,
-        np.exp(
-            cMVN_result.cond_lnIM_mean_df.loc[site, pSA_keys].values.astype(float)
-            - cMVN_result.cond_lnIM_std_df.loc[site, pSA_keys].values.astype(float)
-        ),
-        c="b",
-        linewidth=1.0,
-        linestyle="--",
-    )
+    draw_cmnv(plt.gca(), periods, pSA_keys, cMVN_result, site)
+
+    if gm_params is not None:
+        draw_marginal(plt.gca(), gm_params, periods, pSA_keys)
 
     plt.semilogx()
     plt.xlim(periods.min(), periods.max())
@@ -122,13 +106,16 @@ def plot_response_spectrum(
         f"{'$V_{S30}$'} = {obs_data.loc['Vs30']:.0f} (m/s)"
     )
     plt.xlabel(f"Period")
-    plt.ylabel(f"Pseudo-spectral acceleration, Sa (g)")
+    plt.ylabel(f"Pseudo-spectral acceleration, pSA (g)")
     plt.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     plt.legend()
     fig.tight_layout()
 
-    plt.savefig(output_dir / f"{site}_response_spectra.{constants.FIG_FORMAT}")
-    plt.close()
+    if output_dir is None:
+        return fig
+    else:
+        plt.savefig(output_dir / f"{site}_response_spectra.{constants.FIG_FORMAT}")
+        plt.close()
 
 
 def plot_response_spectrum_residual(
@@ -190,7 +177,7 @@ def draw_waveforms(
     acc_data: Sequence[np.ndarray],
     time_data: Sequence[np.ndarray],
     colors: Sequence[str] = None,
-    add_comp_text: bool = True
+    add_comp_text: bool = True,
 ):
     """
     Draws the waveforms on the specified figure
@@ -293,3 +280,63 @@ def draw_waveforms(
 
         axes.extend([cur_ax1, cur_ax2, cur_ax3])
     return axes
+
+
+def draw_cmnv(
+    ax: plt.Axes,
+    periods: np.ndarray,
+    pSA_keys: Sequence[str],
+    cMVN_result: ConditionalMVNDistribution,
+    site: str,
+):
+    cond_mean = cMVN_result.cond_lnIM_mean_df.loc[site, pSA_keys].values.astype(float)
+    cond_std = cMVN_result.cond_lnIM_std_df.loc[site, pSA_keys].values.astype(float)
+    plt.plot(
+        periods,
+        np.exp(cond_mean),
+        c="b",
+        linewidth=1.2,
+        label=r"Conditional MVN",
+    )
+    plt.plot(
+        periods,
+        np.exp(cond_mean + cond_std),
+        c="b",
+        linewidth=1.0,
+        linestyle="--",
+    )
+    ax.plot(
+        periods,
+        np.exp(cond_mean - cond_std),
+        c="b",
+        linewidth=1.0,
+        linestyle="--",
+    )
+
+
+def draw_marginal(
+    ax: plt.Axes, gm_params: pd.Series, periods: np.ndarray, pSA_keys: Sequence[str]
+):
+    marg_mean = gm_params.loc[np.char.add(pSA_keys, "_mean")].values.astype(float)
+    marg_std = gm_params.loc[np.char.add(pSA_keys, "_std_Total")].values.astype(float)
+    ax.plot(
+        periods,
+        np.exp(marg_mean),
+        c="g",
+        linewidth=1.2,
+        label="Marginal",
+    )
+    ax.plot(
+        periods,
+        np.exp(marg_mean + marg_std),
+        c="g",
+        linewidth=1.0,
+        linestyle="--",
+    )
+    ax.plot(
+        periods,
+        np.exp(marg_mean - marg_std),
+        c="g",
+        linewidth=1.0,
+        linestyle="--",
+    )

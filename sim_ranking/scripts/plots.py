@@ -5,12 +5,10 @@ from typing import List, Sequence
 import pandas as pd
 import numpy as np
 import typer
-import matplotlib
 import matplotlib.pyplot as plt
 
 import gmhazard_calc as gc
 import sim_ranking as sr
-from qcore.timeseries import BBSeis, read_ascii
 
 from sim_ranking import constants
 
@@ -34,15 +32,15 @@ def gen_cMVN_plots(
         (output_dir := results_dir / "plots").mkdir(exist_ok=True)
 
     # Load the conditional MVN & site misfit data
-    cMVN_result = sr.ConditionalMVNDistribution.load(
+    cMVN_result = sr.cmvn.ConditionalMVNDistribution.load(
         results_dir / "cMVN_distributions.pickle"
     )
     best_sim_ids = pd.read_csv(results_dir / "best_sim_ids.csv", index_col=0).squeeze()
     sites = cMVN_result.stations if len(sites) == 0 else np.asarray(sites)
 
     # Load the observation & simulation data
-    obs_df = sr.load_obs_rupture_data(obs_data_ffp, cMVN_result.rupture)
-    sim_data = sr.load_sim_data(sim_imdb_ffp, sites)
+    obs_df = sr.data.load_obs_rupture_data(obs_data_ffp, cMVN_result.rupture)
+    sim_data = sr.data.load_sim_data(sim_imdb_ffp, sites)
 
     # Drop any sites for which there is no simulation data
     mask = np.isin(sites, list(sim_data.keys()))
@@ -71,7 +69,7 @@ def gen_cMVN_plots(
             continue
 
         # Plot response spectrum
-        sr.plot_response_spectrum(
+        sr.plots.plot_response_spectrum(
             periods,
             pSA_keys,
             sim_data[cur_site],
@@ -103,7 +101,7 @@ def gen_cMVN_plots(
     )
 
     # All sites
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         sites,
@@ -112,7 +110,7 @@ def gen_cMVN_plots(
         title="Observation - Simulation Residual",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         sites,
@@ -121,7 +119,7 @@ def gen_cMVN_plots(
         title="Observation - cMVN Residual",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         sites,
@@ -133,7 +131,7 @@ def gen_cMVN_plots(
 
     # Rrup bins
     cur_sites = sites[obs_df.loc[sites, "r_rup"].values < 30]
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -142,7 +140,7 @@ def gen_cMVN_plots(
         title="Observation - Simulation Residual ($R_{Rup}$ < 30)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -151,7 +149,7 @@ def gen_cMVN_plots(
         title="Observation - cMVN Residual ($R_{Rup}$ < 30)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -165,7 +163,7 @@ def gen_cMVN_plots(
         (obs_df.loc[sites, "r_rup"].values > 30)
         & (obs_df.loc[sites, "r_rup"].values < 75)
     ]
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -174,7 +172,7 @@ def gen_cMVN_plots(
         title="Observation - Simulation Residual (30 < $R_{Rup}$ < 75)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -183,7 +181,7 @@ def gen_cMVN_plots(
         title="Observation - cMVN Residual (30 < $R_{Rup}$ < 75)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -194,7 +192,7 @@ def gen_cMVN_plots(
     )
 
     cur_sites = sites[(obs_df.loc[sites, "r_rup"].values > 75)]
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -203,7 +201,7 @@ def gen_cMVN_plots(
         title="Observation - Simulation Residual (75 < $R_{Rup}$)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -212,7 +210,7 @@ def gen_cMVN_plots(
         title="Observation - cMVN Residual (75 < $R_{Rup}$)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -224,7 +222,7 @@ def gen_cMVN_plots(
 
     # Vs30 bins
     cur_sites = sites[obs_df.loc[sites, "Vs30"].values < 300]
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -233,7 +231,7 @@ def gen_cMVN_plots(
         title="Observation - Simulation Residual ($V_{S30}$ < 300)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -242,7 +240,7 @@ def gen_cMVN_plots(
         title="Observation - cMVN Residual ($V_{S30}$ < 300)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -256,7 +254,7 @@ def gen_cMVN_plots(
         (obs_df.loc[sites, "Vs30"].values > 300)
         & (obs_df.loc[sites, "Vs30"].values < 500)
     ]
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -265,7 +263,7 @@ def gen_cMVN_plots(
         title="Observation - Simulation Residual (300 < $V_{S30}$ < 500)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -274,7 +272,7 @@ def gen_cMVN_plots(
         title="Observation - cMVN Residual (300 < $V_{S30}$ < 500)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -285,7 +283,7 @@ def gen_cMVN_plots(
     )
 
     cur_sites = sites[(obs_df.loc[sites, "r_rup"].values > 75)]
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -294,7 +292,7 @@ def gen_cMVN_plots(
         title="Observation - Simulation Residual (500 < $V_{S30}$)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -303,7 +301,7 @@ def gen_cMVN_plots(
         title="Observation - cMVN Residual (500 < $V_{S30}$)",
         ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
     )
-    sr.plot_response_spectrum_residual(
+    sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
@@ -330,11 +328,11 @@ def gen_cMVN_waveform_plots(
     """
     best_sim_ids = pd.read_csv(results_dir / "best_sim_ids.csv", index_col=0).squeeze()
     sites = best_sim_ids.index.values.astype(str)
-    rupture = sr.ConditionalMVNDistribution.load(
+    rupture = sr.plots.ConditionalMVNDistribution.load(
         results_dir / "cMVN_distributions.pickle"
     ).rupture
 
-    obs_df = sr.load_obs_rupture_data(obs_data_ffp, rupture)
+    obs_df = sr.data.load_obs_rupture_data(obs_data_ffp, rupture)
 
     (output_dir := results_dir / "plots" / "site_plots").mkdir(
         exist_ok=True, parents=True
@@ -343,14 +341,14 @@ def gen_cMVN_waveform_plots(
         print(f"Processing site {cur_site}, {ix + 1}/{sites.size}")
 
         # Get the BB file
-        sim_t, sim_acc = sr.load_sim_waveform(sim_rupture_dir, best_sim_ids.loc[cur_site], cur_site)
+        sim_t, sim_acc = sr.data.load_sim_waveform(sim_rupture_dir, best_sim_ids.loc[cur_site], cur_site)
 
         # Get the observed waveforms
-        obs_t, obs_acc = sr.load_obs_waveform(obs_waveform_dir, cur_site)
+        obs_t, obs_acc = sr.data.load_obs_waveform(obs_waveform_dir, cur_site)
 
         fig = plt.figure(figsize=constants.FIG_SIZE)
 
-        sr.draw_waveforms(fig, [sim_acc, obs_acc], [sim_t, obs_t], ["r", "k"])
+        sr.plots.draw_waveforms(fig, [sim_acc, obs_acc], [sim_t, obs_t], ["r", "k"])
 
         fig.suptitle(
             f"{cur_site}, {r'$R_{rup}$'} = {obs_df.loc[cur_site, 'r_rup']:.0f} (km), "

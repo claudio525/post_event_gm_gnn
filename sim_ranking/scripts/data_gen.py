@@ -55,14 +55,19 @@ def compute_sim_site_correlations(
     output_dir: Path, simulation_imdb_ffp: Path, obs_data_ffp: Path
 ):
     """Computes the site correlations from the simulation data directly"""
-    site_correlations = sr.data.compute_sim_site_correlations(
+    site_correlations, im_residuals = sr.data.compute_sim_site_correlations(
         simulation_imdb_ffp, obs_data_ffp
     )
 
     for cur_event, cur_im_dict in site_correlations.items():
         (cur_out_dir := output_dir / cur_event).mkdir(exist_ok=True)
         for cur_im, cur_site_corr in cur_im_dict.items():
-            cur_site_corr.to_csv(cur_out_dir / f"{cur_im}.csv")
+            cur_site_corr.to_csv(cur_out_dir / f"{cur_im.replace('.', 'p')}.csv")
+
+        (cur_im_res_out_dir := cur_out_dir / "im_residuals").mkdir(exist_ok=True)
+        for cur_im, cur_im_residuals in im_residuals[cur_event].items():
+            cur_im_residuals.to_csv(cur_im_res_out_dir / f"{cur_im.replace('.', 'p')}.csv")
+
 
 if __name__ == "__main__":
     app()

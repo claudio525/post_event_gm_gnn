@@ -187,6 +187,8 @@ def run_emp_gmms(
 
 def compute_sim_site_correlations(simulation_imdb_ffp: Path, obs_data_ffp: Path):
     """Computes the site correlations based on the simulation data"""
+    from mera.mera_pymer4 import run_mera
+
     # Get the simulation data
     sim_data = load_sim_data(simulation_imdb_ffp, include_event=True)
 
@@ -194,43 +196,82 @@ def compute_sim_site_correlations(simulation_imdb_ffp: Path, obs_data_ffp: Path)
     ims = list(sim_data.values())[0].columns.values.astype(str)
 
     site_correlations = {}
+    im_residuals = {}
     for cur_event in events:
         ### Compute the residuals per IM
-        im_residuals = {cur_im: {} for cur_im in ims}
+        cur_im_residuals = {cur_im: {} for cur_im in ims}
 
         # Get the observed data
         obs_df = load_obs_rupture_data(obs_data_ffp, cur_event)
+        cur_residuals_df = []
         for cur_site, cur_im_data in sim_data.items():
             # No observed data
             if cur_site not in obs_df.index:
                 continue
 
+            cur_residuals = np.log(cur_im_data.loc[cur_event, ims]) - np.log(
+                cur_im_data.loc[cur_event, ims]
+            ).mean(axis=0)
+            cur_residuals["event"] = [
+                cur_rel.rsplit("_", maxsplit=1)[-1]
+                for cur_rel in cur_residuals.index.values.astype(str)
+            ]
+            cur_residuals["site"] = cur_site
+            cur_residuals.index = np.char.add(
+                cur_residuals.index.values.astype(str), f"_{cur_site}"
+            )
+
+            cur_residuals_df.append(cur_residuals)
+
             # Compute the residual (which is the
             # within-event residual as simulations are event
             # specific models and there between-event
             # residual is zero)
-            cur_residuals = np.log(cur_im_data.loc[cur_event, ims]) - np.log(
-                obs_df.loc[cur_site, ims].astype(float)
+            # Residual is computed with respect to the mean of the
+            # simulation realisations (not observed!)
+            # cur_residuals = np.log(cur_im_data.loc[cur_event, ims]) - np.log(
+            #     cur_im_data.loc[cur_event, ims]
+            # ).mean(axis=0)
+            #
+            # for cur_im in cur_residuals.columns:
+            #     cur_im_residuals[cur_im][cur_site] = cur_residuals[cur_im]
+
+        cur_residuals_df = pd.concat(cur_residuals_df)
+
+        # Treat each realisation as an event and run
+        # mixed-effect regression analysis
+        event_res_df, rem_res_df, bias_std_df = run_mera(
+            cur_residuals_df, ims, "event", "site", compute_site_term=False
+        )
+
+        # Add site and event columns to within-event residual results
+        assert np.all(rem_res_df.index == cur_residuals_df.index)
+        rem_res_df["site"] = cur_residuals_df["site"]
+        rem_res_df["rel"] = cur_residuals_df["event"]
+
+        # Create site (index)/realisations (columns) dataframe
+        # per IM
+        cur_im_residuals = {
+            cur_im: rem_res_df[[cur_im, "site", "rel"]].pivot(
+                columns="rel", index="site", values=cur_im
             )
+            for cur_im in ims
+        }
 
-            for cur_im in cur_residuals.columns:
-                im_residuals[cur_im][cur_site] = cur_residuals[cur_im]
-
-        im_residuals = {cur_im: pd.DataFrame(v).T for cur_im, v in im_residuals.items()}
-
-        ### Compute the site correlations
+        # Compute the site correlations
         cur_site_correlations = {
             cur_im: pd.DataFrame(
                 data=np.corrcoef(cur_residuals),
                 index=cur_residuals.index,
                 columns=cur_residuals.index,
             )
-            for cur_im, cur_residuals in im_residuals.items()
+            for cur_im, cur_residuals in cur_im_residuals.items()
         }
 
         site_correlations[cur_event] = cur_site_correlations
+        im_residuals[cur_event] = cur_im_residuals
 
-    return site_correlations
+    return site_correlations, im_residuals
 
 
 def compute_sim_gm_parameters(simulation_imdb_ffp: Path):
@@ -403,3 +444,11 @@ def load_obs_waveform(obs_waveform_dir: Path, site: str):
     obs_t = meta["dt"] * np.arange(obs_acc.shape[0])
 
     return obs_t, obs_acc
+
+
+def load_correlations(data_dir: Path):
+    return {
+        utils.get_im_filename(cur_ffp.stem): pd.read_csv(cur_ffp, index_col=0)
+        for cur_ffp in data_dir.iterdir()
+        if cur_ffp.is_file()
+    }

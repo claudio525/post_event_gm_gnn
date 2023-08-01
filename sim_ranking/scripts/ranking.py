@@ -7,6 +7,7 @@ import typer
 
 
 import gmhazard_calc as gc
+
 import sim_ranking as sr
 
 app = typer.Typer()
@@ -20,6 +21,7 @@ def conditional_mvn_ranking(
     stations_ll_ffp: Path,
     sim_imdb_ffp: Path,
     output_dir: Path,
+    correlations_dir: Path = None,
     IMs: List[str] = None,
 ):
     """
@@ -65,9 +67,21 @@ def conditional_mvn_ranking(
     # Load the simulation IM data
     sim_data = sr.data.load_sim_data(sim_imdb_ffp, int_stations)
 
+    # Load the within-event site correlations
+    R = (
+        None
+        if correlations_dir is None
+        else sr.data.load_correlations(correlations_dir)
+    )
+
     # Compute the conditional MVN distributions for each IM
     cMVNs_result = sr.cmvn.compute_cond_MVN_distributions(
-        IMs, obs_df, gmm_params_df, stations_df, int_stations
+        IMs,
+        obs_df,
+        gmm_params_df,
+        stations_df,
+        int_stations,
+        R=R,
     )
 
     # Compute the misfit for each site of interest

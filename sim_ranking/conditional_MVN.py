@@ -28,13 +28,19 @@ class ConditionalMVNDistribution:
         with data_ffp.open("rb") as f:
             return pickle.load(f)
 
+    def get_obs_stations(self, site: str):
+        obs_sites = self.cond_lnIM_results[self.IMs[0]].obs_stations_mask_df
+        obs_sites = obs_sites.loc[site, obs_sites.loc[site, :]]
+        return obs_sites.index.values.astype(str)
+
 
 def compute_cond_MVN_distributions(
     IMs: Sequence[gc.im.IM],
     obs_df: pd.DataFrame,
     gmm_params_df: pd.DataFrame,
     stations_df: pd.DataFrame,
-    int_stations: Sequence[str],
+    int_stations: np.ndarray,
+    R: Dict[str, pd.DataFrame] = None,
 ):
     # Sanity checks
     assert np.unique(obs_df["evid"]).size == 1
@@ -74,6 +80,7 @@ def compute_cond_MVN_distributions(
             cur_gmm_params_df,
             np.log(obs_df[str(cur_im)]),
             hypo_loc,
+            R=R[str(cur_im)],
             allow_obs_sites=True,
         )
 
