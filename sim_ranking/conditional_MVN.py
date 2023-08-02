@@ -80,7 +80,7 @@ def compute_cond_MVN_distributions(
             cur_gmm_params_df,
             np.log(obs_df[str(cur_im)]),
             hypo_loc,
-            R=R[str(cur_im)],
+            R=R[str(cur_im)] if R is not None else None,
             allow_obs_sites=True,
         )
 

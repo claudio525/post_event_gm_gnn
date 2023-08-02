@@ -448,7 +448,13 @@ def load_obs_waveform(obs_waveform_dir: Path, site: str):
 
 def load_correlations(data_dir: Path):
     return {
-        utils.get_im_filename(cur_ffp.stem): pd.read_csv(cur_ffp, index_col=0)
+        utils.reverse_im_filename(cur_ffp.stem): pd.read_csv(cur_ffp, index_col=0)
         for cur_ffp in data_dir.iterdir()
         if cur_ffp.is_file()
     }
+
+
+def load_ll_file(ffp: Path):
+    return pd.read_csv(
+        ffp, sep=" ", index_col=2, header=None, names=["lon", "lat"]
+    )

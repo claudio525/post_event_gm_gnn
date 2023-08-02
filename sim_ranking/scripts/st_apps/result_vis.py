@@ -10,6 +10,7 @@ import streamlit as st
 import typer
 
 import gmhazard_calc as gc
+
 import sim_ranking as sr
 import spatial_hazard as sh
 from ml_tools.st_tools import utils as st_utils
@@ -42,7 +43,7 @@ def _load_best_sim_ids(results_dir: Path):
 
 @st.cache_data
 def _get_dist_matrix(sites: np.ndarray, stations_ffp: Path):
-    station_df = sr.utils.load_ll_file(stations_ffp)
+    station_df = sr.data.load_ll_file(stations_ffp)
 
     return sh.im_dist.calculate_distance_matrix(sites, station_df)
 
@@ -143,15 +144,16 @@ def _site_vis(
         periods,
         pSA_keys,
         sim_data[cur_site],
-        cMVN_result,
         obs_df.loc[cur_site],
         cur_site,
         best_sim_ids.loc[cur_site],
+        cMVN_result=cMVN_result if show_conditional else None,
         gm_params=gm_params.loc[cur_site] if show_marginal else None,
         show_all_sims=True,
         fig=fig,
     )
     st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
     st.markdown(
         "Figure shows, all simulation realisation in gray, "
         "the best simulation realisation in red, "
@@ -222,6 +224,7 @@ def _site_vis(
     plt.tight_layout()
 
     st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
     st.markdown(
         "Figure shows the observed response spectrum at the current "
         "site of interest and the closest 5 observation sites used to to "

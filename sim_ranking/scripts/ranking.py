@@ -74,6 +74,9 @@ def conditional_mvn_ranking(
         else sr.data.load_correlations(correlations_dir)
     )
 
+    # Need the absolute value
+    R = R.abs()
+
     # Compute the conditional MVN distributions for each IM
     cMVNs_result = sr.cmvn.compute_cond_MVN_distributions(
         IMs,

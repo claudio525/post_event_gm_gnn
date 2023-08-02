@@ -13,10 +13,10 @@ def plot_response_spectrum(
     periods: np.ndarray,
     pSA_keys: Sequence[str],
     sim_data: pd.DataFrame,
-    cMVN_result: ConditionalMVNDistribution,
     obs_data: pd.Series,
     site: str,
     best_sim_id: str,
+    cMVN_result: ConditionalMVNDistribution = None,
     gm_params: pd.Series = None,
     output_dir: Path = None,
     show_all_sims: bool = False,
@@ -39,7 +39,6 @@ def plot_response_spectrum(
         Simulation IM values
         Index = Realisations
         Columns = IMs
-    cMVN_result: ConditionalMVNDistribution
     obs_data: series
         The observation data for the
         current site
@@ -47,6 +46,7 @@ def plot_response_spectrum(
         Site of interest
     best_sim_id: string
         Id of the best simulation realisation
+    cMVN_result: ConditionalMVNDistribution, optional
     gm_params: series, optional
         The ground motion parameters
         for the site of interest
@@ -93,7 +93,8 @@ def plot_response_spectrum(
     )
 
     # Conditional MVN
-    draw_cmnv(plt.gca(), periods, pSA_keys, cMVN_result, site)
+    if cMVN_result is not None:
+        draw_cmnv(plt.gca(), periods, pSA_keys, cMVN_result, site)
 
     if gm_params is not None:
         draw_marginal(plt.gca(), gm_params, periods, pSA_keys)

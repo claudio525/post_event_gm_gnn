@@ -5,20 +5,20 @@ import numpy as np
 
 import streamlit as st
 import matplotlib.pyplot as plt
-import plotly.express as px
 import plotly.graph_objects as go
 
 from ml_tools.st_tools import utils as st_utils
 import spatial_hazard as sh
 from gmhazard_calc.im import IM
 import sha_calc as sha
+import sim_ranking as sr
 
 
 @st.cache_data
 def get_avail_ims(sim_site_corr_dir: Path, event: str):
     return np.sort(
         [
-            cur_ffp.stem
+            sr.utils.reverse_im_filename(cur_ffp.stem)
             for cur_ffp in (sim_site_corr_dir / event).iterdir()
             if cur_ffp.is_file()
         ]
@@ -27,13 +27,13 @@ def get_avail_ims(sim_site_corr_dir: Path, event: str):
 
 @st.cache_data
 def load_sim_site_correlations(sim_site_corr_dir: Path, event: str, im: str):
-    return pd.read_csv(sim_site_corr_dir / event / f"{im}.csv", index_col=0)
+    return pd.read_csv(sim_site_corr_dir / event / f"{im.replace('.', 'p')}.csv", index_col=0)
 
 
 @st.cache_data
 def load_sim_im_residuals(sim_site_corr_dir: Path, event, im: str):
     return pd.read_csv(
-        sim_site_corr_dir / event / "im_residuals" / f"{im}.csv", index_col=0
+        sim_site_corr_dir / event / "im_residuals" / f"{im.replace('.', 'p')}.csv", index_col=0
     )
 
 
