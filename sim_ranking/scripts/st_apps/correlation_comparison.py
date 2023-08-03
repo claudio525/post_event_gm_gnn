@@ -26,15 +26,19 @@ def get_avail_ims(sim_site_corr_dir: Path, event: str):
 
 
 @st.cache_data
-def load_sim_site_correlations(sim_site_corr_dir: Path, event: str, im: str):
-    return pd.read_csv(sim_site_corr_dir / event / f"{im.replace('.', 'p')}.csv", index_col=0)
+def load_sim_site_correlations(sim_site_corr_dir: Path, event: str):
+    sim_site_corrs = sr.data.SimWithinEventSiteCorrelations.load(
+        sim_site_corr_dir / event
+    )
+
+    return sim_site_corrs
 
 
 @st.cache_data
-def load_sim_im_residuals(sim_site_corr_dir: Path, event, im: str):
-    return pd.read_csv(
-        sim_site_corr_dir / event / "im_residuals" / f"{im.replace('.', 'p')}.csv", index_col=0
-    )
+def load_sim_gm_params(sim_gm_params_dir: Path, event: str):
+    sim_gm_params = sr.data.SimGMParams.load(sim_gm_params_dir / event)
+
+    return sim_gm_params
 
 
 @st.cache_data
@@ -52,6 +56,7 @@ if __name__ == "__main__":
     st_utils.update_st_width(1600, 2, 0, 1, 1)
 
     sim_site_corr_dir = Path("/Users/claudy/dev/work/data/sim_ranking/sim_correlations")
+    sim_gm_params_dir = Path("/Users/claudy/dev/work/data/sim_ranking/sim_gm_params")
 
     ll_ffp = Path(
         "/Users/claudy/dev/work/data/gm_hazard/sites/23p1/non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.ll"
@@ -59,7 +64,9 @@ if __name__ == "__main__":
     site_df = load_site_df(ll_ffp)
 
     avail_events = [
-        cur_ffp.stem for cur_ffp in sim_site_corr_dir.iterdir() if cur_ffp.is_dir()
+        cur_ffp.stem
+        for cur_ffp in sim_site_corr_dir.iterdir()
+        if cur_ffp.is_dir() and not cur_ffp.stem.startswith("_")
     ]
 
     # Event & IM selection
@@ -71,69 +78,73 @@ if __name__ == "__main__":
     with col_2:
         im = st.selectbox("IM", options=avail_ims)
 
-    sim_site_corrs = load_sim_site_correlations(sim_site_corr_dir, event, im)
-    sites = sim_site_corrs.index.values.astype(str)
-    im_residuals = load_sim_im_residuals(sim_site_corr_dir, event, im)
+    sim_site_corrs = load_sim_site_correlations(sim_site_corr_dir, event)
+    cur_sim_site_corrs = sim_site_corrs.correlations[im]
+    sim_gm_params = load_sim_gm_params(sim_gm_params_dir, event)
+
+    sites = cur_sim_site_corrs.index.values.astype(str)
+    dist_matrix = sh.im_dist.calculate_distance_matrix(sites, site_df)
 
     st.markdown(f"# {event} - {im}")
-
-    corr_tab, site_tab = st.tabs(["Correlations", "Site"])
+    corr_tab, site_tab, residuals_tab = st.tabs(["Correlations", "Site", "Residuals"])
 
     ### Correlation
     with corr_tab:
         st.header("Correlations")
-        if not im.startswith("pSA"):
-            st.markdown(f"No empirical model for {im} available")
-            st.stop()
+        if im.startswith("pSA"):
+            # Compute the empirical site correlation
 
-        # Compute the empirical site correlation
-        dist_matrix = sh.im_dist.calculate_distance_matrix(sites, site_df)
-        emp_site_corr = sh.im_dist.get_corr_matrix(sites, dist_matrix, IM.from_str(im))
-
-        # Correlation diff
-        corr_diff = sim_site_corrs - emp_site_corr
-
-        st.markdown("### Within-event site correlation comparison")
-        lower_tri_mask = np.tril(dist_matrix.values).astype(bool)
-
-        # Get the model values
-        dist = np.linspace(0, 300, 100)
-        loth_baker_vals = sha.loth_baker_corr_model.get_correlations(im, im, dist)
-
-        fig = plt.figure(figsize=(10, 6))
-        plt.scatter(
-            dist_matrix.values[lower_tri_mask], sim_site_corrs.values[lower_tri_mask]
-        )
-        plt.plot(dist, loth_baker_vals, c="k", linewidth=1.0)
-
-        plt.xlabel(f"Distance (km)")
-        plt.ylabel(f"Site-Correlation")
-        plt.ylim(-1.0, 1.0)
-        plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-        plt.tight_layout()
-
-        st.pyplot(fig)
-
-        with st.expander("**Difference**"):
-            st.markdown(
-                r"$\Delta_{\hat{\rho}_{i, j, e}} = "
-                r"\hat{\rho}_{i, j, e}^{(Simulation)} - "
-                r"\hat{\rho}_{i, j}^{(Empirical)}$"
+            emp_site_corr = sh.im_dist.get_corr_matrix(
+                sites, dist_matrix, IM.from_str(im)
             )
 
-            fig = plt.figure(figsize=(8, 6))
+            # Correlation diff
+            corr_diff = cur_sim_site_corrs - emp_site_corr
 
+            st.markdown("### Within-event site correlation comparison")
+            lower_tri_mask = np.tril(dist_matrix.values).astype(bool)
+
+            # Get the model values
+            dist = np.linspace(0, 300, 100)
+            loth_baker_vals = sha.loth_baker_corr_model.get_correlations(im, im, dist)
+
+            fig = plt.figure(figsize=(10, 6))
             plt.scatter(
-                dist_matrix.values[lower_tri_mask], corr_diff.values[lower_tri_mask]
+                dist_matrix.values[lower_tri_mask],
+                cur_sim_site_corrs.values[lower_tri_mask],
             )
-            plt.xlabel(f"Site-to-Site Distance (km)")
-            plt.ylabel(r"Correlation difference, $\Delta_{\hat{\rho}_{i, j, e}}$")
+            plt.plot(dist, loth_baker_vals, c="k", linewidth=1.0)
+
+            plt.xlabel(f"Distance (km)")
+            plt.ylabel(f"Site-Correlation")
             plt.ylim(-1.0, 1.0)
             plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
             plt.tight_layout()
 
-            plt.tight_layout()
             st.pyplot(fig)
+
+            with st.expander("**Difference**"):
+                st.markdown(
+                    r"$\Delta_{\hat{\rho}_{i, j, e}} = "
+                    r"\hat{\rho}_{i, j, e}^{(Simulation)} - "
+                    r"\hat{\rho}_{i, j}^{(Empirical)}$"
+                )
+
+                fig = plt.figure(figsize=(8, 6))
+
+                plt.scatter(
+                    dist_matrix.values[lower_tri_mask], corr_diff.values[lower_tri_mask]
+                )
+                plt.xlabel(f"Site-to-Site Distance (km)")
+                plt.ylabel(r"Correlation difference, $\Delta_{\hat{\rho}_{i, j, e}}$")
+                plt.ylim(-1.0, 1.0)
+                plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+                plt.tight_layout()
+
+                plt.tight_layout()
+                st.pyplot(fig)
+        else:
+            st.markdown(f"No empirical model for {im} available")
 
     ### Site specific
     with site_tab:
@@ -164,25 +175,114 @@ if __name__ == "__main__":
         with col_2:
             site_2 = st.selectbox("Site 2", sites)
 
-        st.markdown(r"$\rho_{\delta W_{i, j}}=$" + f"{sim_site_corrs.loc[site_1, site_2]:.2f},\t"
-                                                   f"Site-to-site distance: {dist_matrix.loc[site_1, site_2]:.2f}")
+        st.markdown(
+            r"$\rho_{\delta W_{i, j}}=$"
+            + f"{cur_sim_site_corrs.loc[site_1, site_2]:.2f},\t"
+            f"Site-to-site distance: {dist_matrix.loc[site_1, site_2]:.2f}"
+        )
 
+        # Get the residuals
+        site_1_residuals = sim_gm_params.within_residuals.loc[
+            sim_gm_params.within_residuals.site == site_1
+        ]
+        site_2_residuals = sim_gm_params.within_residuals.loc[
+            sim_gm_params.within_residuals.site == site_2
+        ]
+        assert np.all(site_1_residuals.rel.values == site_2_residuals.rel.values)
 
         fig = plt.figure(figsize=(8, 4.5))
 
         plt.plot([-3.5, 3.5], [-3.5, 3.5], c="k", linewidth=0.75, alpha=1.0, zorder=0)
-        plt.scatter(im_residuals.loc[site_1], im_residuals.loc[site_2], s=15, zorder=1)
+        plt.scatter(
+            site_1_residuals[im],
+            site_2_residuals[im],
+            s=15,
+            zorder=1,
+        )
 
-        plt.title(f"")
         plt.xlabel(f"Within-Event {site_1}")
         plt.ylabel(f"Within-Event {site_2}")
         plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
 
         plt.xlim(-1.5, 1.5)
         plt.ylim(-1.5, 1.5)
-
         plt.tight_layout()
 
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+        ### Correlation coefficient as function of period
+
+        pSA_keys = [
+            cur_im
+            for cur_im in sim_site_corrs.correlations.keys()
+            if cur_im.startswith("pSA")
+        ]
+        periods = [float(cur_key.split("_")[-1]) for cur_key in pSA_keys]
+        sort_ind = np.argsort(periods)
+        periods = np.array(periods)[sort_ind]
+        pSA_keys = np.array(pSA_keys)[sort_ind]
+
+        period_sim_corr_values = [
+            sim_site_corrs.correlations[cur_im].loc[site_1, site_2]
+            for cur_im in pSA_keys
+        ]
+        period_emp_corr_values = loth_baker_vals = [
+            sha.loth_baker_corr_model.get_correlations(
+                cur_im, cur_im, np.asarray([dist_matrix.loc[site_1, site_2]])
+            )
+            for cur_im in pSA_keys
+        ]
+
+        fig = plt.figure(figsize=(8, 4.5))
+        plt.semilogx(periods, period_sim_corr_values, label="Simulation-based",)
+        plt.semilogx(periods, period_emp_corr_values, label="Loth & Baker (2013)",)
+
+        plt.xlabel(f"Period (s)")
+        plt.ylabel(f"Within-event Site-Correlation")
+        plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        plt.legend()
+        plt.tight_layout()
 
         st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
 
+        print(f"wtf")
+
+    with residuals_tab:
+
+        # Between-event residuals
+        fig = plt.figure(figsize=(8, 4.5))
+
+        plt.scatter(
+            np.arange(sim_gm_params.event_residuals.shape[0]),
+            sim_gm_params.event_residuals[im],
+        )
+
+        plt.xlabel(f"Realisation")
+        plt.ylabel(f"{im} Between-realisation residuals")
+        plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        plt.ylim([-2, 2])
+        plt.tight_layout()
+
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+        # Within-event residuals
+        fig = plt.figure(figsize=(8, 4.5))
+
+        plt.scatter(
+            np.arange(sim_gm_params.within_residuals.shape[0]),
+            sim_gm_params.within_residuals[im],
+        )
+
+        plt.xlabel(f"Record")
+        plt.ylabel(f"{im} Within-record residuals")
+        plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        plt.ylim([-2, 2])
+        plt.tight_layout()
+
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+        st.markdown("Each blob is a site")

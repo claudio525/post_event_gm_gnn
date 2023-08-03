@@ -51,10 +51,12 @@ def _get_dist_matrix(sites: np.ndarray, stations_ffp: Path):
 @st.cache_data
 def _load_gm_params(gm_params_ffp: Path, event: str):
     gm_params = pd.read_csv(gm_params_ffp, index_col=0)
-    gm_params.event = gm_params.event.values.astype(str)
 
-    gm_params = gm_params.loc[gm_params.event == event]
-    gm_params = gm_params.set_index("site")
+    if "event" in gm_params.columns:
+        gm_params.event = gm_params.event.values.astype(str)
+
+        gm_params = gm_params.loc[gm_params.event == event]
+        gm_params = gm_params.set_index("site")
 
     return gm_params
 

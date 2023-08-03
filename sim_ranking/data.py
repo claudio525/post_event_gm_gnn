@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, NamedTuple, Dict, List
 
 import gmhazard_calc as gc
 import pandas as pd
@@ -10,6 +10,7 @@ from empirical.util.classdef import TectType, GMM
 from IM_calculation.source_site_dist import src_site_dist
 from qcore import srf
 from qcore.timeseries import BBSeis, read_ascii
+import ml_tools as mlt
 
 from . import constants
 from . import utils
@@ -185,140 +186,286 @@ def run_emp_gmms(
     result_df.to_csv(output_ffp, index_label="id")
 
 
-def compute_sim_site_correlations(simulation_imdb_ffp: Path, obs_data_ffp: Path):
+class SimWithinEventSiteCorrelations(NamedTuple):
+
+    event: str
+    ims: List[str]
+    sites: List[str]
+    correlations: Dict[str, pd.DataFrame]
+
+    def write(self, data_dir: Path):
+        mlt.utils.write_to_yaml(
+            dict(event=self.event, ims=self.ims, sites=self.sites),
+            data_dir / "meta.yaml",
+        )
+        for cur_im, cur_df in self.correlations.items():
+            cur_df.to_csv(data_dir / f"{cur_im.replace('.', 'p')}.csv")
+
+    @classmethod
+    def load(cls, data_dir: Path):
+        meta = mlt.utils.load_yaml(data_dir / "meta.yaml")
+        correlations = {}
+        for cur_ffp in data_dir.iterdir():
+            correlations[utils.reverse_im_filename(cur_ffp.stem)] = pd.read_csv(
+                cur_ffp, index_col=0
+            )
+        return cls(meta["event"], meta["ims"], meta["sites"], correlations)
+
+
+def compute_sim_site_correlations(sim_params_dir: Path):
     """Computes the site correlations based on the simulation data"""
+    events = [cur_ffp.stem for cur_ffp in sim_params_dir.iterdir() if cur_ffp.is_dir()]
+
+    results = []
+    for cur_event in events:
+        sim_gm_params = SimGMParams.load(sim_params_dir / cur_event)
+
+        correlations = {}
+        for cur_im in sim_gm_params.ims:
+            cur_within_residuals = sim_gm_params.within_residuals[[cur_im, "site", "rel"]]
+            cur_within_residuals = cur_within_residuals.pivot(
+                index="rel", columns="site", values=cur_im
+            )
+
+            correlations[cur_im] = cur_within_residuals.corr(method="pearson")
+
+        results.append(
+            SimWithinEventSiteCorrelations(
+                cur_event, sim_gm_params.ims, sim_gm_params.sites, correlations
+            )
+        )
+
+    return results
+
+    # from mera.mera_pymer4 import run_mera
+    #
+    # # Get the simulation data
+    # sim_data = load_sim_data(simulation_imdb_ffp, include_event=True)
+    #
+    # events = np.unique(list(sim_data.values())[0].index.get_level_values(0))
+    # ims = list(sim_data.values())[0].columns.values.astype(str)
+    #
+    # site_correlations = {}
+    # im_residuals = {}
+    # for cur_event in events:
+    #     ### Compute the residuals per IM
+    #     cur_im_residuals = {cur_im: {} for cur_im in ims}
+    #
+    #     # Get the observed data
+    #     obs_df = load_obs_rupture_data(obs_data_ffp, cur_event)
+    #     cur_residuals_df = []
+    #     for cur_site, cur_im_data in sim_data.items():
+    #         # No observed data
+    #         if cur_site not in obs_df.index:
+    #             continue
+    #
+    #         cur_residuals = np.log(cur_im_data.loc[cur_event, ims]) - np.log(
+    #             cur_im_data.loc[cur_event, ims]
+    #         ).mean(axis=0)
+    #         cur_residuals["event"] = [
+    #             cur_rel.rsplit("_", maxsplit=1)[-1]
+    #             for cur_rel in cur_residuals.index.values.astype(str)
+    #         ]
+    #         cur_residuals["site"] = cur_site
+    #         cur_residuals.index = np.char.add(
+    #             cur_residuals.index.values.astype(str), f"_{cur_site}"
+    #         )
+    #
+    #         cur_residuals_df.append(cur_residuals)
+    #
+    #         # Compute the residual (which is the
+    #         # within-event residual as simulations are event
+    #         # specific models and there between-event
+    #         # residual is zero)
+    #         # Residual is computed with respect to the mean of the
+    #         # simulation realisations (not observed!)
+    #         # cur_residuals = np.log(cur_im_data.loc[cur_event, ims]) - np.log(
+    #         #     cur_im_data.loc[cur_event, ims]
+    #         # ).mean(axis=0)
+    #         #
+    #         # for cur_im in cur_residuals.columns:
+    #         #     cur_im_residuals[cur_im][cur_site] = cur_residuals[cur_im]
+    #
+    #     cur_residuals_df = pd.concat(cur_residuals_df)
+    #
+    #     # Treat each realisation as an event and run
+    #     # mixed-effect regression analysis
+    #     event_res_df, rem_res_df, bias_std_df = run_mera(
+    #         cur_residuals_df, ims, "event", "site", compute_site_term=False
+    #     )
+    #
+    #     # Add site and event columns to within-event residual results
+    #     assert np.all(rem_res_df.index == cur_residuals_df.index)
+    #     rem_res_df["site"] = cur_residuals_df["site"]
+    #     rem_res_df["rel"] = cur_residuals_df["event"]
+    #
+    #     # Create site (index)/realisations (columns) dataframe
+    #     # per IM
+    #     cur_im_residuals = {
+    #         cur_im: rem_res_df[[cur_im, "site", "rel"]].pivot(
+    #             columns="rel", index="site", values=cur_im
+    #         )
+    #         for cur_im in ims
+    #     }
+    #
+    #     # Compute the site correlations
+    #     cur_site_correlations = {
+    #         cur_im: pd.DataFrame(
+    #             data=np.corrcoef(cur_residuals),
+    #             index=cur_residuals.index,
+    #             columns=cur_residuals.index,
+    #         )
+    #         for cur_im, cur_residuals in cur_im_residuals.items()
+    #     }
+    #
+    #     site_correlations[cur_event] = cur_site_correlations
+    #     im_residuals[cur_event] = cur_im_residuals
+    #
+    # return site_correlations, im_residuals
+
+
+class SimGMParams(NamedTuple):
+
+    event: str
+    ims: List[str]
+    sites: List[str]
+    gm_params: pd.DataFrame
+    residuals: pd.DataFrame
+    event_residuals: pd.DataFrame
+    within_residuals: pd.DataFrame
+    bias_std: pd.DataFrame
+
+    def write(self, data_dir: Path):
+        mlt.utils.write_to_yaml(
+            dict(event=self.event, ims=self.ims, sites=self.sites),
+            data_dir / "meta.yaml",
+        )
+
+        self.gm_params.to_csv(data_dir / "gm_params.csv")
+        self.residuals.to_csv(data_dir / "residuals.csv")
+        self.event_residuals.to_csv(data_dir / "event_residuals.csv")
+        self.within_residuals.to_csv(data_dir / "rem_residuals.csv")
+        self.bias_std.to_csv(data_dir / "bias_std.csv")
+
+    @classmethod
+    def load(cls, data_dir: Path):
+        meta = mlt.utils.load_yaml(data_dir / "meta.yaml")
+        return cls(
+            meta["event"],
+            meta["ims"],
+            meta["sites"],
+            pd.read_csv(data_dir / "gm_params.csv", index_col=0),
+            pd.read_csv(data_dir / "residuals.csv", index_col=0),
+            pd.read_csv(data_dir / "event_residuals.csv", index_col=0),
+            pd.read_csv(data_dir / "rem_residuals.csv", index_col=0),
+            pd.read_csv(data_dir / "bias_std.csv", index_col=0),
+        )
+
+
+def compute_sim_gm_parameters(simulation_imdb_ffp: Path, obs_data_ffp: Path):
+    """Computes the parametric IM distributions based on the simulation data"""
     from mera.mera_pymer4 import run_mera
 
     # Get the simulation data
     sim_data = load_sim_data(simulation_imdb_ffp, include_event=True)
 
-    events = np.unique(list(sim_data.values())[0].index.get_level_values(0))
-    ims = list(sim_data.values())[0].columns.values.astype(str)
+    sites = list(sim_data.keys())
+    events = np.unique(sim_data[sites[0]].index.get_level_values(0))
+    ims = [str(cur_im) for cur_im in sim_data[sites[0]].columns.values.astype(str)]
 
-    site_correlations = {}
-    im_residuals = {}
+    # Load the observation data
+    obs_data = {
+        cur_event: load_obs_rupture_data(obs_data_ffp, cur_event)
+        for cur_event in events
+    }
+
+    results = []
     for cur_event in events:
-        ### Compute the residuals per IM
-        cur_im_residuals = {cur_im: {} for cur_im in ims}
+        gm_params = {}
+        residual_df = []
+        sites = []
+        for cur_site, cur_sim_data in sim_data.items():
+            cur_sim_data = cur_sim_data.loc[cur_event]
+            cur_obs_data = obs_data[cur_event]
 
-        # Get the observed data
-        obs_df = load_obs_rupture_data(obs_data_ffp, cur_event)
-        cur_residuals_df = []
-        for cur_site, cur_im_data in sim_data.items():
             # No observed data
-            if cur_site not in obs_df.index:
+            if cur_site not in cur_obs_data.index:
                 continue
+            sites.append(cur_site)
 
-            cur_residuals = np.log(cur_im_data.loc[cur_event, ims]) - np.log(
-                cur_im_data.loc[cur_event, ims]
-            ).mean(axis=0)
-            cur_residuals["event"] = [
-                cur_rel.rsplit("_", maxsplit=1)[-1]
-                for cur_rel in cur_residuals.index.values.astype(str)
-            ]
-            cur_residuals["site"] = cur_site
-            cur_residuals.index = np.char.add(
-                cur_residuals.index.values.astype(str), f"_{cur_site}"
+            # Check that the IMs match
+            assert np.isin(ims, cur_obs_data.columns).all()
+
+            # Compute the log mean
+            cur_mean = np.log(cur_sim_data).mean(axis=0)
+            cur_mean.index = np.char.add(cur_mean.index.values.astype(str), "_mean")
+            gm_params[cur_site] = cur_mean.to_dict()
+
+            # Compute the residual
+            cur_residual = np.log(
+                cur_obs_data.loc[cur_site, ims].values.astype(float)
+            ) - np.log(cur_sim_data[ims].values.astype(float))
+            cur_residual = pd.DataFrame(
+                index=np.char.add(
+                    cur_sim_data.index.values.astype(str), f"_{cur_site}"
+                ),
+                columns=ims,
+                data=cur_residual,
             )
+            cur_residual["rel"] = [
+                cur_i.split("_")[1] for cur_i in cur_residual.index.values.astype(str)
+            ]
+            cur_residual["site"] = cur_site
 
-            cur_residuals_df.append(cur_residuals)
+            residual_df.append(cur_residual)
 
-            # Compute the residual (which is the
-            # within-event residual as simulations are event
-            # specific models and there between-event
-            # residual is zero)
-            # Residual is computed with respect to the mean of the
-            # simulation realisations (not observed!)
-            # cur_residuals = np.log(cur_im_data.loc[cur_event, ims]) - np.log(
-            #     cur_im_data.loc[cur_event, ims]
-            # ).mean(axis=0)
-            #
-            # for cur_im in cur_residuals.columns:
-            #     cur_im_residuals[cur_im][cur_site] = cur_residuals[cur_im]
+        # Combine
+        residual_df = pd.concat(residual_df)
 
-        cur_residuals_df = pd.concat(cur_residuals_df)
-
-        # Treat each realisation as an event and run
-        # mixed-effect regression analysis
-        event_res_df, rem_res_df, bias_std_df = run_mera(
-            cur_residuals_df, ims, "event", "site", compute_site_term=False
+        # Run the mixed-effects regression
+        # This treats each realisation as an event
+        event_res_df, within_res, bias_std_df = run_mera(
+            residual_df, ims, "rel", "site", compute_site_term=False
         )
 
-        # Add site and event columns to within-event residual results
-        assert np.all(rem_res_df.index == cur_residuals_df.index)
-        rem_res_df["site"] = cur_residuals_df["site"]
-        rem_res_df["rel"] = cur_residuals_df["event"]
+        # Add site and rel column to within event residuals
+        assert np.all(within_res.index == residual_df.index)
+        within_res["site"] = residual_df["site"]
+        within_res["rel"] = residual_df["rel"]
 
-        # Create site (index)/realisations (columns) dataframe
-        # per IM
-        cur_im_residuals = {
-            cur_im: rem_res_df[[cur_im, "site", "rel"]].pivot(
-                columns="rel", index="site", values=cur_im
+        # Get the GM params
+        for cur_site, cur_mean in gm_params.items():
+            tau = bias_std_df.tau.copy()
+            tau.index = np.char.add(tau.index.values.astype(str), "_std_Inter")
+
+            phi = bias_std_df.phi_w.copy()
+            phi.index = np.char.add(phi.index.values.astype(str), "_std_Intra")
+
+            sigma = np.sqrt(bias_std_df.tau ** 2 + bias_std_df.phi_w ** 2)
+            sigma.index = np.char.add(sigma.index.values.astype(str), "_std_Total")
+
+            gm_params[cur_site] = {
+                **cur_mean,
+                **tau.to_dict(),
+                **phi.to_dict(),
+                **sigma.to_dict(),
+            }
+
+        gm_params = pd.DataFrame(gm_params).T
+        results.append(
+            SimGMParams(
+                cur_event,
+                ims,
+                sites,
+                gm_params,
+                residual_df,
+                event_res_df,
+                within_res,
+                bias_std_df,
             )
-            for cur_im in ims
-        }
+        )
 
-        # Compute the site correlations
-        cur_site_correlations = {
-            cur_im: pd.DataFrame(
-                data=np.corrcoef(cur_residuals),
-                index=cur_residuals.index,
-                columns=cur_residuals.index,
-            )
-            for cur_im, cur_residuals in cur_im_residuals.items()
-        }
-
-        site_correlations[cur_event] = cur_site_correlations
-        im_residuals[cur_event] = cur_im_residuals
-
-    return site_correlations, im_residuals
-
-
-def compute_sim_gm_parameters(simulation_imdb_ffp: Path):
-    """Computes the parametric IM distributions based on the simulation data"""
-    # Get the simulation data
-    sim_data = load_sim_data(simulation_imdb_ffp, include_event=True)
-
-    # Compute the GM parameters for each site
-    results = {}
-    for cur_site, cur_im_data in sim_data.items():
-        for cur_event in np.unique(cur_im_data.index.get_level_values(0)):
-            # Compute the mean
-            cur_mean = np.log(cur_im_data.loc[cur_event]).mean(axis=0)
-            cur_mean.index = np.char.add(cur_mean.index.values.astype(str), "_mean")
-            cur_result = cur_mean.to_dict()
-
-            # Compute the standard deviation
-            cur_std = np.log(cur_im_data.loc[cur_event]).std(axis=0)
-
-            cur_within_std = cur_std.copy()
-            cur_within_std.index = np.char.add(
-                cur_within_std.index.values.astype(str), "_std_Intra"
-            )
-            cur_result.update(cur_within_std.to_dict())
-
-            cur_between_std = cur_std.copy()
-            cur_between_std.index = np.char.add(
-                cur_between_std.index.values.astype(str), "_std_Inter"
-            )
-            # Between event standard deviation is zero for simulations
-            # as the model is event-specific
-            cur_between_std.iloc[:] = 0
-            cur_result.update(cur_between_std.to_dict())
-
-            cur_total_std = cur_std.copy()
-            cur_total_std.index = np.char.add(
-                cur_total_std.index.values.astype(str), "_std_Total"
-            )
-            cur_result.update(cur_total_std.to_dict())
-
-            cur_result["event"] = cur_event
-            cur_result["site"] = cur_site
-
-            results[f"{cur_event}_{cur_site}"] = cur_result
-
-    sim_params_df = pd.DataFrame(results).T
-    return sim_params_df
+    return results
 
 
 def load_sim_data(
@@ -455,6 +602,4 @@ def load_correlations(data_dir: Path):
 
 
 def load_ll_file(ffp: Path):
-    return pd.read_csv(
-        ffp, sep=" ", index_col=2, header=None, names=["lon", "lat"]
-    )
+    return pd.read_csv(ffp, sep=" ", index_col=2, header=None, names=["lon", "lat"])

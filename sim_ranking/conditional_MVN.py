@@ -1,3 +1,4 @@
+import copy
 from typing import Sequence, Dict
 from pathlib import Path
 from dataclasses import dataclass
@@ -32,6 +33,62 @@ class ConditionalMVNDistribution:
         obs_sites = self.cond_lnIM_results[self.IMs[0]].obs_stations_mask_df
         obs_sites = obs_sites.loc[site, obs_sites.loc[site, :]]
         return obs_sites.index.values.astype(str)
+
+
+def run_conditional_mvn_ranking(
+        output_dir: Path,
+    stations_df: pd.DataFrame, IMs: Sequence[str], gm_params_df: pd.DataFrame,
+        sim_data,
+        obs_df: pd.DataFrame,
+        int_stations: np.ndarray,
+        R: Dict[str, pd.DataFrame] = None
+):
+    # Compute the conditional MVN distributions for each IM
+    IMs_str = IMs
+    IMs = [gc.im.IM.from_str(cur_im) for cur_im in IMs]
+
+    cMVNs_result = compute_cond_MVN_distributions(
+        IMs,
+        obs_df,
+        gm_params_df,
+        stations_df,
+        int_stations,
+        R=R,
+    )
+
+    # Compute the misfit for each site of interest
+    site_misfits = []
+    for cur_site in int_stations:
+        if (cur_sim_df := sim_data.get(cur_site)) is None:
+            print(f"No simulation data available for site: {cur_site}, skipping")
+            continue
+
+        # Compute misfit for each IM
+        cur_misfit = (
+            cMVNs_result.cond_lnIM_mean_df.loc[cur_site, IMs_str].values
+            - np.log(cur_sim_df[IMs_str].values)
+        ) ** 2
+
+        # Aggregate along IM axis
+        site_misfits.append(
+            pd.Series(
+                index=cur_sim_df.index, data=cur_misfit.sum(axis=1), name=cur_site
+            )
+        )
+
+    # Combine
+    site_misfits_df = pd.concat(site_misfits, axis=1)
+
+    # Select the best realisation for each site
+    best_sim_id = pd.Series(
+        data=site_misfits_df.index[np.argmin(site_misfits_df.values, axis=0)],
+        index=site_misfits_df.columns,
+    )
+
+    # Save the results
+    cMVNs_result.save(output_dir / "cMVN_distributions.pickle")
+    site_misfits_df.to_csv(output_dir / "site_misfits.csv")
+    best_sim_id.to_csv(output_dir / "best_sim_ids.csv")
 
 
 def compute_cond_MVN_distributions(
@@ -117,5 +174,10 @@ def compute_cond_MVN_distributions(
     )
 
     return ConditionalMVNDistribution(
-        IMs, int_stations, rutpure, cond_lnIM_mean_df, cond_lnIM_std_df, cond_lnIM_results
+        IMs,
+        int_stations,
+        rutpure,
+        cond_lnIM_mean_df,
+        cond_lnIM_std_df,
+        cond_lnIM_results,
     )

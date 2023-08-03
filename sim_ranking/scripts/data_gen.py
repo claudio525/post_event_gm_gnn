@@ -43,30 +43,36 @@ def get_emp_gmm_params(
 
 
 @app.command("compute-sim-gm-params")
-def get_sim_gm_params(output_ffp: Path, simulation_imdb_ffp: Path):
+def get_sim_gm_params(output_dir: Path, simulation_imdb_ffp: Path, obs_data_ffp: Path):
     """Computes the GM parameters from the simulation data directly"""
-    sim_gm_params = sr.data.compute_sim_gm_parameters(simulation_imdb_ffp)
+    sim_gm_params = sr.data.compute_sim_gm_parameters(simulation_imdb_ffp, obs_data_ffp)
 
-    sim_gm_params.to_csv(output_ffp)
+    for cur_params in sim_gm_params:
+        (cur_out_dir := output_dir / cur_params.event).mkdir(exist_ok=True)
+        cur_params.write(cur_out_dir)
 
 
 @app.command("compute-sim-site-correlations")
 def compute_sim_site_correlations(
-    output_dir: Path, simulation_imdb_ffp: Path, obs_data_ffp: Path
+    output_dir: Path, sim_params_dir: Path,
 ):
     """Computes the site correlations from the simulation data directly"""
-    site_correlations, im_residuals = sr.data.compute_sim_site_correlations(
-        simulation_imdb_ffp, obs_data_ffp
+    correlation_results = sr.data.compute_sim_site_correlations(
+        sim_params_dir
     )
 
-    for cur_event, cur_im_dict in site_correlations.items():
-        (cur_out_dir := output_dir / cur_event).mkdir(exist_ok=True)
-        for cur_im, cur_site_corr in cur_im_dict.items():
-            cur_site_corr.to_csv(cur_out_dir / f"{cur_im.replace('.', 'p')}.csv")
+    for cur_result in correlation_results:
+        (cur_out_dir := output_dir / cur_result.event).mkdir(exist_ok=True)
+        cur_result.write(cur_out_dir)
 
-        (cur_im_res_out_dir := cur_out_dir / "im_residuals").mkdir(exist_ok=True)
-        for cur_im, cur_im_residuals in im_residuals[cur_event].items():
-            cur_im_residuals.to_csv(cur_im_res_out_dir / f"{cur_im.replace('.', 'p')}.csv")
+    # for cur_event, cur_im_dict in site_correlations.items():
+    #     (cur_out_dir := output_dir / cur_event).mkdir(exist_ok=True)
+    #     for cur_im, cur_site_corr in cur_im_dict.items():
+    #         cur_site_corr.to_csv(cur_out_dir / f"{cur_im.replace('.', 'p')}.csv")
+    #
+    #     (cur_im_res_out_dir := cur_out_dir / "im_residuals").mkdir(exist_ok=True)
+    #     for cur_im, cur_im_residuals in im_residuals[cur_event].items():
+    #         cur_im_residuals.to_csv(cur_im_res_out_dir / f"{cur_im.replace('.', 'p')}.csv")
 
 
 if __name__ == "__main__":
