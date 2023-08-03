@@ -187,6 +187,11 @@ def _site_vis(
 
     st.markdown("## Observed")
     st.markdown(f"Observation sites used:\n{', '.join(obs_stations_used)}")
+    st.markdown(
+        "Figure shows the observed response spectrum at the current "
+        "site of interest and the closest 5 observation sites used to to "
+        "compute the conditional IM distributions."
+    )
 
     fig = plt.figure(figsize=(10, 6))
 
@@ -227,11 +232,12 @@ def _site_vis(
 
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
-    st.markdown(
-        "Figure shows the observed response spectrum at the current "
-        "site of interest and the closest 5 observation sites used to to "
-        "compute the conditional MVN."
-    )
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
