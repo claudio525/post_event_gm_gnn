@@ -5,9 +5,7 @@ import pandas as pd
 import numpy as np
 import typer
 
-
-import gmhazard_calc as gc
-
+import ml_tools as mlt
 import sim_ranking as sr
 
 app = typer.Typer()
@@ -20,7 +18,7 @@ def emp_cmvn_ranking(
     obs_data_ffp: Path,
     stations_ll_ffp: Path,
     sim_imdb_ffp: Path,
-    output_dir: Path,
+    results_dir: Path,
     IMs: List[str] = None,
 ):
     """
@@ -34,6 +32,8 @@ def emp_cmvn_ranking(
      - Support for specifying sites of interest
      - Support for setting IM weights
     """
+    method_type = sr.constants.RankingMethod.emp_cMVN
+    (output_dir := results_dir / sr.constants.METHOD_RESULT_DIR_NAME_MAPPING[method_type]).mkdir(exist_ok=True)
     assert len(list(output_dir.iterdir())) == 0, "Output directory has to be empty"
 
     # Load the station data
@@ -67,6 +67,17 @@ def emp_cmvn_ranking(
         output_dir, stations_df, IMs, gm_params_df, sim_data, obs_df, int_stations
     )
 
+    meta = dict(
+        method_type=method_type.value,
+        rupture=rupture,
+        IMs=IMs,
+        sim_imdb_ffp=str(sim_imdb_ffp),
+        obs_data_ffp=str(obs_data_ffp),
+        stations_ll_ffp=str(stations_ll_ffp),
+        gm_params_ffp=str(gm_params_ffp),
+    )
+    mlt.utils.write_to_yaml(meta, output_dir / "meta.yaml")
+
 
 @app.command("cmvn-sim")
 def sim_cmvn_ranking(
@@ -75,7 +86,7 @@ def sim_cmvn_ranking(
     obs_data_ffp: Path,
     stations_ll_ffp: Path,
     sim_imdb_ffp: Path,
-    output_dir: Path,
+    results_dir: Path,
     corr_dir: Path,
     IMs: List[str] = None,
 ):
@@ -83,6 +94,8 @@ def sim_cmvn_ranking(
     Performs simulation ranking based on
     simulation conditional MVN
     """
+    method_type = sr.constants.RankingMethod.sim_cMVN
+    (output_dir := results_dir / sr.constants.METHOD_RESULT_DIR_NAME_MAPPING[method_type]).mkdir(exist_ok=True)
     assert len(list(output_dir.iterdir())) == 0, "Output directory has to be empty"
 
     # Load the station data
@@ -126,6 +139,20 @@ def sim_cmvn_ranking(
         int_stations,
         R=R,
     )
+
+    # Save the meta data
+    meta = dict(
+        method_type=method_type.value,
+        rupture=rupture,
+        IMs=IMs,
+        sim_gm_params_dir=str(sim_gm_params_dir),
+        obs_data_ffp=str(obs_data_ffp),
+        stations_ll_ffp=str(stations_ll_ffp),
+        sim_imdb_ffp=str(sim_imdb_ffp),
+        corr_dir=str(corr_dir),
+    )
+
+    mlt.utils.write_to_yaml(meta, output_dir / "meta.yaml")
 
 
 if __name__ == "__main__":

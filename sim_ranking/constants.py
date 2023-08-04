@@ -1,4 +1,18 @@
 import os
+from enum import Enum
+
+class RankingMethod(Enum):
+    emp_cMVN = 1
+    sim_cMVN = 2
+
+METHOD_RESULT_DIR_NAME_MAPPING = {
+    RankingMethod.emp_cMVN: "empirical_cMVN",
+    RankingMethod.sim_cMVN: "sim_cMVN",
+}
+
+RESULTS_DIR_NAME_METHOD_MAPPING = {v: k for k, v in METHOD_RESULT_DIR_NAME_MAPPING.items()}
+
+
 
 PERIODS = [
     0.01,
