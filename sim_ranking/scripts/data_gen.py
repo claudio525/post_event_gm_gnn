@@ -1,12 +1,6 @@
 from pathlib import Path
 
-import pandas as pd
-import numpy as np
 import typer
-
-
-from IM_calculation.source_site_dist import src_site_dist
-from qcore import srf
 
 import sim_ranking as sr
 

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -55,11 +56,11 @@ def load_site_df(ll_ffp: Path):
 if __name__ == "__main__":
     st_utils.update_st_width(1600, 2, 0, 1, 1)
 
-    sim_site_corr_dir = Path("/Users/claudy/dev/work/data/sim_ranking/sim_correlations")
-    sim_gm_params_dir = Path("/Users/claudy/dev/work/data/sim_ranking/sim_gm_params")
+    sim_site_corr_dir = Path(os.path.expandvars("$wdata/sim_ranking/sim_correlations"))
+    sim_gm_params_dir = Path(os.path.expandvars("$wdata/sim_ranking/sim_gm_params"))
 
     ll_ffp = Path(
-        "/Users/claudy/dev/work/data/gm_hazard/sites/23p1/non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.ll"
+        os.path.expandvars("$wdata/gm_hazard/sites/23p1/non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.ll")
     )
     site_df = load_site_df(ll_ffp)
 
@@ -154,6 +155,7 @@ if __name__ == "__main__":
                     lat=site_df.loc[sites].lat,
                     lon=site_df.loc[sites].lon,
                     mode="markers",
+                    marker=dict(size=10),
                     hovertext=sites,
                     hoverinfo="text",
                 )

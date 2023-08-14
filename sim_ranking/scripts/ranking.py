@@ -33,7 +33,10 @@ def emp_cmvn_ranking(
      - Support for setting IM weights
     """
     method_type = sr.constants.RankingMethod.emp_cMVN
-    (output_dir := results_dir / sr.constants.METHOD_RESULT_DIR_NAME_MAPPING[method_type]).mkdir(exist_ok=True)
+    (
+        output_dir := results_dir
+        / sr.constants.METHOD_RESULT_DIR_NAME_MAPPING[method_type]
+    ).mkdir(exist_ok=True)
     assert len(list(output_dir.iterdir())) == 0, "Output directory has to be empty"
 
     # Load the station data
@@ -94,8 +97,60 @@ def sim_cmvn_ranking(
     Performs simulation ranking based on
     simulation conditional MVN
     """
-    method_type = sr.constants.RankingMethod.sim_cMVN
-    (output_dir := results_dir / sr.constants.METHOD_RESULT_DIR_NAME_MAPPING[method_type]).mkdir(exist_ok=True)
+    run_sim_cmvn_ranking(
+        sr.constants.RankingMethod.sim_cMVN,
+        rupture,
+        sim_gm_params_dir,
+        obs_data_ffp,
+        stations_ll_ffp,
+        sim_imdb_ffp,
+        results_dir,
+        corr_dir=corr_dir,
+        IMs=IMs,
+    )
+
+
+@app.command("cmvn-sim-emp-corr")
+def sim_cmvn_ranking_emp_corr(
+    rupture: str,
+    sim_gm_params_dir: Path,
+    obs_data_ffp: Path,
+    stations_ll_ffp: Path,
+    sim_imdb_ffp: Path,
+    results_dir: Path,
+    IMs: List[str] = None,
+):
+    """
+    Same as cmvn-sim but uses correlation
+    coefficients from the empirical model
+    """
+    run_sim_cmvn_ranking(
+        sr.constants.RankingMethod.sim_cMVN_emp_corr,
+        rupture,
+        sim_gm_params_dir,
+        obs_data_ffp,
+        stations_ll_ffp,
+        sim_imdb_ffp,
+        results_dir,
+        IMs=IMs,
+    )
+
+
+def run_sim_cmvn_ranking(
+    method_type: sr.constants.RankingMethod,
+    rupture: str,
+    sim_gm_params_dir: Path,
+    obs_data_ffp: Path,
+    stations_ll_ffp: Path,
+    sim_imdb_ffp: Path,
+    results_dir: Path,
+    corr_dir: Path = None,
+    IMs: List[str] = None,
+):
+    (
+        output_dir := results_dir
+        / sr.constants.METHOD_RESULT_DIR_NAME_MAPPING[method_type]
+    ).mkdir(exist_ok=True)
     assert len(list(output_dir.iterdir())) == 0, "Output directory has to be empty"
 
     # Load the station data
@@ -123,10 +178,14 @@ def sim_cmvn_ranking(
     )
 
     # Load the within-event site correlations
-    R = None if corr_dir is None else sr.data.load_correlations(corr_dir)
-
-    # Need the absolute value
-    R = {cur_im: cur_R.abs() for cur_im, cur_R in R.items()}
+    R = None
+    if corr_dir is not None:
+        # Load and convert to absolute values
+        R = {
+            # cur_im: cur_R.abs()
+            cur_im: cur_R
+            for cur_im, cur_R in sr.data.load_correlations(corr_dir).items()
+        }
 
     # Run the conditional MVN based ranking
     sr.conditional_MVN.run_conditional_mvn_ranking(
@@ -149,7 +208,7 @@ def sim_cmvn_ranking(
         obs_data_ffp=str(obs_data_ffp),
         stations_ll_ffp=str(stations_ll_ffp),
         sim_imdb_ffp=str(sim_imdb_ffp),
-        corr_dir=str(corr_dir),
+        corr_dir=str(corr_dir) if corr_dir is not None else None,
     )
 
     mlt.utils.write_to_yaml(meta, output_dir / "meta.yaml")

@@ -4,17 +4,11 @@ from typing import List, Sequence
 import pandas as pd
 import numpy as np
 import typer
-import matplotlib
 import matplotlib.ticker as ticker
 import matplotlib.pyplot as plt
 import seaborn as sns
-import pygmt
 
-import gmhazard_calc as gc
 import sim_ranking as sr
-from qcore.timeseries import BBSeis, read_ascii
-
-from pygmt_helper import plotting
 
 app = typer.Typer()
 
@@ -39,7 +33,7 @@ def plot_perturbed_waveforms(
     # Load the waveform data
     time_data, acc_data = [], []
     for cur_rel_id in rel_ids:
-        cur_t, cur_acc = sr.load_sim_waveform(sim_rupture_dir, cur_rel_id, site)
+        cur_t, cur_acc = sr.data.load_sim_waveform(sim_rupture_dir, cur_rel_id, site)
 
         if max_t is not None:
             cur_mask = cur_t < max_t
@@ -51,7 +45,7 @@ def plot_perturbed_waveforms(
 
     fig = plt.figure(figsize=(6, 4.5))
 
-    axes = sr.draw_waveforms(
+    axes = sr.plots.draw_waveforms(
         fig, acc_data, time_data, colors=["r"] * n_records, add_comp_text=False
     )
     for cur_ax in axes:
@@ -74,26 +68,20 @@ def plot_perturbed_response_spectrum(
     sim_imdb_ffp: Path, site: str, n_rels: int, output_ffp: Path
 ):
     # Load Simulation data
-    sim_df = sr.load_sim_data(sim_imdb_ffp, [site])[site]
+    sim_df = sr.data.load_sim_data(sim_imdb_ffp, [site])[site]
 
     # Select realisations
     rel_ids = np.random.choice(sim_df.index.values.astype(str), n_rels, replace=False)
 
-    pSA_keys = np.asarray(
-        [cur_c for cur_c in sim_df.columns if cur_c.startswith("pSA")]
-    )
-    periods = np.asarray(
-        [float(cur_c.rsplit("_", maxsplit=1)[-1]) for cur_c in pSA_keys]
-    )
-    sort_ind = np.argsort(periods)
+    periods, pSA_keys = sr.utils.get_periods(sim_df.columns.values.astype(str))
 
     # fig = plt.figure(figsize=(6, 4.5))
     fig = plt.figure(figsize=(8, 6))
 
     for cur_rel_id in rel_ids:
         plt.plot(
-            periods[sort_ind],
-            sim_df.loc[cur_rel_id, pSA_keys[sort_ind]],
+            periods,
+            sim_df.loc[cur_rel_id, pSA_keys],
             c="gray",
             linewidth=0.75,
             alpha=0.5
@@ -113,6 +101,7 @@ def plot_perturbed_response_spectrum(
 
 @app.command("observation-sites")
 def plot_observation_sites(sites_ffp: Path, map_data_ffp: Path, output_ffp: Path):
+    from pygmt_helper import plotting
     sites_df = pd.read_csv(sites_ffp, index_col="sta")
 
     min_lon, max_lon, min_lat, max_lat = sr.constants.CANTERBURY_REGION
@@ -150,6 +139,7 @@ def plot_observation_sites(sites_ffp: Path, map_data_ffp: Path, output_ffp: Path
 
 @app.command("historic-events")
 def plot_historic_events(events_ffp: Path, map_data_ffp: Path, output_ffp: Path):
+    from pygmt_helper import plotting
     event_df = pd.read_csv(events_ffp)
 
     min_lon, max_lon, min_lat, max_lat = sr.constants.CANTERBURY_REGION

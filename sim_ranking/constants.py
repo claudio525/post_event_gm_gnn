@@ -4,10 +4,14 @@ from enum import Enum
 class RankingMethod(Enum):
     emp_cMVN = 1
     sim_cMVN = 2
+    # Same as sim_cMVN but uses correlation coefficients
+    # from the empirical model
+    sim_cMVN_emp_corr = 3
 
 METHOD_RESULT_DIR_NAME_MAPPING = {
     RankingMethod.emp_cMVN: "empirical_cMVN",
     RankingMethod.sim_cMVN: "sim_cMVN",
+    RankingMethod.sim_cMVN_emp_corr: "sim_cMVN_emp_corr",
 }
 
 RESULTS_DIR_NAME_METHOD_MAPPING = {v: k for k, v in METHOD_RESULT_DIR_NAME_MAPPING.items()}

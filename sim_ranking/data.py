@@ -5,10 +5,7 @@ import gmhazard_calc as gc
 import pandas as pd
 import numpy as np
 
-from empirical.util.openquake_wrapper_vectorized import oq_run
-from empirical.util.classdef import TectType, GMM
-from IM_calculation.source_site_dist import src_site_dist
-from qcore import srf
+
 from qcore.timeseries import BBSeis, read_ascii
 import ml_tools as mlt
 
@@ -46,6 +43,10 @@ def run_emp_gmms(
         The empirical GMM parameters for PGA
         and the default set of pSA periods
     """
+    from qcore import srf
+    from empirical.util.openquake_wrapper_vectorized import oq_run
+    from empirical.util.classdef import TectType, GMM
+    from IM_calculation.source_site_dist import src_site_dist
 
     ### Constants
     GMM_MAPPING = {
@@ -222,7 +223,9 @@ def compute_sim_site_correlations(sim_params_dir: Path):
 
         correlations = {}
         for cur_im in sim_gm_params.ims:
-            cur_within_residuals = sim_gm_params.within_residuals[[cur_im, "site", "rel"]]
+            cur_within_residuals = sim_gm_params.within_residuals[
+                [cur_im, "site", "rel"]
+            ]
             cur_within_residuals = cur_within_residuals.pivot(
                 index="rel", columns="site", values=cur_im
             )
@@ -469,26 +472,31 @@ def compute_sim_gm_parameters(simulation_imdb_ffp: Path, obs_data_ffp: Path):
 
 
 def load_sim_data(
-    sim_imdb_ffp: Path, sites: Sequence[str] = None, include_event: bool = False
+    sim_imdb_ffp: Path, sites: Sequence[str] = None, event: str = None
 ):
     """Loads the simulation IM values for the specified sites"""
     sim_data = {}
     with gc.dbs.IMDB.get_imdb(str(sim_imdb_ffp)) as db:
-        if sites is None:
-            # Bit of a hack
-            sites = [
-                cur_key.split("/")[-1].split("_")[-1]
-                for cur_key in db._db.keys()
-                if cur_key not in ["/simulations", "/sites"]
-            ]
+        sites = sites if sites is not None else db.get_stored_stations()
 
         for cur_site in sites:
             if (cur_im_df := db.im_data(cur_site)) is not None:
-                sim_data[cur_site] = (
-                    cur_im_df if include_event else cur_im_df.droplevel(0, 0)
-                )
+                if event is not None:
+                    # Not data for this event/site combination
+                    if event not in cur_im_df.index:
+                        continue
+
+                    cur_im_df = cur_im_df.loc[event]
+
+                sim_data[cur_site] = cur_im_df
 
     return sim_data
+
+
+def load_avail_sim_events(sim_imdb_ffp: Path):
+    """Loads the available simulations in the specified IMDB"""
+    with gc.dbs.IMDB.get_imdb(str(sim_imdb_ffp)) as db:
+        return db.rupture_names()
 
 
 def load_obs_rupture_data(obs_data_ffp: Path, rupture: str):
@@ -603,3 +611,7 @@ def load_correlations(data_dir: Path):
 
 def load_ll_file(ffp: Path):
     return pd.read_csv(ffp, sep=" ", index_col=2, header=None, names=["lon", "lat"])
+
+
+def load_vs30_file(ffp: Path):
+    return pd.read_csv(ffp, sep=" ", index_col=0, header=None, names=["vs30"])

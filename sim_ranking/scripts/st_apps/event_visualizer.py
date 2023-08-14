@@ -15,7 +15,7 @@ def get_source_df(sources_ffp: Path):
     # Load the data
     source_df = pd.read_csv(sources_ffp, index_col=0)
     source_df = source_df.loc[:, ["lat", "lon", "mag", "tect_class", "datetime", "depth"]]
-    source_df = source_df.loc[source_df.mag > 5]
+    source_df = source_df.loc[source_df.mag > 5.5]
 
     source_df["event_id"] = source_df.index.values
     source_df["mag_radius"] = source_df.mag * 500
@@ -61,13 +61,13 @@ def get_pSA_df(gm_records_df: pd.DataFrame):
 if __name__ == "__main__":
     def on_event_change():
         if len(st.session_state.event_ids) > 0:
-            st.session_state.sites = gm_records_df.loc[
+            st.session_state.event_sites = gm_records_df.loc[
                 gm_records_df.evid == st.session_state.event_ids[0], "sta"].values
 
             st.session_state.event_mask = source_df.event_id.values == st.session_state.event_ids[0]
-            st.session_state.site_mask = np.isin(site_df.site_id.values, st.session_state.sites)
+            st.session_state.site_mask = np.isin(site_df.site_id.values, st.session_state.event_sites)
         else:
-            st.session_state.sites = site_df.index.values
+            st.session_state.event_sites = site_df.index.values
 
             st.session_state.event_mask = np.ones(len(source_df), dtype=bool)
             st.session_state.site_mask = np.ones(len(site_df), dtype=bool)
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     if "site_mask" not in st.session_state:
         st.session_state.site_mask = np.ones(site_df.shape[0], dtype=bool)
     if "sites" not in st.session_state:
-        st.session_state.sites = site_df.index.values
+        st.session_state.event_sites = site_df.index.values
     if "event_ids" not in st.session_state:
         st.session_state.event_ids = []
 
@@ -168,7 +168,7 @@ if __name__ == "__main__":
             # st.markdown(.to_markdown())
             # st.markdown(source_df.loc[source_df.event_id == st.session_state.event_id, :].to_markdown())
     with col2:
-        st.selectbox("**Site**", st.session_state.sites, key="site")
+        st.selectbox("**Site**", st.session_state.event_sites, key="site")
 
         st.markdown(f"**Lat/Lon**: {site_df.loc[st.session_state.site, 'lat']:.2f}, {site_df.loc[st.session_state.site, 'lon']:.2f}")
         st.markdown(f"**Vs30**: {site_df.loc[st.session_state.site, 'Vs30']}")

@@ -36,12 +36,15 @@ class ConditionalMVNDistribution:
 
 
 def run_conditional_mvn_ranking(
-        output_dir: Path,
-    stations_df: pd.DataFrame, IMs: Sequence[str], gm_params_df: pd.DataFrame,
-        sim_data,
-        obs_df: pd.DataFrame,
-        int_stations: np.ndarray,
-        R: Dict[str, pd.DataFrame] = None
+    output_dir: Path,
+    stations_df: pd.DataFrame,
+    IMs: Sequence[str],
+    gm_params_df: pd.DataFrame,
+    sim_data,
+    obs_df: pd.DataFrame,
+    int_stations: np.ndarray,
+    R: Dict[str, pd.DataFrame] = None,
+
 ):
     # Compute the conditional MVN distributions for each IM
     IMs_str = IMs
