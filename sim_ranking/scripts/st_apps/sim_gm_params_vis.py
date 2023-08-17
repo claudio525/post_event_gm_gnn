@@ -7,6 +7,7 @@ import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+import typer
 
 from ml_tools.st_tools import utils as st_utils
 import spatial_hazard as sh
@@ -53,11 +54,13 @@ def load_site_df(ll_ffp: Path):
     )
 
 
-if __name__ == "__main__":
+def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
     st_utils.update_st_width(1600, 2, 0, 1, 1)
 
-    sim_site_corr_dir = Path(os.path.expandvars("$wdata/sim_ranking/sim_correlations"))
-    sim_gm_params_dir = Path(os.path.expandvars("$wdata/sim_ranking/sim_gm_params"))
+    if sim_site_corr_dir is None:
+        sim_site_corr_dir = Path(os.path.expandvars("$wdata/sim_ranking/sim_correlations"))
+    if sim_gm_params_dir is None:
+        sim_gm_params_dir = Path(os.path.expandvars("$wdata/sim_ranking/sim_gm_params"))
 
     ll_ffp = Path(
         os.path.expandvars("$wdata/gm_hazard/sites/23p1/non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.ll")
@@ -94,7 +97,6 @@ if __name__ == "__main__":
         st.header("Correlations")
         if im.startswith("pSA"):
             # Compute the empirical site correlation
-
             emp_site_corr = sh.im_dist.get_corr_matrix(
                 sites, dist_matrix, IM.from_str(im)
             )
@@ -109,16 +111,33 @@ if __name__ == "__main__":
             dist = np.linspace(0, 300, 100)
             loth_baker_vals = sha.loth_baker_corr_model.get_correlations(im, im, dist)
 
+            # Get modified Loth & Baker values
+            # based on eq 11.8 and tau and phi (estimates) from Ask14
+            lb_tau = 0.5
+            cp = IM.from_str(im).period
+            if cp < 0.1:
+                lb_phi = 0.65
+            elif cp < 1.0:
+                lb_phi = 0.6
+            else:
+                lb_phi = 0.55
+            lb_updated = (loth_baker_vals * lb_phi**2 + lb_tau**2) / np.sqrt(lb_phi**2 + lb_tau**2)
+
             fig = plt.figure(figsize=(10, 6))
             plt.scatter(
                 dist_matrix.values[lower_tri_mask],
                 cur_sim_site_corrs.values[lower_tri_mask],
+                s=1.0,
+                alpha=0.75
             )
             plt.plot(dist, loth_baker_vals, c="k", linewidth=1.0)
+            plt.plot(dist, lb_updated, c="k", linestyle="--", linewidth=1.0)
+
 
             plt.xlabel(f"Distance (km)")
             plt.ylabel(f"Site-Correlation")
             plt.ylim(-1.0, 1.0)
+            plt.xlim(0.0, 100)
             plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
             plt.tight_layout()
 
@@ -134,7 +153,7 @@ if __name__ == "__main__":
                 fig = plt.figure(figsize=(8, 6))
 
                 plt.scatter(
-                    dist_matrix.values[lower_tri_mask], corr_diff.values[lower_tri_mask]
+                    dist_matrix.values[lower_tri_mask], corr_diff.values[lower_tri_mask], s=1.0
                 )
                 plt.xlabel(f"Site-to-Site Distance (km)")
                 plt.ylabel(r"Correlation difference, $\Delta_{\hat{\rho}_{i, j, e}}$")
@@ -224,7 +243,7 @@ if __name__ == "__main__":
         ### Correlation coefficient as function of period
         with st.expander("pSA"):
             st.markdown(f"""
-            ### Correlation coefficient as function of period
+            ### Correlation coefficient as function of period for **{site_1}** and **{site_2}**
             Figure shows the correlation coefficient as a function of period for the two selected sites {site_1} and {site_2}.
             """)
             pSA_keys = [
@@ -262,6 +281,7 @@ if __name__ == "__main__":
 
             plt.xlabel(f"Period (s)")
             plt.ylabel(f"Within-event Site-Correlation")
+            plt.ylim(-1, 1)
             plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
             plt.legend()
             plt.tight_layout()
@@ -272,35 +292,38 @@ if __name__ == "__main__":
     with residuals_tab:
         with st.expander("Summary"):
 
-            # Between-event residuals
-            st.markdown("""
-            ## Between-Event Residuals
-            Shows the between-event residuals for each realisation (gray lines), the mean, and $\\tau$.
-            """)
-            fig = plt.figure(figsize=(8, 4.5))
+            if sim_gm_params.event_residuals is not None:
+                # Between-event residuals
+                st.markdown("""
+                ## Between-Event Residuals
+                Shows the between-event residuals for each realisation (gray lines), the mean, and $\\tau$.
+                """)
+                fig = plt.figure(figsize=(8, 4.5))
 
-            for cur_rel, cur_row in sim_gm_params.event_residuals.iterrows():
-                plt.semilogx(periods, cur_row.loc[pSA_keys], c="k", alpha=0.1, linewidth=0.5)
+                for cur_rel, cur_row in sim_gm_params.event_residuals.iterrows():
+                    plt.semilogx(periods, cur_row.loc[pSA_keys], c="k", alpha=0.1, linewidth=0.5)
 
-            plt.semilogx(
-                periods,
-                sim_gm_params.event_residuals.loc[:, pSA_keys].mean(),
-                c="b",
-                linewidth=1.0,
-            )
-            plt.semilogx(periods, sim_gm_params.event_residuals.loc[:, pSA_keys].mean() +
-                         sim_gm_params.bias_std.tau.loc[pSA_keys], c="b", linewidth=0.75, linestyle="--")
-            plt.semilogx(periods, sim_gm_params.event_residuals.loc[:, pSA_keys].mean() -
-                            sim_gm_params.bias_std.tau.loc[pSA_keys], c="b", linewidth=0.75, linestyle="--")
+                plt.semilogx(
+                    periods,
+                    sim_gm_params.event_residuals.loc[:, pSA_keys].mean(),
+                    c="b",
+                    linewidth=1.0,
+                )
+                plt.semilogx(periods, sim_gm_params.event_residuals.loc[:, pSA_keys].mean() +
+                             sim_gm_params.bias_std.tau.loc[pSA_keys], c="b", linewidth=0.75, linestyle="--")
+                plt.semilogx(periods, sim_gm_params.event_residuals.loc[:, pSA_keys].mean() -
+                                sim_gm_params.bias_std.tau.loc[pSA_keys], c="b", linewidth=0.75, linestyle="--")
 
-            plt.xlabel(f"Period (s)")
-            plt.ylabel(r"$\delta B$")
-            plt.xlim([0.01, 10])
-            plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-            plt.tight_layout()
+                plt.xlabel(f"Period (s)")
+                plt.ylabel(r"$\delta B$")
+                plt.xlim([0.01, 10])
+                plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+                plt.tight_layout()
 
-            st.pyplot(fig, use_container_width=False)
-            plt.close(fig)
+                st.pyplot(fig, use_container_width=False)
+                plt.close(fig)
+            else:
+                st.markdown("No between-event residuals available")
 
             # Within-event residuals
             st.markdown("""
@@ -320,20 +343,21 @@ if __name__ == "__main__":
                 c="b",
                 linewidth=1.0,
             )
-            plt.semilogx(
-                periods,
-                sim_gm_params.within_residuals.loc[:, pSA_keys].mean() + sim_gm_params.bias_std.phi_w.loc[pSA_keys],
-                c="b",
-                linewidth=0.75,
-                linestyle="--",
-            )
-            plt.semilogx(
-                periods,
-                sim_gm_params.within_residuals.loc[:, pSA_keys].mean() - sim_gm_params.bias_std.phi_w.loc[pSA_keys],
-                c="b",
-                linewidth=0.75,
-                linestyle="--",
-            )
+            if sim_gm_params.bias_std is not None:
+                plt.semilogx(
+                    periods,
+                    sim_gm_params.within_residuals.loc[:, pSA_keys].mean() + sim_gm_params.bias_std.phi_w.loc[pSA_keys],
+                    c="b",
+                    linewidth=0.75,
+                    linestyle="--",
+                )
+                plt.semilogx(
+                    periods,
+                    sim_gm_params.within_residuals.loc[:, pSA_keys].mean() - sim_gm_params.bias_std.phi_w.loc[pSA_keys],
+                    c="b",
+                    linewidth=0.75,
+                    linestyle="--",
+                )
 
 
             plt.xlabel(f"Period (s)")
@@ -346,26 +370,24 @@ if __name__ == "__main__":
             plt.close(fig)
 
 
-            print(f"wtf")
-
-
         with st.expander("IM specific"):
-            # Between-event residuals
-            fig = plt.figure(figsize=(8, 4.5))
+            if sim_gm_params.event_residuals is not None:
+                # Between-event residuals
+                fig = plt.figure(figsize=(8, 4.5))
 
-            plt.scatter(
-                np.arange(sim_gm_params.event_residuals.shape[0]),
-                sim_gm_params.event_residuals[im],
-            )
+                plt.scatter(
+                    np.arange(sim_gm_params.event_residuals.shape[0]),
+                    sim_gm_params.event_residuals[im],
+                )
 
-            plt.xlabel(f"Realisation")
-            plt.ylabel(f"{im} Between-realisation residuals")
-            plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-            plt.ylim([-2, 2])
-            plt.tight_layout()
+                plt.xlabel(f"Realisation")
+                plt.ylabel(f"{im} Between-realisation residuals")
+                plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+                plt.ylim([-2, 2])
+                plt.tight_layout()
 
-            st.pyplot(fig, use_container_width=False)
-            plt.close(fig)
+                st.pyplot(fig, use_container_width=False)
+                plt.close(fig)
 
             # Within-event residuals
             fig = plt.figure(figsize=(8, 4.5))
@@ -385,3 +407,7 @@ if __name__ == "__main__":
             plt.close(fig)
 
             st.markdown("Each blob is a site")
+
+
+if __name__ == '__main__':
+    typer.run(main)

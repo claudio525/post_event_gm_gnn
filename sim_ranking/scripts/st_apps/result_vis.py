@@ -17,45 +17,6 @@ import gmhazard_calc as gc
 import sim_ranking as sr
 import spatial_hazard as sh
 
-
-# @st.cache_data
-# def _load_cmvn_results(results_dir: Path):
-#     cMVN_result = sr.cmvn.ConditionalMVNDistribution.load(
-#         results_dir / "cMVN_distributions.pickle"
-#     )
-#     sites = cMVN_result.stations
-#
-#     return cMVN_result, sites
-#
-#
-# @st.cache_data
-# def _load_best_sim_ids(results_dir: Path):
-#     return pd.read_csv(results_dir / "best_sim_ids.csv", index_col=0).squeeze()
-#
-#
-# @st.cache_data
-# def _get_dist_matrix(sites: np.ndarray, stations_ffp: Path):
-#     station_df = sr.data.load_ll_file(stations_ffp)
-#
-#     return sh.im_dist.calculate_distance_matrix(sites, station_df)
-#
-#
-# @st.cache_data
-# def _load_gm_params(gm_params_ffp: Path, event: str):
-#     gm_params = pd.read_csv(gm_params_ffp, index_col=0)
-#
-#     if "event" in gm_params.columns:
-#         gm_params.event = gm_params.event.values.astype(str)
-#
-#         gm_params = gm_params.loc[gm_params.event == event]
-#         gm_params = gm_params.set_index("site")
-#
-#     return gm_params
-
-
-### New
-
-
 @st.cache_data
 def _get_meta(results_dir: Path):
     meta = mlt.utils.load_yaml(results_dir / "meta.yaml")
@@ -92,12 +53,12 @@ def _load_obs_data(obs_data_ffp: Path, rupture: str):
 
 def _get_sim_data(results_dir: Path, sites: np.ndarray):
     meta = _get_meta(results_dir)
-    return _load_sim_data(meta["sim_imdb_ffp"], sites)
+    return _load_sim_data(meta["sim_imdb_ffp"], sites, meta["rupture"])
 
 
 @st.cache_data
-def _load_sim_data(sim_imdb_ffp: Path, sites: np.ndarray):
-    return sr.data.load_sim_data(sim_imdb_ffp, sites)
+def _load_sim_data(sim_imdb_ffp: Path, sites: np.ndarray, event: str):
+    return sr.data.load_sim_data(sim_imdb_ffp, sites=sites, event=event)
 
 
 def _get_sites(results_dir: Path):
@@ -185,7 +146,11 @@ def main(
     col_1, col_2 = st.columns(2)
 
     # Event selection
-    events = [cur_ffp.stem for cur_ffp in results_dir.iterdir() if cur_ffp.is_dir()]
+    events = [
+        cur_ffp.stem
+        for cur_ffp in results_dir.iterdir()
+        if cur_ffp.is_dir() and not cur_ffp.stem.startswith("_")
+    ]
     with col_1:
         event = st.selectbox("Event", events)
 

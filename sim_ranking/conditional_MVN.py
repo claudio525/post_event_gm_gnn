@@ -94,6 +94,20 @@ def run_conditional_mvn_ranking(
     best_sim_id.to_csv(output_dir / "best_sim_ids.csv")
 
 
+def obs_site_filter(
+    hypo_loc: Tuple[float, float],
+    station_df: pd.DataFrame,
+    int_stations: np.ndarray,
+    obs_stations: np.ndarray,
+    distance_matrix: pd.DataFrame,
+):
+    """
+    Computes the mask that specifies the relevant
+    observation sites for each site of interest
+    """
+    pass
+
+
 def compute_cond_MVN_distributions(
     IMs: Sequence[gc.im.IM],
     obs_df: pd.DataFrame,
@@ -140,6 +154,7 @@ def compute_cond_MVN_distributions(
             cur_gmm_params_df,
             np.log(obs_df[str(cur_im)]),
             hypo_loc,
+            # obs_site_filter_fn=
             R=R[str(cur_im)] if R is not None else None,
             allow_obs_sites=True,
         )

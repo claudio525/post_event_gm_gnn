@@ -242,6 +242,7 @@ class ResponseSpectrumSimModel(nn.Module):
         rs_padding: List[int],
         fc_units: List[int],
         rs_input_length: int,
+        n_scalar_inputs: int,
     ):
         super().__init__()
 
@@ -266,28 +267,33 @@ class ResponseSpectrumSimModel(nn.Module):
         ### Add the fully connected layers
         # Get the conv out size
         conv_out_size = self.rs_layers(torch.zeros(1, 1, rs_input_length)).shape[-1]
+        fc_input_size = (conv_out_size * 3) + n_scalar_inputs
         self.fc_layers = nn.Sequential()
         for i in range(len(fc_units)):
             if i == 0:
-                self.fc_layers.append(nn.Linear(conv_out_size * 3, fc_units[i]))
+                self.fc_layers.append(nn.Linear(fc_input_size, fc_units[i]))
             else:
                 self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
 
             self.fc_layers.append(nn.ELU())
-        self.fc_layers.append(nn.Linear(self.fc_layers[-2].out_features, 1))
 
-    def forward(self, rs_int_sim, rs_obs_sim, rs_obs_obs):
+        self.fc_layers.append(nn.Linear(self.fc_layers[-2].out_features, 1))
+        self.fc_layers.append(nn.Sigmoid())
+
+    def forward(self, rs_int_sim, rs_obs_sim, rs_obs_obs, scalar_features):
         rs_int_sim_out = self.rs_layers(rs_int_sim)
         rs_obs_sim_out = self.rs_layers(rs_obs_sim)
         rs_obs_obs_out = self.rs_layers(rs_obs_obs)
 
-        rs_conv_out = torch.cat((rs_int_sim_out, rs_obs_sim_out, rs_obs_obs_out), 1)
+        rs_conv_out = torch.cat(
+            (rs_int_sim_out, rs_obs_sim_out, rs_obs_obs_out, scalar_features), 1
+        )
 
         return self.fc_layers(rs_conv_out)
 
 
 def custom_loss(output, target, distance):
-    w = torch.abs((-1 / 100) * distance + 1)
+    w = (-1 / 100) * distance + 1
     return torch.mean(w * (target - output) ** 2)
 
 
@@ -300,6 +306,7 @@ def train(
     optimizer: torch.optim.Optimizer,
 ):
     loss_hist_train, loss_hist_val = torch.zeros(n_epochs), torch.zeros(n_epochs)
+    loss_fn = nn.MSELoss()
 
     for epoch in range(n_epochs):
         print(f"Processing epoch {epoch+1}/{n_epochs}")
@@ -326,10 +333,11 @@ def train(
             distance = distance.to(device, dtype=torch.float32)
 
             # Forward pass
-            pred = model(rs_int_sim, rs_obs_sim, rs_obs_obs)
+            pred = model(rs_int_sim, rs_obs_sim, rs_obs_obs, site_features).ravel()
 
             # Compute the loss and update weights
-            loss = custom_loss(pred, sim_score, distance)
+            # loss = custom_loss(pred, sim_score, distance)
+            loss = loss_fn(pred, sim_score)
             loss.backward()
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
@@ -358,8 +366,9 @@ def train(
                 distance = distance.to(device, dtype=torch.float32)
 
                 # Compute prediction and save loss
-                pred = model(rs_int_sim, rs_obs_sim, rs_obs_obs)
-                loss = custom_loss(pred, sim_score, distance)
+                pred = model(rs_int_sim, rs_obs_sim, rs_obs_obs, site_features).ravel()
+                # loss = loss_fn(pred, sim_score, distance)
+                loss = loss_fn(pred, sim_score)
                 loss_hist_val[epoch] += loss.item() * sim_score.shape[0]
 
             loss_hist_val[epoch] /= len(val_dataloader.dataset)
@@ -370,12 +379,14 @@ def train(
 
 
 
+
 if __name__ == "__main__":
     ### CONFIG ###
     N_RELS_USED = 10
     N_VAL_SITES = 10
 
-    BATCH_SIZE = 1024
+    BATCH_SIZE = 32
+    N_SCALAR_FEATURES = 7
     RS_N_CHANNELS = [1, 16, 32]
     RS_KERNEL_SIZES = [5, 3]
     FC_UNITS = [64, 32, 16]
@@ -503,10 +514,10 @@ if __name__ == "__main__":
 
     # Create the dataloaders
     train_dataloader = DataLoader(
-        train_dataset, batch_size=32, shuffle=True, num_workers=4, pin_memory=True
+        train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True
     )
     val_dataloader = DataLoader(
-        val_dataset, batch_size=32, shuffle=True, num_workers=4, pin_memory=True
+        val_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True
     )
 
     # Create the model
@@ -519,13 +530,13 @@ if __name__ == "__main__":
     )
 
     model = ResponseSpectrumSimModel(
-        RS_KERNEL_SIZES, RS_N_CHANNELS, padding, FC_UNITS, periods.size
+        RS_KERNEL_SIZES, RS_N_CHANNELS, padding, FC_UNITS, periods.size, N_SCALAR_FEATURES
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     summary(
         model,
-        input_size=[(BATCH_SIZE, 1, 31), (BATCH_SIZE, 1, 31), (BATCH_SIZE, 1, 31)],
+        input_size=[(BATCH_SIZE, 1, 31), (BATCH_SIZE, 1, 31), (BATCH_SIZE, 1, 31), (BATCH_SIZE, N_SCALAR_FEATURES)],
     )
 
     print(f"Running training")

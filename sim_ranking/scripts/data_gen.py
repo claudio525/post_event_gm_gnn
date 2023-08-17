@@ -36,10 +36,25 @@ def get_emp_gmm_params(
     sr.data.run_emp_gmms(output_ffp, site_dir, srf_dir, nz_gmdb_source_ffp, rjb_max)
 
 
-@app.command("compute-sim-gm-params")
-def get_sim_gm_params(output_dir: Path, simulation_imdb_ffp: Path, obs_data_ffp: Path):
-    """Computes the GM parameters from the simulation data directly"""
-    sim_gm_params = sr.data.compute_sim_gm_parameters(simulation_imdb_ffp, obs_data_ffp)
+@app.command("compute-sim-gm-params-mera")
+def get_sim_gm_params_mera(output_dir: Path, simulation_imdb_ffp: Path):
+    """
+    Computes the GM parameters from the simulation data
+    directly using MERA
+    """
+    sim_gm_params = sr.data.compute_sim_gm_params_mera(simulation_imdb_ffp)
+
+    for cur_params in sim_gm_params:
+        (cur_out_dir := output_dir / cur_params.event).mkdir(exist_ok=True)
+        cur_params.write(cur_out_dir)
+
+@app.command("compute-sim-gm-params-total")
+def get_sim_gm_params_total(output_dir: Path, simulation_imdb_ffp: Path):
+    """
+    Computes the GM parameters from the simulation data
+    directly, assumes between event term is 0, i.e. just uses total residual
+    """
+    sim_gm_params = sr.data.compute_sim_gm_params_total(simulation_imdb_ffp)
 
     for cur_params in sim_gm_params:
         (cur_out_dir := output_dir / cur_params.event).mkdir(exist_ok=True)

@@ -96,7 +96,7 @@ if __name__ == "__main__":
         st.session_state.event_mask = np.ones(source_df.shape[0], dtype=bool)
     if "site_mask" not in st.session_state:
         st.session_state.site_mask = np.ones(site_df.shape[0], dtype=bool)
-    if "sites" not in st.session_state:
+    if "event_sites" not in st.session_state:
         st.session_state.event_sites = site_df.index.values
     if "event_ids" not in st.session_state:
         st.session_state.event_ids = []
@@ -169,6 +169,9 @@ if __name__ == "__main__":
             # st.markdown(source_df.loc[source_df.event_id == st.session_state.event_id, :].to_markdown())
     with col2:
         st.selectbox("**Site**", st.session_state.event_sites, key="site")
+        # print("-------------------")
+        # print(st.session_state.event_sites)
+        # print()
 
         st.markdown(f"**Lat/Lon**: {site_df.loc[st.session_state.site, 'lat']:.2f}, {site_df.loc[st.session_state.site, 'lon']:.2f}")
         st.markdown(f"**Vs30**: {site_df.loc[st.session_state.site, 'Vs30']}")
