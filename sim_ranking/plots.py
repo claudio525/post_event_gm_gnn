@@ -106,7 +106,7 @@ def plot_response_spectrum(
         f"{site}, {r'$R_{rup}$'} = {obs_data.loc['r_rup']:.0f} (km), "
         f"{'$V_{S30}$'} = {obs_data.loc['Vs30']:.0f} (m/s)"
     )
-    plt.xlabel(f"Period")
+    plt.xlabel(f"Period (s)")
     plt.ylabel(f"Pseudo-spectral acceleration, pSA (g)")
     plt.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     plt.legend()
@@ -297,7 +297,7 @@ def draw_cmnv(
         np.exp(cond_mean),
         c="b",
         linewidth=1.2,
-        label=r"Conditional MVN",
+        label=r"Conditional",
     )
     plt.plot(
         periods,

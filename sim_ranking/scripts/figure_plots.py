@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import sim_ranking as sr
+import spatial_hazard as sh
+import sha_calc as sha
 
 app = typer.Typer()
 
@@ -84,7 +86,7 @@ def plot_perturbed_response_spectrum(
             sim_df.loc[cur_rel_id, pSA_keys],
             c="gray",
             linewidth=0.75,
-            alpha=0.5
+            alpha=0.5,
         )
 
     plt.semilogx()
@@ -102,6 +104,7 @@ def plot_perturbed_response_spectrum(
 @app.command("observation-sites")
 def plot_observation_sites(sites_ffp: Path, map_data_ffp: Path, output_ffp: Path):
     from pygmt_helper import plotting
+
     sites_df = pd.read_csv(sites_ffp, index_col="sta")
 
     min_lon, max_lon, min_lat, max_lat = sr.constants.CANTERBURY_REGION
@@ -140,6 +143,7 @@ def plot_observation_sites(sites_ffp: Path, map_data_ffp: Path, output_ffp: Path
 @app.command("historic-events")
 def plot_historic_events(events_ffp: Path, map_data_ffp: Path, output_ffp: Path):
     from pygmt_helper import plotting
+
     event_df = pd.read_csv(events_ffp)
 
     min_lon, max_lon, min_lat, max_lat = sr.constants.CANTERBURY_REGION
@@ -180,6 +184,297 @@ def plot_historic_events(events_ffp: Path, map_data_ffp: Path, output_ffp: Path)
         dpi=900,
         anti_alias=True,
     )
+
+
+@app.command("event-sites-example")
+def plot_event_sites_example(
+    events_ffp: Path, sites_ffp: Path, map_data_ffp: Path, output_ffp: Path
+):
+    """Creates a figure of Canterbury showing
+    all historic events"""
+    import pygmt
+    from pygmt_helper import plotting
+
+    event_df = pd.read_csv(events_ffp)
+    sites_df = pd.read_csv(sites_ffp, index_col="sta")
+
+    min_lon, max_lon, min_lat, max_lat = sr.constants.CANTERBURY_REGION
+
+    # Filter by region
+    event_df = event_df.loc[
+        (event_df.lon > min_lon)
+        & (event_df.lon < max_lon)
+        & (event_df.lat > min_lat)
+        & (event_df.lat < max_lat)
+    ]
+
+    sites_df = sites_df.loc[
+        (sites_df.lon > min_lon)
+        & (sites_df.lon < max_lon)
+        & (sites_df.lat > min_lat)
+        & (sites_df.lat < max_lat)
+    ]
+
+    # Magnitude filter
+    event_df = event_df.loc[event_df.mag > 4]
+
+    # Load map data
+    map_data = (
+        None
+        if map_data_ffp is None
+        else plotting.NZMapData.load(map_data_ffp, high_res_topo=False)
+    )
+    # map_data = None
+
+    # Generate the figure
+    fig = plotting.gen_region_fig(
+        region=(min_lon, max_lon, min_lat, max_lat),
+        map_data=map_data,
+        plot_kwargs=dict(topo_cmap="oleron"),
+        plot_roads=False,
+        config_options=dict(
+            MAP_FRAME_TYPE="plain",
+            FORMAT_GEO_MAP="ddd.xx",
+            MAP_FRAME_PEN="thinner,black",
+            FONT_ANNOT_PRIMARY="6p,Helvetica,black",
+        ),
+    )
+
+    # Plot the events
+    for ix, (cur_event, cur_row) in enumerate(event_df.iterrows()):
+        fig.meca(
+            spec=dict(
+                strike=cur_row.strike,
+                dip=cur_row.dip,
+                rake=cur_row.rake,
+                magnitude=cur_row.mag,
+            ),
+            scale=f"{0.04 * cur_row.mag}c",
+            G="red",
+            W="0.05p,black,solid",
+            longitude=cur_row.lon,
+            latitude=cur_row.lat,
+            depth=cur_row.depth,
+        )
+
+    # Create the inset rectangle
+    inset_region = [
+        172.60,
+        172.69,
+        -43.545,
+        -43.495,
+    ]
+    fig.plot(
+        data=[[inset_region[0], inset_region[2], inset_region[1], inset_region[3]]],
+        style="r+s",
+        pen="0.5p,black",
+    )
+
+    # Plot the sites
+    for ix, (cur_site, cur_row) in enumerate(sites_df.iterrows()):
+        fig.plot(
+            x=cur_row.lon,
+            y=cur_row.lat,
+            style="t0.15c",
+            fill="darkblue",
+            pen="0.1p,darkblue",
+        )
+
+    # Create the inset
+    with fig.inset(
+        position="jTR+o0.2c",
+        region=inset_region,
+        projection="M4c",
+        margin=0,
+        box="+p0.5p,black",
+    ):
+        fig.basemap(frame=False)
+
+        # Plots the default coast (sea & inland lakes/rivers)
+        if map_data is None:
+            fig.coast(
+                shorelines=["1/0.1p,black", "2/0.1p,black"],
+                resolution="f",
+                land="#666666",
+                water="skyblue",
+            )
+        # Use the custom NZ data
+        else:
+            plotting._draw_map_data(
+                fig, map_data
+            )  # , plot_kwargs=dict(topo_cmap="oleron"))
+
+        # Plot the sites
+        inset_sites_df = sites_df.loc[
+            (sites_df.lon > inset_region[0])
+            & (sites_df.lon < inset_region[1])
+            & (sites_df.lat > inset_region[2])
+            & (sites_df.lat < inset_region[3])
+        ]
+        for ix, (cur_site, cur_row) in enumerate(inset_sites_df.iterrows()):
+            fig.plot(
+                x=cur_row.lon,
+                y=cur_row.lat,
+                style="t0.15c",
+                fill="darkblue",
+                pen="0.1p,black",
+            )
+
+        # Plot the site of interest
+        fig.plot(
+            x=172.636849,
+            y=-43.530954,
+            style="a0.2c",
+            fill="orange",
+            pen="0.1p,black",
+        )
+        fig.text(
+            text="Site of Interest",
+            x=172.64,
+            y=-43.530954,
+            justify="LM",
+            font="6p,Helvetica,black",
+        )
+
+    fig.savefig(
+        output_ffp,
+        dpi=900,
+        anti_alias=True,
+    )
+
+    print(f"wtf")
+
+
+# @app.command("gm-params-comparison")
+# def gm_params_comparison(sim_gm_params_dir: Path, emp_gm_params_ffp: Path, sim_imdb_ffp: Path, event: str, site: str = None):
+#     sim_gm_params = sr.data.load_sim_gm_params(sim_gm_params_dir).gm_params
+#     emp_gm_params = sr.data.load_emp_gm_params(emp_gm_params_ffp, event)
+#     sim_data = sr.data.load_sim_data(sim_imdb_ffp, event=event)
+#
+#     periods, pSA_keys = sr.utils.get_periods(sim_data.columns.values.astype(str))
+#
+#     fig = plt.figure(figsize=(10, 6))
+#     fig = sr.plots.plot_response_spectrum(
+#         periods,
+#         pSA_keys,
+#         sim_data[cur_site],
+#         obs_df.loc[cur_site],
+#         cur_site,
+#         best_sim_ids.loc[cur_site],
+#         cMVN_result=cmvn_result if show_conditional else None,
+#         gm_params=gm_params.loc[cur_site] if show_marginal else None,
+#         show_all_sims=True,
+#         fig=fig,
+#     )
+#     st.pyplot(fig, use_container_width=False)
+#
+#     print(f"wtf")
+
+
+@app.command("correlation-period")
+def correlation_period(sim_corr_dir: Path, event: str, station_ffp: Path, output_dir: Path):
+    sim_corrs = sr.data.load_correlations(sim_corr_dir)[event]
+
+    periods, pSA_keys = sr.utils.get_periods(sim_corrs.ims)
+
+    station_df = sr.data.load_ll_file(station_ffp)
+    dist_matrix = sh.im_dist.calculate_distance_matrix(sim_corrs.sites, station_df)
+
+    upper_mask = np.triu(sim_corrs.get_im_corrs(pSA_keys[0]), 1).astype(bool)
+
+    # Compute the average absolute correlation for each period
+    # across all site pairs
+    rho_avg = {}
+    rho_std = {}
+    for cur_im in pSA_keys:
+        cur_corrs = sim_corrs.get_im_corrs(cur_im)
+        rho_avg[cur_im] = np.mean(np.abs(cur_corrs.values[upper_mask]))
+        rho_std[cur_im] = np.std(np.abs(cur_corrs.values[upper_mask]))
+
+    rho_avg = pd.Series(rho_avg)
+    rho_std = pd.Series(rho_std)
+
+    # Compute the average absolute correlation for different distance bins
+    distance_bins = np.array([0, 10, 30, 80, 150])
+    dist_rho_avg = {i: {} for i in range(len(distance_bins) - 1)}
+    dist_rho_std = {i: {} for i in range(len(distance_bins) - 1)}
+    dist_emp_corr = {i: {} for i in range(len(distance_bins) - 1)}
+    for i in range(len(distance_bins) - 1):
+
+
+        cur_dist_mask = (dist_matrix >= distance_bins[i]) & (
+            dist_matrix < distance_bins[i + 1]
+        )
+        cur_mask = cur_dist_mask & upper_mask
+
+        for cur_im in pSA_keys:
+            cur_corrs = sim_corrs.get_im_corrs(cur_im)
+            dist_rho_avg[i][cur_im] = np.mean(np.abs(cur_corrs.values[cur_mask]))
+            dist_rho_std[i][cur_im] = np.std(np.abs(cur_corrs.values[cur_mask]))
+            dist_emp_corr[i][cur_im] = sha.loth_baker_corr_model.get_correlations(cur_im, cur_im, np.asarray([np.mean(distance_bins[i:i+2])]))[0]
+
+    dist_rho_avg = pd.DataFrame(dist_rho_avg)
+    dist_rho_std = pd.DataFrame(dist_rho_std)
+    dist_emp_corr = pd.DataFrame(dist_emp_corr)
+
+    fig = plt.figure(figsize=(8, 6))
+
+    c = ["maroon", "red", "blue", "magenta"]
+    for i in range(len(distance_bins) - 1):
+        plt.semilogx(
+            periods,
+            dist_emp_corr.loc[:, i],
+            label=f"Loth & Baker (2013)" if i == 0 else None,
+            c=c[i],
+            linewidth=1.0,
+            linestyle="--",
+        )
+        plt.semilogx(
+            periods,
+            dist_rho_avg.loc[:, i],
+            label=f"{distance_bins[i]}-{distance_bins[i + 1]} km",
+            c=c[i],
+            linewidth=1.0,
+        )
+
+    plt.semilogx(periods, rho_avg, label="All site pairs", c="k", linewidth=1.0)
+
+    # plt.title(f"Average Absolute Correlation vs Period")
+    plt.xlabel(f"Period (s)")
+    plt.ylabel(f"Average Absolute Correlation")
+    plt.xlim(periods.min(), periods.max())
+    plt.ylim(0, 0.7)
+    plt.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(output_dir / f"{event}_average_correlation_vs_period.{sr.constants.FIG_FORMAT}")
+
+    # Standard deviation plot
+    fig = plt.figure(figsize=(8, 6))
+
+    for i in range(len(distance_bins) - 1):
+        plt.semilogx(
+            periods,
+            dist_rho_std.loc[:, i],
+            label=f"{distance_bins[i]}-{distance_bins[i + 1]} km",
+            c=c[i],
+            linewidth=1.0,
+        )
+
+    plt.semilogx(periods, rho_std, label="All site pairs", c="k", linewidth=1.0)
+
+    plt.xlabel(f"Period (s)")
+    plt.ylabel(f"Standard Deviation Of Absolute Correlation")
+    plt.xlim(periods.min(), periods.max())
+    plt.ylim(0, 0.3)
+    plt.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(output_dir / f"{event}_std_correlation_vs_period.{sr.constants.FIG_FORMAT}")
+
+    print(f"wtf")
 
 
 if __name__ == "__main__":

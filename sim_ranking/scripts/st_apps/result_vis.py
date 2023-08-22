@@ -17,20 +17,22 @@ import gmhazard_calc as gc
 import sim_ranking as sr
 import spatial_hazard as sh
 
+
 @st.cache_data
 def _get_meta(results_dir: Path):
-    meta = mlt.utils.load_yaml(results_dir / "meta.yaml")
-    meta = {
-        key: os.path.expandvars(val)
-        if isinstance(val, str) and (key.endswith("_ffp") or key.endswith("_dir"))
-        else val
-        for key, val in meta.items()
-    }
-    return meta
+    return sr.data.get_meta(results_dir)
+    # meta = mlt.utils.load_yaml(results_dir / "meta.yaml")
+    # meta = {
+    #     key: os.path.expandvars(val)
+    #     if isinstance(val, str) and (key.endswith("_ffp") or key.endswith("_dir"))
+    #     else val
+    #     for key, val in meta.items()
+    # }
+    # return meta
 
 
-def _get_method_type(results_dir: Path):
-    return sr.constants.RankingMethod(_get_meta(results_dir)["method_type"])
+# def _get_method_type(results_dir: Path):
+#     return sr.constants.RankingMethod(_get_meta(results_dir)["method_type"])
 
 
 @st.cache_data
@@ -63,7 +65,7 @@ def _load_sim_data(sim_imdb_ffp: Path, sites: np.ndarray, event: str):
 
 def _get_sites(results_dir: Path):
     sites = _load_cmvn_result(results_dir).stations
-    method_type = _get_method_type(results_dir)
+    method_type = sr.data.get_method_type(results_dir)
 
     if method_type is sr.constants.RankingMethod.emp_cMVN:
         sim_data = _get_sim_data(results_dir, sites)
@@ -102,21 +104,16 @@ def _load_best_sim_ids(results_dir: Path):
 
 @st.cache_data
 def _load_sim_gm_params(data_dir: Path):
-    return sr.data.SimGMParams.load(data_dir)
+    return sr.data.load_sim_gm_params(data_dir)
 
 
 @st.cache_data
 def _load_emp_gm_params(gm_params_ffp: Path, event: str):
-    gm_params = pd.read_csv(gm_params_ffp, index_col=0)
-
-    gm_params.event = gm_params.event.values.astype(str)
-    gm_params = gm_params.loc[gm_params.event == event]
-    gm_params = gm_params.set_index("site")
-    return gm_params
+    return sr.data.load_emp_gm_params(gm_params_ffp, event)
 
 
 def _get_gm_params(results_dir: Path):
-    method_type = _get_method_type(results_dir)
+    method_type = sr.data.get_method_type(results_dir)
     meta = _get_meta(results_dir)
     if method_type is sr.constants.RankingMethod.emp_cMVN:
         return _load_emp_gm_params(meta["gm_params_ffp"], meta["rupture"])
@@ -142,6 +139,8 @@ def main(
 ):
     start_time = time.time()
     mlt.st_tools.utils.update_st_width(1600, 2, 0, 1, 1)
+
+    st.markdown(f"Results Directory: {results_dir}")
 
     col_1, col_2 = st.columns(2)
 
@@ -184,22 +183,22 @@ def _get_observation_sites(results_dir: Path, site: str):
     periods, pSA_keys = _get_periods(results_dir)
 
     obs_stations_rho = {
-        cur_obs_site: np.mean(
-            [
-                cmvn_result.cond_lnIM_results[gc.im.IM.from_str(cur_pSA_key)].R.loc[
-                    site, cur_obs_site
-                ]
-                for cur_pSA_key in pSA_keys
-            ]
-        )
+        cur_obs_site: {
+            cur_pSA_key: cmvn_result.cond_lnIM_results[
+                gc.im.IM.from_str(cur_pSA_key)
+            ].R.loc[site, cur_obs_site]
+            for cur_pSA_key in pSA_keys
+        }
         for cur_obs_site in obs_sites
     }
+    obs_stations_rho = pd.DataFrame(obs_stations_rho).T
+    obs_stations_mean_rho = obs_stations_rho.mean(axis=1)
 
-    return obs_sites, obs_stations_rho
+    return obs_sites, obs_stations_rho, obs_stations_mean_rho
 
 
 def _site_vis(cur_results_dir: Path):
-    method_type = _get_method_type(cur_results_dir)
+    method_type = sr.data.get_method_type(cur_results_dir)
 
     sites = _get_sites(cur_results_dir)
     cur_site = st.selectbox("Site", sites)
@@ -246,11 +245,13 @@ def _site_vis(cur_results_dir: Path):
     plt.close(fig)
 
     ### Response spectrum at the relevant observation sites
-    obs_sites, obs_stations_rho = _get_observation_sites(cur_results_dir, cur_site)
+    obs_sites, obs_stations_rho, obs_stations_mean_rho = _get_observation_sites(
+        cur_results_dir, cur_site
+    )
 
     # Get the 5 sites with larges rho to site of interest
     largest_rho_obs_stations = np.flip(
-        obs_sites[np.argsort(list(obs_stations_rho.values()))[-5:]]
+        obs_stations_mean_rho.sort_values().index.values.astype(str)[-5:]
     )
 
     # Get the distance matrix
@@ -273,7 +274,7 @@ def _site_vis(cur_results_dir: Path):
             periods,
             obs_df.loc[cur_obs_site, pSA_keys],
             label=f"{cur_obs_site} ({obs_stations_dist.loc[cur_obs_site, cur_site]:.2f} km,"
-            f" $\\rho$={obs_stations_rho[cur_obs_site]:.2f})",
+            f" $\\rho$={obs_stations_mean_rho[cur_obs_site]:.2f})",
             c=colors[ix],
             linewidth=0.9,
         )
@@ -328,7 +329,7 @@ def _site_vis(cur_results_dir: Path):
             periods,
             diff.loc[cur_obs_site, pSA_keys],
             label=f"{cur_obs_site} ({obs_stations_dist.loc[cur_obs_site, cur_site]:.2f} km,"
-            f" $\\rho$={obs_stations_rho[cur_obs_site]:.2f})",
+            f" $\\rho$={obs_stations_mean_rho[cur_obs_site]:.2f})",
             c=colors[ix],
             linewidth=0.9,
         )
@@ -344,7 +345,37 @@ def _site_vis(cur_results_dir: Path):
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
 
-    print(f"wtf")
+    ### Correlation coefficients between observation sites and site of interest
+    st.markdown(
+        """
+        ## pSA Correlation coefficients
+        Figure shows the correlation coefficients between the site of interest and the
+        observation sites used to compute the conditional IM distributions. 
+        Only shows the 5 most relevant observation sites (largest $\\rho$).
+        """
+    )
+    fig = plt.figure(figsize=(10, 6))
+
+    for ix, cur_obs_site in enumerate(largest_rho_obs_stations):
+        plt.semilogx(
+            periods,
+            obs_stations_rho.loc[cur_obs_site, pSA_keys],
+            c=colors[ix],
+            label=f"{cur_obs_site} ({obs_stations_dist.loc[cur_obs_site, cur_site]:.2f} km,"
+            f" $\\rho$={obs_stations_mean_rho[cur_obs_site]:.2f})",
+            linewidth=0.9,
+        )
+
+    plt.xlabel(f"Period, T (s)")
+    plt.ylabel(r"$\rho$")
+    plt.xlim([0.01, 10])
+    plt.ylim([-1, 1])
+    plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    plt.legend()
+    plt.tight_layout()
+
+    st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
 
 
 if __name__ == "__main__":

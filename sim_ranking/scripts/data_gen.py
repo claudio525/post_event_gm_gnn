@@ -48,6 +48,7 @@ def get_sim_gm_params_mera(output_dir: Path, simulation_imdb_ffp: Path):
         (cur_out_dir := output_dir / cur_params.event).mkdir(exist_ok=True)
         cur_params.write(cur_out_dir)
 
+
 @app.command("compute-sim-gm-params-total")
 def get_sim_gm_params_total(output_dir: Path, simulation_imdb_ffp: Path):
     """
@@ -63,25 +64,15 @@ def get_sim_gm_params_total(output_dir: Path, simulation_imdb_ffp: Path):
 
 @app.command("compute-sim-site-correlations")
 def compute_sim_site_correlations(
-    output_dir: Path, sim_params_dir: Path,
+    output_dir: Path,
+    sim_params_dir: Path,
+    smooth: bool = False,
 ):
     """Computes the site correlations from the simulation data directly"""
-    correlation_results = sr.data.compute_sim_site_correlations(
-        sim_params_dir
-    )
+    correlation_results = sr.data.compute_sim_site_corrs(sim_params_dir, smooth=smooth)
 
     for cur_result in correlation_results:
-        (cur_out_dir := output_dir / cur_result.event).mkdir(exist_ok=True)
-        cur_result.write(cur_out_dir)
-
-    # for cur_event, cur_im_dict in site_correlations.items():
-    #     (cur_out_dir := output_dir / cur_event).mkdir(exist_ok=True)
-    #     for cur_im, cur_site_corr in cur_im_dict.items():
-    #         cur_site_corr.to_csv(cur_out_dir / f"{cur_im.replace('.', 'p')}.csv")
-    #
-    #     (cur_im_res_out_dir := cur_out_dir / "im_residuals").mkdir(exist_ok=True)
-    #     for cur_im, cur_im_residuals in im_residuals[cur_event].items():
-    #         cur_im_residuals.to_csv(cur_im_res_out_dir / f"{cur_im.replace('.', 'p')}.csv")
+        cur_result.write(output_dir / f"{cur_result.event}.pickle")
 
 
 if __name__ == "__main__":

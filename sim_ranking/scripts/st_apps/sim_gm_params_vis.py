@@ -18,20 +18,26 @@ import sim_ranking as sr
 
 @st.cache_data
 def get_avail_ims(sim_site_corr_dir: Path, event: str):
-    return np.sort(
-        [
-            sr.utils.reverse_im_filename(cur_ffp.stem)
-            for cur_ffp in (sim_site_corr_dir / event).iterdir()
-            if cur_ffp.is_file()
-        ]
-    )
+    sim_site_corrs = load_sim_site_correlations(sim_site_corr_dir, event)
+    return sim_site_corrs.ims
+
+
+    # return np.sort(
+    #     [
+    #         sr.utils.reverse_im_filename(cur_ffp.stem)
+    #         for cur_ffp in (sim_site_corr_dir / event).iterdir()
+    #         if cur_ffp.is_file()
+    #     ]
+    # )
 
 
 @st.cache_data
 def load_sim_site_correlations(sim_site_corr_dir: Path, event: str):
-    sim_site_corrs = sr.data.SimWithinEventSiteCorrelations.load(
-        sim_site_corr_dir / event
-    )
+    # sim_site_corrs = sr.data.SimWithinEventSiteCorrelations.load(
+    #     sim_site_corr_dir / event
+    # )
+
+    sim_site_corrs = sr.data.SiteCorrelations.load(sim_site_corr_dir / f"{event}.pickle")
 
     return sim_site_corrs
 
@@ -69,9 +75,9 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
 
     avail_events = [
         cur_ffp.stem
-        for cur_ffp in sim_site_corr_dir.iterdir()
-        if cur_ffp.is_dir() and not cur_ffp.stem.startswith("_")
+        for cur_ffp in sim_site_corr_dir.iterdir() if not cur_ffp.stem.startswith("_")
     ]
+
 
     # Event & IM selection
     col_1, col_2 = st.columns(2)
@@ -83,7 +89,7 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
         im = st.selectbox("IM", options=avail_ims)
 
     sim_site_corrs = load_sim_site_correlations(sim_site_corr_dir, event)
-    cur_sim_site_corrs = sim_site_corrs.correlations[im]
+    cur_sim_site_corrs = sim_site_corrs.to_im_dict()[im]
     sim_gm_params = load_sim_gm_params(sim_gm_params_dir, event)
 
     sites = cur_sim_site_corrs.index.values.astype(str)
@@ -248,19 +254,23 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
             """)
             pSA_keys = [
                 cur_im
-                for cur_im in sim_site_corrs.correlations.keys()
+                for cur_im in sim_site_corrs.ims
                 if cur_im.startswith("pSA")
             ]
+
             periods = [float(cur_key.split("_")[-1]) for cur_key in pSA_keys]
             sort_ind = np.argsort(periods)
             periods = np.array(periods)[sort_ind]
             pSA_keys = np.array(pSA_keys)[sort_ind]
 
-            period_sim_corr_values = [
-                sim_site_corrs.correlations[cur_im].loc[site_1, site_2]
-                for cur_im in pSA_keys
-            ]
-            period_emp_corr_values = loth_baker_vals = [
+            period_sim_corr_values = sim_site_corrs.get_site_im_corrs(site_1, pSA_keys).loc[site_2, :]
+
+            # period_sim_corr_values = [
+            #     sim_site_corrs.corrs[cur_im].loc[site_1, site_2]
+            #     for cur_im in pSA_keys
+            # ]
+
+            period_emp_corr_values = [
                 sha.loth_baker_corr_model.get_correlations(
                     cur_im, cur_im, np.asarray([dist_matrix.loc[site_1, site_2]])
                 )
@@ -406,7 +416,7 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
             st.pyplot(fig, use_container_width=False)
             plt.close(fig)
 
-            st.markdown("Each blob is a site")
+
 
 
 if __name__ == '__main__':

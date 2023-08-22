@@ -1,5 +1,8 @@
+import os
+import pickle
 from pathlib import Path
 from typing import Sequence, NamedTuple, Dict, List, Union
+from dataclasses import dataclass
 
 import gmhazard_calc as gc
 import pandas as pd
@@ -213,7 +216,62 @@ class SimWithinEventSiteCorrelations(NamedTuple):
         return cls(meta["event"], meta["ims"], meta["sites"], correlations)
 
 
-def compute_sim_site_correlations(sim_params_dir: Path):
+@dataclass
+class SiteCorrelations:
+    corrs: np.ndarray
+    sites: np.ndarray
+    ims: np.ndarray
+    event: str
+
+    def __post_init__(self):
+        assert self.corrs.shape == (
+            self.sites.size,
+            self.sites.size,
+            self.ims.size,
+        )
+        assert self.sites.size == np.unique(self.sites).size
+        assert self.ims.size == np.unique(self.ims).size
+
+    def write(self, data_ffp: Path):
+        with data_ffp.open("wb") as f:
+            pickle.dump(self, f)
+
+    @classmethod
+    def load(cls, data_ffp: Path):
+        with data_ffp.open("rb") as f:
+            return pickle.load(f)
+
+    def to_im_dict(self):
+        return {
+            cur_im: pd.DataFrame(
+                data=self.corrs[:, :, self._get_im_ix(cur_im)],
+                index=self.sites,
+                columns=self.sites,
+            )
+            for cur_im in self.ims
+        }
+
+    def _get_im_ix(self, cur_im: str):
+        return np.flatnonzero(cur_im == self.ims)[0]
+
+    def get_im_corrs(self, im: str):
+        return pd.DataFrame(
+            data=self.corrs[:, :, self._get_im_ix(im)],
+            index=self.sites,
+            columns=self.sites,
+        )
+
+    def get_site_im_corrs(self, site: str, ims: Sequence[str]):
+        site_ix = np.flatnonzero(site == self.sites)[0]
+        im_ind = [self._get_im_ix(cur_im) for cur_im in ims]
+
+        # Why do I need a transpose here??
+        return pd.DataFrame(
+            data=self.corrs[site_ix, :, im_ind].T, index=self.sites, columns=ims
+        )
+
+
+def compute_sim_site_corrs(sim_params_dir: Path, smooth: bool = False):
     """Computes the site correlations based on the simulation data"""
     events = [
         cur_ffp.stem
@@ -223,112 +281,80 @@ def compute_sim_site_correlations(sim_params_dir: Path):
 
     results = []
     for cur_event in events:
-        sim_gm_params = SimGMParams.load(sim_params_dir / cur_event)
+        cur_sim_gm_params = SimGMParams.load(sim_params_dir / cur_event)
+        cur_ims = np.asarray(cur_sim_gm_params.ims)
+        cur_sites = np.asarray(cur_sim_gm_params.sites)
 
-        correlations = {}
-        for cur_im in sim_gm_params.ims:
-            cur_within_residuals = sim_gm_params.within_residuals[
+        cur_site_corrs = np.full(
+            (len(cur_sites), len(cur_sites), len(cur_ims)), fill_value=np.nan
+        )
+
+        for i, cur_im in enumerate(cur_ims):
+            cur_within_residuals = cur_sim_gm_params.within_residuals[
                 [cur_im, "site", "rel"]
             ]
             cur_within_residuals = cur_within_residuals.pivot(
                 index="rel", columns="site", values=cur_im
             )
 
-            correlations[cur_im] = cur_within_residuals.corr(method="pearson")
+            cur_corrs = cur_within_residuals.loc[:, cur_sites].corr(method="pearson")
+            assert np.all(cur_corrs.index.values.astype(str) == cur_sites)
+
+            cur_site_corrs[:, :, i] = cur_corrs.values
+
+        if smooth:
+            # If this is ever changed, ensure that the
+            # boundaries are handled correctly
+            smoothing_kernel = np.array([1 / 3, 1 / 3, 1 / 3])
+
+            # Get the indices of the pSA IMs
+            pSA_keys = cur_ims[np.char.startswith(cur_ims, "pSA")]
+            periods, pSA_keys = utils.get_periods(pSA_keys)
+            pSA_ind = [
+                np.flatnonzero(cur_pSA_key == cur_ims)[0] for cur_pSA_key in pSA_keys
+            ]
+
+            # This is sub-optimal
+            # Check https://stackoverflow.com/questions/62442341/vectorizing-2d-convolutions-in-numpy
+            # specifically the last answer
+            for i in range(len(cur_sites)):
+                for j in range(len(cur_sites)):
+                    # Run the convolution
+                    cur_corrs = np.convolve(
+                        cur_site_corrs[i, j, pSA_ind], smoothing_kernel, mode="same"
+                    )
+
+                    # Deal with incorrect boundaries values
+                    cur_corrs[0] = cur_site_corrs[i, j, pSA_ind[0]]
+                    cur_corrs[-1] = cur_site_corrs[i, j, pSA_ind[-1]]
+
+                    # Save
+                    cur_site_corrs[i, j, pSA_ind] = cur_corrs
 
         results.append(
-            SimWithinEventSiteCorrelations(
-                cur_event, sim_gm_params.ims, sim_gm_params.sites, correlations
+            SiteCorrelations(
+                cur_site_corrs, np.asarray(cur_sites), np.asarray(cur_ims), cur_event
             )
         )
 
-    return results
+        # correlations = {}
+        # for cur_im in sim_gm_params.ims:
+        #     cur_within_residuals = sim_gm_params.within_residuals[
+        #         [cur_im, "site", "rel"]
+        #     ]
+        #     cur_within_residuals = cur_within_residuals.pivot(
+        #         index="rel", columns="site", values=cur_im
+        #     )
+        #
+        #     correlations[cur_im] = cur_within_residuals.corr(method="pearson")
+        #
+        # results.append(
+        #     SimWithinEventSiteCorrelations(
+        #         cur_event, sim_gm_params.ims, sim_gm_params.sites, correlations
+        #     )
+        # )
 
-    # from mera.mera_pymer4 import run_mera
-    #
-    # # Get the simulation data
-    # sim_data = load_sim_data(simulation_imdb_ffp, include_event=True)
-    #
-    # events = np.unique(list(sim_data.values())[0].index.get_level_values(0))
-    # ims = list(sim_data.values())[0].columns.values.astype(str)
-    #
-    # site_correlations = {}
-    # im_residuals = {}
-    # for cur_event in events:
-    #     ### Compute the residuals per IM
-    #     cur_im_residuals = {cur_im: {} for cur_im in ims}
-    #
-    #     # Get the observed data
-    #     obs_df = load_obs_rupture_data(obs_data_ffp, cur_event)
-    #     cur_residuals_df = []
-    #     for cur_site, cur_im_data in sim_data.items():
-    #         # No observed data
-    #         if cur_site not in obs_df.index:
-    #             continue
-    #
-    #         cur_residuals = np.log(cur_im_data.loc[cur_event, ims]) - np.log(
-    #             cur_im_data.loc[cur_event, ims]
-    #         ).mean(axis=0)
-    #         cur_residuals["event"] = [
-    #             cur_rel.rsplit("_", maxsplit=1)[-1]
-    #             for cur_rel in cur_residuals.index.values.astype(str)
-    #         ]
-    #         cur_residuals["site"] = cur_site
-    #         cur_residuals.index = np.char.add(
-    #             cur_residuals.index.values.astype(str), f"_{cur_site}"
-    #         )
-    #
-    #         cur_residuals_df.append(cur_residuals)
-    #
-    #         # Compute the residual (which is the
-    #         # within-event residual as simulations are event
-    #         # specific models and there between-event
-    #         # residual is zero)
-    #         # Residual is computed with respect to the mean of the
-    #         # simulation realisations (not observed!)
-    #         # cur_residuals = np.log(cur_im_data.loc[cur_event, ims]) - np.log(
-    #         #     cur_im_data.loc[cur_event, ims]
-    #         # ).mean(axis=0)
-    #         #
-    #         # for cur_im in cur_residuals.columns:
-    #         #     cur_im_residuals[cur_im][cur_site] = cur_residuals[cur_im]
-    #
-    #     cur_residuals_df = pd.concat(cur_residuals_df)
-    #
-    #     # Treat each realisation as an event and run
-    #     # mixed-effect regression analysis
-    #     event_res_df, rem_res_df, bias_std_df = run_mera(
-    #         cur_residuals_df, ims, "event", "site", compute_site_term=False
-    #     )
-    #
-    #     # Add site and event columns to within-event residual results
-    #     assert np.all(rem_res_df.index == cur_residuals_df.index)
-    #     rem_res_df["site"] = cur_residuals_df["site"]
-    #     rem_res_df["rel"] = cur_residuals_df["event"]
-    #
-    #     # Create site (index)/realisations (columns) dataframe
-    #     # per IM
-    #     cur_im_residuals = {
-    #         cur_im: rem_res_df[[cur_im, "site", "rel"]].pivot(
-    #             columns="rel", index="site", values=cur_im
-    #         )
-    #         for cur_im in ims
-    #     }
-    #
-    #     # Compute the site correlations
-    #     cur_site_correlations = {
-    #         cur_im: pd.DataFrame(
-    #             data=np.corrcoef(cur_residuals),
-    #             index=cur_residuals.index,
-    #             columns=cur_residuals.index,
-    #         )
-    #         for cur_im, cur_residuals in cur_im_residuals.items()
-    #     }
-    #
-    #     site_correlations[cur_event] = cur_site_correlations
-    #     im_residuals[cur_event] = cur_im_residuals
-    #
-    # return site_correlations, im_residuals
+    return results
 
 
 class SimGMParams(NamedTuple):
@@ -710,11 +736,19 @@ def load_obs_waveform(obs_waveform_dir: Path, site: str):
     return obs_t, obs_acc
 
 
+# def load_correlations(data_dir: Path):
+#     return {
+#         utils.reverse_im_filename(cur_ffp.stem): pd.read_csv(cur_ffp, index_col=0)
+#         for cur_ffp in data_dir.iterdir()
+#         if cur_ffp.is_file()
+#     }
+
+
 def load_correlations(data_dir: Path):
     return {
-        utils.reverse_im_filename(cur_ffp.stem): pd.read_csv(cur_ffp, index_col=0)
+        cur_ffp.stem: SiteCorrelations.load(cur_ffp)
         for cur_ffp in data_dir.iterdir()
-        if cur_ffp.is_file()
+        if cur_ffp.is_file() and not cur_ffp.stem.startswith("_")
     }
 
 
@@ -726,3 +760,39 @@ def load_vs30_file(ffp: Path):
     return pd.read_csv(ffp, sep=" ", index_col=0, header=None, names=["vs30"])
 
 
+def load_sim_gm_params(data_dir: Path):
+    return SimGMParams.load(data_dir)
+
+
+def load_emp_gm_params(gm_params_ffp: Path, event: str):
+    gm_params = pd.read_csv(gm_params_ffp, index_col=0)
+
+    gm_params.event = gm_params.event.values.astype(str)
+    gm_params = gm_params.loc[gm_params.event == event]
+    gm_params = gm_params.set_index("site")
+    return gm_params
+
+
+def get_method_type(results_dir: Path):
+    return constants.RankingMethod(get_meta(results_dir)["method_type"])
+
+
+def get_meta(results_dir: Path):
+    meta = mlt.utils.load_yaml(results_dir / "meta.yaml")
+    meta = {
+        key: os.path.expandvars(val)
+        if isinstance(val, str) and (key.endswith("_ffp") or key.endswith("_dir"))
+        else val
+        for key, val in meta.items()
+    }
+    return meta
+
+
+def get_gm_params(results_dir: Path):
+    method_type = get_method_type(results_dir)
+    meta = get_meta(results_dir)
+    if method_type is constants.RankingMethod.emp_cMVN:
+        return load_emp_gm_params(meta["gm_params_ffp"], meta["rupture"])
+    else:
+        sim_gm_params = load_sim_gm_params(Path(meta["sim_gm_params_dir"]))
+        return sim_gm_params.gm_params

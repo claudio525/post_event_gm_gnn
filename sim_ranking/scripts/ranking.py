@@ -157,7 +157,7 @@ def sim_cmvn_ranking_all(
             stations_ll_ffp,
             sim_imdb_ffp,
             results_dir / cur_event,
-            corr_dir=corr_dir / cur_event,
+            corr_dir=corr_dir,
             IMs=IMs,
         )
 
@@ -294,12 +294,13 @@ def run_sim_cmvn_ranking(
     # Load the within-event site correlations
     R = None
     if corr_dir is not None:
+        R = sr.data.load_correlations(corr_dir)[rupture].to_im_dict()
         # Load and convert to absolute values
-        R = {
-            # cur_im: cur_R.abs()
-            cur_im: cur_R
-            for cur_im, cur_R in sr.data.load_correlations(corr_dir).items()
-        }
+        # R = {
+        #     # cur_im: cur_R.abs()
+        #     cur_im: cur_R
+        #     for cur_im, cur_R in sr.data.load_correlations(corr_dir).items()
+        # }
 
     # Run the conditional MVN based ranking
     sr.conditional_MVN.run_conditional_mvn_ranking(

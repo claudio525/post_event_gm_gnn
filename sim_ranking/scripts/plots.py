@@ -10,8 +10,6 @@ import matplotlib.pyplot as plt
 import gmhazard_calc as gc
 import sim_ranking as sr
 
-from sim_ranking import constants
-
 app = typer.Typer()
 
 @app.command("cmvn-result-plots")
@@ -40,7 +38,7 @@ def gen_cMVN_plots(
 
     # Load the observation & simulation data
     obs_df = sr.data.load_obs_rupture_data(obs_data_ffp, cMVN_result.rupture)
-    sim_data = sr.data.load_sim_data(sim_imdb_ffp, sites)
+    sim_data = sr.data.load_sim_data(sim_imdb_ffp, sites=sites, event=cMVN_result.rupture)
 
     # Drop any sites for which there is no simulation data
     mask = np.isin(sites, list(sim_data.keys()))
@@ -60,6 +58,9 @@ def gen_cMVN_plots(
     )
     pSA_keys = [f"pSA_{cur_period}" for cur_period in periods]
 
+    # Load the GM params
+    gm_params = sr.data.get_gm_params(results_dir)
+
     # Individual site plots
     (site_output_dir := output_dir / "site_plots").mkdir(exist_ok=True)
     for ix, cur_site in enumerate(sites):
@@ -73,11 +74,12 @@ def gen_cMVN_plots(
             periods,
             pSA_keys,
             sim_data[cur_site],
-            cMVN_result,
             obs_df.loc[cur_site],
             cur_site,
             best_sim_ids.loc[cur_site],
-            site_output_dir,
+            gm_params=gm_params.loc[cur_site] if gm_params is not None else None,
+            cMVN_result=cMVN_result,
+            output_dir=site_output_dir,
             show_all_sims=show_all_sims,
         )
 
@@ -106,7 +108,7 @@ def gen_cMVN_plots(
         pSA_keys,
         sites,
         obs_sim_ln_ratio,
-        output_dir / f"obs_sim_residuals.{constants.FIG_FORMAT}",
+        output_dir / f"obs_sim_residuals.{sr.constants.FIG_FORMAT}",
         title="Observation - Simulation Residual",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
@@ -115,18 +117,18 @@ def gen_cMVN_plots(
         pSA_keys,
         sites,
         obs_cmvn_ln_ratio,
-        output_dir / f"obs_cmvn_residuals.{constants.FIG_FORMAT}",
-        title="Observation - cMVN Residual",
-        ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
+        output_dir / f"obs_cmvn_residuals.{sr.constants.FIG_FORMAT}",
+        title="Observation - Conditional IM Distribution Residuals",
+        ylabel=r"$lnIM_{Obs} - lnIM_{Cond}$",
     )
     sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         sites,
         cmvn_sim_ln_ratio,
-        output_dir / f"cmvn_sim_residuals.{constants.FIG_FORMAT}",
-        title="cMVN - Simulation Residual",
-        ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
+        output_dir / f"cmvn_sim_residuals.{sr.constants.FIG_FORMAT}",
+        title="Conditional IM Distribution - Simulation Residuals",
+        ylabel=r"$lnIM_{Cond} - lnIM_{Sim}$",
     )
 
     # Rrup bins
@@ -136,8 +138,8 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / f"obs_sim_residuals_rrup_0_30.{constants.FIG_FORMAT}",
-        title="Observation - Simulation Residual ($R_{Rup}$ < 30)",
+        output_dir / f"obs_sim_residuals_rrup_0_30.{sr.constants.FIG_FORMAT}",
+        title="Observation - Simulation Residuals ($R_{Rup}$ < 30)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
     sr.plots.plot_response_spectrum_residual(
@@ -145,18 +147,18 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / f"obs_cmvn_residuals_rrup_0_30.{constants.FIG_FORMAT}",
-        title="Observation - cMVN Residual ($R_{Rup}$ < 30)",
-        ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
+        output_dir / f"obs_cmvn_residuals_rrup_0_30.{sr.constants.FIG_FORMAT}",
+        title="Observation - Conditional IM Distribution Residuals ($R_{Rup}$ < 30)",
+        ylabel=r"$lnIM_{Obs} - lnIM_{Cond}$",
     )
     sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / f"cmvn_sim_residuals_rrup_0_30.{constants.FIG_FORMAT}",
-        title="cMVN - Simulation Residual ($R_{Rup}$ < 30)",
-        ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
+        output_dir / f"cmvn_sim_residuals_rrup_0_30.{sr.constants.FIG_FORMAT}",
+        title="Conditional IM Distribution - Simulation Residuals ($R_{Rup}$ < 30)",
+        ylabel=r"$lnIM_{Cond} - lnIM_{Sim}$",
     )
 
     cur_sites = sites[
@@ -168,8 +170,8 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / f"obs_sim_residuals_rrup_30_75.{constants.FIG_FORMAT}",
-        title="Observation - Simulation Residual (30 < $R_{Rup}$ < 75)",
+        output_dir / f"obs_sim_residuals_rrup_30_75.{sr.constants.FIG_FORMAT}",
+        title="Observation - Simulation Residuals (30 < $R_{Rup}$ < 75)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
     sr.plots.plot_response_spectrum_residual(
@@ -177,18 +179,18 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / f"obs_cmvn_residuals_rrup_30_75.{constants.FIG_FORMAT}",
-        title="Observation - cMVN Residual (30 < $R_{Rup}$ < 75)",
-        ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
+        output_dir / f"obs_cmvn_residuals_rrup_30_75.{sr.constants.FIG_FORMAT}",
+        title="Observation - Conditional IM Distribution Residual (30 < $R_{Rup}$ < 75)",
+        ylabel=r"$lnIM_{Obs} - lnIM_{Cond}$",
     )
     sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / f"cmvn_sim_residuals_rrup_30_75.{constants.FIG_FORMAT}",
-        title="cMVN - Simulation Residual (30 < $R_{Rup}$ < 75)",
-        ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
+        output_dir / f"cmvn_sim_residuals_rrup_30_75.{sr.constants.FIG_FORMAT}",
+        title="Conditional IM Distribution - Simulation Residuals (30 < $R_{Rup}$ < 75)",
+        ylabel=r"$lnIM_{Cond} - lnIM_{Sim}$",
     )
 
     cur_sites = sites[(obs_df.loc[sites, "r_rup"].values > 75)]
@@ -197,8 +199,8 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / f"obs_sim_residuals_rrup_75.{constants.FIG_FORMAT}",
-        title="Observation - Simulation Residual (75 < $R_{Rup}$)",
+        output_dir / f"obs_sim_residuals_rrup_75.{sr.constants.FIG_FORMAT}",
+        title="Observation - Simulation Residuals (75 < $R_{Rup}$)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
     sr.plots.plot_response_spectrum_residual(
@@ -206,18 +208,18 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / f"obs_cmvn_residuals_rrup_75.{constants.FIG_FORMAT}",
-        title="Observation - cMVN Residual (75 < $R_{Rup}$)",
-        ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
+        output_dir / f"obs_cmvn_residuals_rrup_75.{sr.constants.FIG_FORMAT}",
+        title="Observation - Conditional IM Distribution Residuals (75 < $R_{Rup}$)",
+        ylabel=r"$lnIM_{Obs} - lnIM_{Cond}$",
     )
     sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / f"cmvn_sim_residuals_rrup_75.{constants.FIG_FORMAT}",
-        title="cMVN - Simulation Residual (75 < $R_{Rup}$)",
-        ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
+        output_dir / f"cmvn_sim_residuals_rrup_75.{sr.constants.FIG_FORMAT}",
+        title="Conditional IM Distribution - Simulation Residuals (75 < $R_{Rup}$)",
+        ylabel=r"$lnIM_{Cond} - lnIM_{Sim}$",
     )
 
     # Vs30 bins
@@ -227,8 +229,8 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / f"obs_sim_residuals_vs30_0_300.{constants.FIG_FORMAT}",
-        title="Observation - Simulation Residual ($V_{S30}$ < 300)",
+        output_dir / f"obs_sim_residuals_vs30_0_300.{sr.constants.FIG_FORMAT}",
+        title="Observation - Simulation Residuals ($V_{S30}$ < 300)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
     sr.plots.plot_response_spectrum_residual(
@@ -236,18 +238,18 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / f"obs_cmvn_residuals_vs30_0_300.{constants.FIG_FORMAT}",
-        title="Observation - cMVN Residual ($V_{S30}$ < 300)",
-        ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
+        output_dir / f"obs_cmvn_residuals_vs30_0_300.{sr.constants.FIG_FORMAT}",
+        title="Observation - Conditional IM Distribution Residuals ($V_{S30}$ < 300)",
+        ylabel=r"$lnIM_{Obs} - lnIM_{Cond}$",
     )
     sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / f"cmvn_sim_residuals_vs30_0_300.{constants.FIG_FORMAT}",
-        title="cMVN - Simulation Residual ($V_{S30}$ < 300)",
-        ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
+        output_dir / f"cmvn_sim_residuals_vs30_0_300.{sr.constants.FIG_FORMAT}",
+        title="Conditional IM Distribution - Simulation Residuals ($V_{S30}$ < 300)",
+        ylabel=r"$lnIM_{Cond} - lnIM_{Sim}$",
     )
 
     cur_sites = sites[
@@ -259,8 +261,8 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / f"obs_sim_residuals_vs30_300_500.{constants.FIG_FORMAT}",
-        title="Observation - Simulation Residual (300 < $V_{S30}$ < 500)",
+        output_dir / f"obs_sim_residuals_vs30_300_500.{sr.constants.FIG_FORMAT}",
+        title="Observation - Simulation Residuals (300 < $V_{S30}$ < 500)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
     sr.plots.plot_response_spectrum_residual(
@@ -268,18 +270,18 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / f"obs_cmvn_residuals_vs30_300_500.{constants.FIG_FORMAT}",
-        title="Observation - cMVN Residual (300 < $V_{S30}$ < 500)",
-        ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
+        output_dir / f"obs_cmvn_residuals_vs30_300_500.{sr.constants.FIG_FORMAT}",
+        title="Observation - Conditional IM Distribution Residuals (300 < $V_{S30}$ < 500)",
+        ylabel=r"$lnIM_{Obs} - lnIM_{Cond}$",
     )
     sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / f"cmvn_sim_residuals_vs30_300_500.{constants.FIG_FORMAT}",
-        title="cMVN - Simulation Residual (300 < $V_{S30}$ < 500)",
-        ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
+        output_dir / f"cmvn_sim_residuals_vs30_300_500.{sr.constants.FIG_FORMAT}",
+        title="Conditional IM Distribution - Simulation Residuals (300 < $V_{S30}$ < 500)",
+        ylabel=r"$lnIM_{Cond} - lnIM_{Sim}$",
     )
 
     cur_sites = sites[(obs_df.loc[sites, "r_rup"].values > 75)]
@@ -288,8 +290,8 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_sim_ln_ratio,
-        output_dir / f"obs_sim_residuals_vs30_500.{constants.FIG_FORMAT}",
-        title="Observation - Simulation Residual (500 < $V_{S30}$)",
+        output_dir / f"obs_sim_residuals_vs30_500.{sr.constants.FIG_FORMAT}",
+        title="Observation - Simulation Residuals (500 < $V_{S30}$)",
         ylabel=r"$lnIM_{Obs} - lnIM_{Sim}$",
     )
     sr.plots.plot_response_spectrum_residual(
@@ -297,18 +299,18 @@ def gen_cMVN_plots(
         pSA_keys,
         cur_sites,
         obs_cmvn_ln_ratio,
-        output_dir / f"obs_cmvn_residuals_vs30_500.{constants.FIG_FORMAT}",
-        title="Observation - cMVN Residual (500 < $V_{S30}$)",
-        ylabel=r"$lnIM_{Obs} - lnIM_{cMVN}$",
+        output_dir / f"obs_cmvn_residuals_vs30_500.{sr.constants.FIG_FORMAT}",
+        title="Observation - Conditional IM Distribution Residuals (500 < $V_{S30}$)",
+        ylabel=r"$lnIM_{Obs} - lnIM_{Cond}$",
     )
     sr.plots.plot_response_spectrum_residual(
         periods,
         pSA_keys,
         cur_sites,
         cmvn_sim_ln_ratio,
-        output_dir / f"cmvn_sim_residuals_vs30_500.{constants.FIG_FORMAT}",
-        title="cMVN Residual - Simulation (500 < $V_{S30}$)",
-        ylabel=r"$lnIM_{cMVN} - lnIM_{Sim}$",
+        output_dir / f"cmvn_sim_residuals_vs30_500.{sr.constants.FIG_FORMAT}",
+        title="Conditional IM Distribution Residuals - Simulation (500 < $V_{S30}$)",
+        ylabel=r"$lnIM_{Cond} - lnIM_{Sim}$",
     )
 
 
@@ -346,7 +348,7 @@ def gen_cMVN_waveform_plots(
         # Get the observed waveforms
         obs_t, obs_acc = sr.data.load_obs_waveform(obs_waveform_dir, cur_site)
 
-        fig = plt.figure(figsize=constants.FIG_SIZE)
+        fig = plt.figure(figsize=sr.constants.FIG_SIZE)
 
         sr.plots.draw_waveforms(fig, [sim_acc, obs_acc], [sim_t, obs_t], ["r", "k"])
 
