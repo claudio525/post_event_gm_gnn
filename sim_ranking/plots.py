@@ -78,18 +78,20 @@ def plot_response_spectrum(
     plt.plot(
         periods,
         obs_data.loc[pSA_keys].values.astype(float),
-        c="k",
-        linewidth=1.2,
-        label="Observed",
+        c="r",
+        linewidth=1.5,
+        # linewidth=1.2,
+        # label="Observed",
     )
 
     # Best Simulation
     plt.plot(
         periods,
         sim_data.loc[best_sim_id, pSA_keys].values.astype(float),
-        c="r",
-        linewidth=1.2,
-        label="Simulation",
+        c="k",
+        linewidth=1.5,
+        # linewidth=1.2,
+        # label="Simulation",
     )
 
     # Conditional MVN
@@ -296,7 +298,8 @@ def draw_cmnv(
         periods,
         np.exp(cond_mean),
         c="b",
-        linewidth=1.2,
+        # linewidth=1.2,
+        linewidth=1.5,
         label=r"Conditional",
     )
     plt.plot(
@@ -324,7 +327,8 @@ def draw_marginal(
         periods,
         np.exp(marg_mean),
         c="g",
-        linewidth=1.2,
+        # linewidth=1.2,
+        linewidth=1.5,
         label="Marginal",
     )
     ax.plot(

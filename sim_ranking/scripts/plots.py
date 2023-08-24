@@ -26,6 +26,8 @@ def gen_cMVN_plots(
       - response spectrum plot for each site
       - summary residual plots
     """
+    # plt.rcParams.update({"font.size": 14, "axes.labelsize": 14})
+
     if output_dir is None:
         (output_dir := results_dir / "plots").mkdir(exist_ok=True)
 

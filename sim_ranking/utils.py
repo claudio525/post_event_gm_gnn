@@ -19,3 +19,7 @@ def get_periods(columns: Sequence[str]):
     return periods[sort_ind], pSA_keys[sort_ind]
 
 
+def get_nice_im_name(im: str):
+    if im.startswith("pSA"):
+        return f"pSA({im.split('_')[-1]}s)"
+    return im
