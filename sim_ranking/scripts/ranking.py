@@ -20,6 +20,7 @@ def emp_cmvn_ranking(
     sim_imdb_ffp: Path,
     results_dir: Path,
     IMs: List[str] = None,
+    n_stations: int = 20,
 ):
     """
     Performs simulation ranking based on
@@ -40,7 +41,9 @@ def emp_cmvn_ranking(
         sim_imdb_ffp,
         results_dir,
         IMs=IMs,
+        n_stations=n_stations,
     )
+
 
 @app.command("cmvn-emp-all")
 def emp_cmvn_ranking_all(
@@ -50,10 +53,15 @@ def emp_cmvn_ranking_all(
     sim_imdb_ffp: Path,
     results_dir: Path,
     IMs: List[str] = None,
+    n_stations: int = 20,
 ):
-    # Find all events for which empirical and simualtion data is available
+    # Find all events for which empirical and simulation data is available
     sim_events = sr.data.load_avail_sim_events(sim_imdb_ffp)
-    emp_events = np.unique(pd.read_csv(gm_params_ffp, index_col=0, dtype={"event": str}).event.values.astype(str))
+    emp_events = np.unique(
+        pd.read_csv(
+            gm_params_ffp, index_col=0, dtype={"event": str}
+        ).event.values.astype(str)
+    )
     events = np.intersect1d(sim_events, emp_events)
 
     for cur_event in events:
@@ -65,17 +73,19 @@ def emp_cmvn_ranking_all(
             sim_imdb_ffp,
             results_dir / cur_event,
             IMs=IMs,
+            n_stations=n_stations,
         )
 
 
 def run_emp_cmvn_ranking(
-        rupture: str,
-        gm_params_ffp: Path,
-        obs_data_ffp: Path,
-        stations_ll_ffp: Path,
-        sim_imdb_ffp: Path,
-        results_dir: Path,
-        IMs: List[str] = None,
+    rupture: str,
+    gm_params_ffp: Path,
+    obs_data_ffp: Path,
+    stations_ll_ffp: Path,
+    sim_imdb_ffp: Path,
+    results_dir: Path,
+    IMs: List[str] = None,
+    n_stations: int = 20,
 ):
     method_type = sr.constants.RankingMethod.emp_cMVN
     (
@@ -112,7 +122,14 @@ def run_emp_cmvn_ranking(
 
     # Run the conditional MVN based ranking
     sr.conditional_MVN.run_conditional_mvn_ranking(
-        output_dir, stations_df, IMs, gm_params_df, sim_data, obs_df, int_stations
+        output_dir,
+        stations_df,
+        IMs,
+        gm_params_df,
+        sim_data,
+        obs_df,
+        int_stations,
+        n_stations=n_stations,
     )
 
     meta = dict(
@@ -136,6 +153,7 @@ def sim_cmvn_ranking_all(
     results_dir: Path,
     corr_dir: Path,
     IMs: List[str] = None,
+    n_stations: int = 20,
 ):
     """
     Performs simulation ranking based on
@@ -159,6 +177,7 @@ def sim_cmvn_ranking_all(
             results_dir / cur_event,
             corr_dir=corr_dir,
             IMs=IMs,
+            n_stations=n_stations,
         )
 
 
@@ -172,6 +191,7 @@ def sim_cmvn_ranking(
     results_dir: Path,
     corr_dir: Path,
     IMs: List[str] = None,
+    n_stations: int = 20,
 ):
     """
     Performs simulation ranking based on
@@ -188,6 +208,7 @@ def sim_cmvn_ranking(
         results_dir,
         corr_dir=corr_dir,
         IMs=IMs,
+        n_stations=n_stations,
     )
 
 
@@ -199,6 +220,7 @@ def sim_cmvn_ranking_emp_corr_all(
     sim_imdb_ffp: Path,
     results_dir: Path,
     IMs: List[str] = None,
+    n_stations: int = 20,
 ):
     """
     Same as cmvn-sim-all but uses correlation
@@ -221,6 +243,7 @@ def sim_cmvn_ranking_emp_corr_all(
             sim_imdb_ffp,
             results_dir / cur_event,
             IMs=IMs,
+            n_stations=n_stations,
         )
 
 
@@ -233,6 +256,7 @@ def sim_cmvn_ranking_emp_corr(
     sim_imdb_ffp: Path,
     results_dir: Path,
     IMs: List[str] = None,
+    n_stations: int = 20,
 ):
     """
     Same as cmvn-sim but uses correlation
@@ -247,6 +271,7 @@ def sim_cmvn_ranking_emp_corr(
         sim_imdb_ffp,
         results_dir,
         IMs=IMs,
+        n_stations=n_stations,
     )
 
 
@@ -260,6 +285,7 @@ def run_sim_cmvn_ranking(
     results_dir: Path,
     corr_dir: Path = None,
     IMs: List[str] = None,
+    n_stations: int = 20,
 ):
     (
         output_dir := results_dir
@@ -295,12 +321,6 @@ def run_sim_cmvn_ranking(
     R = None
     if corr_dir is not None:
         R = sr.data.load_correlations(corr_dir)[rupture].to_im_dict()
-        # Load and convert to absolute values
-        # R = {
-        #     # cur_im: cur_R.abs()
-        #     cur_im: cur_R
-        #     for cur_im, cur_R in sr.data.load_correlations(corr_dir).items()
-        # }
 
     # Run the conditional MVN based ranking
     sr.conditional_MVN.run_conditional_mvn_ranking(
@@ -312,6 +332,7 @@ def run_sim_cmvn_ranking(
         obs_df,
         int_stations,
         R=R,
+        n_stations=n_stations,
     )
 
     # Save the meta data

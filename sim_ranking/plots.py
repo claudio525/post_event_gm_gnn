@@ -80,8 +80,7 @@ def plot_response_spectrum(
         obs_data.loc[pSA_keys].values.astype(float),
         c="r",
         linewidth=1.5,
-        # linewidth=1.2,
-        # label="Observed",
+        label="Observed",
     )
 
     # Best Simulation
@@ -90,8 +89,7 @@ def plot_response_spectrum(
         sim_data.loc[best_sim_id, pSA_keys].values.astype(float),
         c="k",
         linewidth=1.5,
-        # linewidth=1.2,
-        # label="Simulation",
+        label="Simulation",
     )
 
     # Conditional MVN

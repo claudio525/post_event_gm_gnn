@@ -193,7 +193,6 @@ def plot_event_sites_example(
 ):
     """Creates a figure of Canterbury showing
     all historic events"""
-    import pygmt
     from pygmt_helper import plotting
 
     event_df = pd.read_csv(events_ffp, index_col="evid")
@@ -433,117 +432,119 @@ def sim_site_correlations(sim_corr_dir: Path, site_ffp: Path, ims: List[str], ev
         # plt.show()
         # print(f"wtf")
 
-@app.command("correlation-period")
-def correlation_period(
-    sim_corr_dir: Path, event: str, station_ffp: Path, output_dir: Path
-):
-    """Plots the average correlation as a function period."""
-    sim_corrs = sr.data.load_correlations(sim_corr_dir)[event]
-
-    periods, pSA_keys = sr.utils.get_periods(sim_corrs.ims)
-
-    station_df = sr.data.load_ll_file(station_ffp)
-    dist_matrix = sh.im_dist.calculate_distance_matrix(sim_corrs.sites, station_df)
-
-    upper_mask = np.triu(sim_corrs.get_im_corrs(pSA_keys[0]), 1).astype(bool)
-
-    # Compute the average absolute correlation for each period
-    # across all site pairs
-    rho_avg = {}
-    rho_std = {}
-    for cur_im in pSA_keys:
-        cur_corrs = sim_corrs.get_im_corrs(cur_im)
-        rho_avg[cur_im] = np.mean(cur_corrs.values[upper_mask])
-        rho_std[cur_im] = np.std(cur_corrs.values[upper_mask])
-
-    rho_avg = pd.Series(rho_avg)
-    rho_std = pd.Series(rho_std)
-
-    # Compute the average absolute correlation for different distance bins
-    distance_bins = np.array([0, 10, 30, 80, 150])
-    dist_rho_avg = {i: {} for i in range(len(distance_bins) - 1)}
-    dist_rho_std = {i: {} for i in range(len(distance_bins) - 1)}
-    dist_emp_corr = {i: {} for i in range(len(distance_bins) - 1)}
-    for i in range(len(distance_bins) - 1):
-
-        cur_dist_mask = (dist_matrix >= distance_bins[i]) & (
-            dist_matrix < distance_bins[i + 1]
-        )
-        cur_mask = cur_dist_mask & upper_mask
-
-        for cur_im in pSA_keys:
-            cur_corrs = sim_corrs.get_im_corrs(cur_im)
-            dist_rho_avg[i][cur_im] = np.mean(cur_corrs.values[cur_mask])
-            dist_rho_std[i][cur_im] = np.std(cur_corrs.values[cur_mask])
-            dist_emp_corr[i][cur_im] = sha.loth_baker_corr_model.get_correlations(
-                cur_im, cur_im, np.asarray([np.mean(distance_bins[i : i + 2])])
-            )[0]
-
-    dist_rho_avg = pd.DataFrame(dist_rho_avg)
-    dist_rho_std = pd.DataFrame(dist_rho_std)
-    dist_emp_corr = pd.DataFrame(dist_emp_corr)
-
-    fig = plt.figure(figsize=(8, 6))
-
-    c = ["maroon", "red", "blue", "magenta"]
-    for i in range(len(distance_bins) - 1):
-        plt.semilogx(
-            periods,
-            dist_emp_corr.loc[:, i],
-            label=f"Loth & Baker (2013)" if i == 0 else None,
-            c=c[i],
-            linewidth=1.0,
-            linestyle="--",
-        )
-        plt.semilogx(
-            periods,
-            dist_rho_avg.loc[:, i],
-            label=f"{distance_bins[i]}-{distance_bins[i + 1]} km",
-            c=c[i],
-            linewidth=1.0,
-        )
-
-    plt.semilogx(periods, rho_avg, label="All site pairs", c="k", linewidth=1.0)
-
-    # plt.title(f"Average Absolute Correlation vs Period")
-    plt.xlabel(f"Period (s)")
-    plt.ylabel(f"Average Absolute Correlation")
-    plt.xlim(periods.min(), periods.max())
-    plt.ylim(-0.6, 0.6)
-    plt.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
-    plt.legend()
-
-    plt.tight_layout()
-    plt.savefig(
-        output_dir / f"{event}_average_correlation_vs_period.{sr.constants.FIG_FORMAT}"
-    )
-
-    # Standard deviation plot
-    fig = plt.figure(figsize=(8, 6))
-
-    for i in range(len(distance_bins) - 1):
-        plt.semilogx(
-            periods,
-            dist_rho_std.loc[:, i],
-            label=f"{distance_bins[i]}-{distance_bins[i + 1]} km",
-            c=c[i],
-            linewidth=1.0,
-        )
-
-    plt.semilogx(periods, rho_std, label="All site pairs", c="k", linewidth=1.0)
-
-    plt.xlabel(f"Period (s)")
-    plt.ylabel(f"Standard Deviation Of Absolute Correlation")
-    plt.xlim(periods.min(), periods.max())
-    plt.ylim(0, 0.3)
-    plt.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
-    plt.legend()
-
-    plt.tight_layout()
-    plt.savefig(
-        output_dir / f"{event}_std_correlation_vs_period.{sr.constants.FIG_FORMAT}"
-    )
 
 
 if __name__ == "__main__":
     app()
+
+
+# @app.command("correlation-period")
+# def correlation_period(
+#     sim_corr_dir: Path, event: str, station_ffp: Path, output_dir: Path
+# ):
+#     """Plots the average correlation as a function period."""
+#     sim_corrs = sr.data.load_correlations(sim_corr_dir)[event]
+#
+#     periods, pSA_keys = sr.utils.get_periods(sim_corrs.ims)
+#
+#     station_df = sr.data.load_ll_file(station_ffp)
+#     dist_matrix = sh.im_dist.calculate_distance_matrix(sim_corrs.sites, station_df)
+#
+#     upper_mask = np.triu(sim_corrs.get_im_corrs(pSA_keys[0]), 1).astype(bool)
+#
+#     # Compute the average absolute correlation for each period
+#     # across all site pairs
+#     rho_avg = {}
+#     rho_std = {}
+#     for cur_im in pSA_keys:
+#         cur_corrs = sim_corrs.get_im_corrs(cur_im)
+#         rho_avg[cur_im] = np.mean(cur_corrs.values[upper_mask])
+#         rho_std[cur_im] = np.std(cur_corrs.values[upper_mask])
+#
+#     rho_avg = pd.Series(rho_avg)
+#     rho_std = pd.Series(rho_std)
+#
+#     # Compute the average absolute correlation for different distance bins
+#     distance_bins = np.array([0, 10, 30, 80, 150])
+#     dist_rho_avg = {i: {} for i in range(len(distance_bins) - 1)}
+#     dist_rho_std = {i: {} for i in range(len(distance_bins) - 1)}
+#     dist_emp_corr = {i: {} for i in range(len(distance_bins) - 1)}
+#     for i in range(len(distance_bins) - 1):
+#
+#         cur_dist_mask = (dist_matrix >= distance_bins[i]) & (
+#             dist_matrix < distance_bins[i + 1]
+#         )
+#         cur_mask = cur_dist_mask & upper_mask
+#
+#         for cur_im in pSA_keys:
+#             cur_corrs = sim_corrs.get_im_corrs(cur_im)
+#             dist_rho_avg[i][cur_im] = np.mean(cur_corrs.values[cur_mask])
+#             dist_rho_std[i][cur_im] = np.std(cur_corrs.values[cur_mask])
+#             dist_emp_corr[i][cur_im] = sha.loth_baker_corr_model.get_correlations(
+#                 cur_im, cur_im, np.asarray([np.mean(distance_bins[i : i + 2])])
+#             )[0]
+#
+#     dist_rho_avg = pd.DataFrame(dist_rho_avg)
+#     dist_rho_std = pd.DataFrame(dist_rho_std)
+#     dist_emp_corr = pd.DataFrame(dist_emp_corr)
+#
+#     fig = plt.figure(figsize=(8, 6))
+#
+#     c = ["maroon", "red", "blue", "magenta"]
+#     for i in range(len(distance_bins) - 1):
+#         plt.semilogx(
+#             periods,
+#             dist_emp_corr.loc[:, i],
+#             label=f"Loth & Baker (2013)" if i == 0 else None,
+#             c=c[i],
+#             linewidth=1.0,
+#             linestyle="--",
+#         )
+#         plt.semilogx(
+#             periods,
+#             dist_rho_avg.loc[:, i],
+#             label=f"{distance_bins[i]}-{distance_bins[i + 1]} km",
+#             c=c[i],
+#             linewidth=1.0,
+#         )
+#
+#     plt.semilogx(periods, rho_avg, label="All site pairs", c="k", linewidth=1.0)
+#
+#     # plt.title(f"Average Absolute Correlation vs Period")
+#     plt.xlabel(f"Period (s)")
+#     plt.ylabel(f"Average Absolute Correlation")
+#     plt.xlim(periods.min(), periods.max())
+#     plt.ylim(-0.6, 0.6)
+#     plt.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+#     plt.legend()
+#
+#     plt.tight_layout()
+#     plt.savefig(
+#         output_dir / f"{event}_average_correlation_vs_period.{sr.constants.FIG_FORMAT}"
+#     )
+#
+#     # Standard deviation plot
+#     fig = plt.figure(figsize=(8, 6))
+#
+#     for i in range(len(distance_bins) - 1):
+#         plt.semilogx(
+#             periods,
+#             dist_rho_std.loc[:, i],
+#             label=f"{distance_bins[i]}-{distance_bins[i + 1]} km",
+#             c=c[i],
+#             linewidth=1.0,
+#         )
+#
+#     plt.semilogx(periods, rho_std, label="All site pairs", c="k", linewidth=1.0)
+#
+#     plt.xlabel(f"Period (s)")
+#     plt.ylabel(f"Standard Deviation Of Absolute Correlation")
+#     plt.xlim(periods.min(), periods.max())
+#     plt.ylim(0, 0.3)
+#     plt.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+#     plt.legend()
+#
+#     plt.tight_layout()
+#     plt.savefig(
+#         output_dir / f"{event}_std_correlation_vs_period.{sr.constants.FIG_FORMAT}"
+#     )

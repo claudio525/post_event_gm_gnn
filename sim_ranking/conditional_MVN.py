@@ -40,12 +40,45 @@ def run_conditional_mvn_ranking(
     stations_df: pd.DataFrame,
     IMs: Sequence[str],
     gm_params_df: pd.DataFrame,
-    sim_data,
+    sim_data: Dict,
     obs_df: pd.DataFrame,
     int_stations: np.ndarray,
     R: Dict[str, pd.DataFrame] = None,
-
+    n_stations: int = 20,
 ):
+    """
+    Computes the conditional IM distributions
+
+    Parameters
+    ----------
+    output_dir: Path
+    stations_df: DataFrame
+    IMs: sequence of strings
+    gm_params_df: DataFrame
+        The unconditional GM parameters, must have
+        the columns for each IM:
+            IM_mean, IM_std_Total, IM_std_Inter, IM_std_Intra
+    sim_data: dict
+        The IM values for the simulation realisations
+        Dictionary with site as key and dataframe as value
+    obs_df: DataFrame
+        Observed IM values at the GM recording stations
+    int_stations: array of strings
+        Sites for which to perform cMVN ranking
+        Can include observation sites in which case
+        the observation data of that station is ignored
+        during calculation
+    R: dict of DataFrames, optional
+        The within-event spatial correlation matrices
+        for each IM
+    n_stations: int, optional
+        The number of observation stations to use for
+        the calculation of the conditional IM distributions
+
+    Returns
+    -------
+    ConditionalMVNDistribution
+    """
     # Compute the conditional MVN distributions for each IM
     IMs_str = IMs
     IMs = [gc.im.IM.from_str(cur_im) for cur_im in IMs]
@@ -57,6 +90,7 @@ def run_conditional_mvn_ranking(
         stations_df,
         int_stations,
         R=R,
+        n_stations=n_stations,
     )
 
     # Compute the misfit for each site of interest
@@ -101,6 +135,7 @@ def compute_cond_MVN_distributions(
     stations_df: pd.DataFrame,
     int_stations: np.ndarray,
     R: Dict[str, pd.DataFrame] = None,
+    n_stations: int = 20,
 ):
     # Sanity checks
     assert np.unique(obs_df["evid"]).size == 1
@@ -140,7 +175,7 @@ def compute_cond_MVN_distributions(
             cur_gmm_params_df,
             np.log(obs_df[str(cur_im)]),
             hypo_loc,
-            obs_site_filter_fn=sh.im_dist.get_obs_site_filter_fn(),
+            obs_site_filter_fn=sh.im_dist.get_nn_obs_site_filter_fn(n_stations),
             R=R[str(cur_im)] if R is not None else None,
             allow_obs_sites=True,
         )
