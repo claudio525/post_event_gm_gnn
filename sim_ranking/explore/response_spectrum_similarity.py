@@ -25,7 +25,7 @@ site_ffp = Path("/Users/claudy/dev/work/data/gm_datasets/nz_gmdb/v3.0/Tables/sit
 site_df =pd.read_csv(site_ffp, index_col="sta", low_memory=False, usecols=["sta", "lat", "lon"])
 
 simulation_ffp=  Path("/Users/claudy/dev/work/data/sim_ranking/sim_im_data/simulations.imdb")
-sim_data = sr.data.load_sim_data(simulation_ffp, include_event=True)
+sim_data = sr.data.load_sim_data(simulation_ffp)
 sites = list(sim_data.keys())
 events = sim_data[sites[0]].index.get_level_values(0).unique().values.astype(str)
 
