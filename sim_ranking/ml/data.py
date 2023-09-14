@@ -1,5 +1,4 @@
-import time
-from typing import Dict, Sequence, List
+from typing import Dict, Sequence
 
 import numpy as np
 import pandas as pd
@@ -46,6 +45,8 @@ def compute_site_combinations(
     return site_combs, used_sites
 
 
+
+
 class ResponseSpectrumDataset(Dataset):
     def __init__(
         self,
@@ -59,20 +60,22 @@ class ResponseSpectrumDataset(Dataset):
         periods: np.ndarray,
         pSA_keys: np.ndarray,
         dist_matrix: pd.DataFrame,
-        device: str,
+        site_features: Sequence[str],
         max_dist: float = 100,
         sim_score_fn=ss.similiarity_score,
     ):
-        self.device = device
         self.sim_score_fn = sim_score_fn
         self.sites = sites
         self.site_combs = site_combs
         self.events = events
         self.rels = rels
         self.dist_matrix = dist_matrix
+        self.site_features = site_features
 
         self.all_sites = dist_matrix.index.values.astype(str)
-        self.all_sites_ix_lookup = {cur_site: ix for ix, cur_site in enumerate(self.all_sites)}
+        self.all_sites_ix_lookup = {
+            cur_site: ix for ix, cur_site in enumerate(self.all_sites)
+        }
 
         # Some sanity checking
         for cur_event in sites.keys():
@@ -108,18 +111,22 @@ class ResponseSpectrumDataset(Dataset):
         }
 
         # Normalise the station data
-        self.site_features = ["vs30", "Z_1.0", "Z_2.5"]
         self.station_df = station_df.copy()
-        self.station_df["vs30"] = (
-            self.station_df["vs30"] - self.station_df["vs30"].mean()
-        ) / self.station_df["vs30"].std()
-        self.station_df["Z_1.0"] = (
-            self.station_df["Z_1.0"] - self.station_df["Z_1.0"].mean()
-        ) / self.station_df["Z_1.0"].std()
-        self.station_df["Z_2.5"] = (
-            self.station_df["Z_2.5"] - self.station_df["Z_2.5"].mean()
-        ) / self.station_df["Z_2.5"].std()
         self.station_df = self.station_df.loc[:, self.site_features]
+
+        # Ensure pre-processing has been applied
+        assert all(
+            [
+                np.isclose(self.station_df[cur_feature].mean(), 0)
+                for cur_feature in self.site_features
+            ]
+        )
+        assert all(
+            [
+                np.isclose(self.station_df[cur_feature].std(), 1)
+                for cur_feature in self.site_features
+            ]
+        )
 
         # Scale the (used) site-to-site distances
         # such that they are between -1 and 1
@@ -135,11 +142,11 @@ class ResponseSpectrumDataset(Dataset):
         )
         n_site_features = len(self.site_features)
         for i, site_i in enumerate(self.all_sites):
-            cur_vals = self.station_df.loc[
-                site_i, self.site_features
-            ]
+            cur_vals = self.station_df.loc[site_i, self.site_features]
             self.feature_tensor[i, :, : len(self.site_features)] = cur_vals
-            self.feature_tensor[:, i, n_site_features:n_site_features+n_site_features] = cur_vals
+            self.feature_tensor[
+                :, i, n_site_features : n_site_features + n_site_features
+            ] = cur_vals
         self.feature_tensor[:, :, -1] = self.scaled_dist_matrix.values
 
         # Organize the sim response spectra such that it is
@@ -164,9 +171,11 @@ class ResponseSpectrumDataset(Dataset):
         for cur_event in self.events:
             cur_event_scores = []
             for i, site_i in enumerate(self.sites[cur_event]):
-                site_int_obs = self.obs_im_data[cur_event].loc[site_i, :].values.astype(float)
+                site_int_obs = (
+                    self.obs_im_data[cur_event].loc[site_i, :].values.astype(float)
+                )
                 site_int_sim = self.sim_im_data[cur_event][:, :, i]
-                cur_sim_scores = ss.similiarity_score_t(site_int_obs, site_int_sim)
+                cur_sim_scores = ss.similiarity_score(site_int_obs, site_int_sim)
 
                 cur_event_scores.append(cur_sim_scores)
 
@@ -183,61 +192,53 @@ class ResponseSpectrumDataset(Dataset):
     def n_samples(self):
         return self._cum_n_samples[-1]
 
-    def __len__(self):
-        return self.n_samples
-
-    def __getitem__(self, idx: int):
-        # Break the index down
-        # print(f"---------------------------")
-        # start_time = time.perf_counter()
-        event_ix = np.argmin(idx // self._cum_n_samples)
-        site_ix = (idx % self._cum_n_samples[max(event_ix - 1, 0)]) // self.n_rels_used
-        rel_ix = idx % self.n_rels_used
-        # print(f"Took {time.perf_counter() - start_time} to do index stuff")
+    def get_metadata(self, idx: int):
+        """Get the metadata for a specific sample"""
+        event_ix, site_ix, rel_ix = self.get_indices(idx)
 
         # Get the site of interest and observation site
-        # start_time = time.perf_counter()
         event = self.events[event_ix]
         site_int_ix = self.site_combs[event][site_ix, 0]
         site_obs_ix = self.site_combs[event][site_ix, 1]
 
         site_int = self.sites[event][site_int_ix]
         site_obs = self.sites[event][site_obs_ix]
-        # print(f"Took {time.perf_counter() - start_time} to do site stuff")
+        rel = self.rels[event][rel_ix]
 
-        # site_int = self.all_sites[site_int_ix]
-        # site_obs = self.all_sites[site_obs_ix]
+        return event, rel, site_int, site_obs,
+
+    def __len__(self):
+        return self.n_samples
+
+    def get_indices(self, idx: int):
+        event_ix = np.argmin(idx // self._cum_n_samples)
+        site_ix = (idx % self._cum_n_samples[max(event_ix - 1, 0)]) // self.n_rels_used
+        rel_ix = idx % self.n_rels_used
+
+        return event_ix, site_ix, rel_ix
+
+    def __getitem__(self, idx: int):
+        # Break the index down
+        event_ix, site_ix, rel_ix = self.get_indices(idx)
+
+        # Get the site of interest and observation site
+        event = self.events[event_ix]
+        site_int_ix = self.site_combs[event][site_ix, 0]
+        site_obs_ix = self.site_combs[event][site_ix, 1]
+
+        site_int = self.sites[event][site_int_ix]
+        site_obs = self.sites[event][site_obs_ix]
 
         # Features
-        # start_time = time.perf_counter()
         site_int_sim = self.sim_im_data[event][rel_ix, :, site_int_ix]
         site_obs_sim = self.sim_im_data[event][rel_ix, :, site_obs_ix]
         site_obs_obs = self.obs_im_data[event].loc[site_obs].values.astype(float)
-        # print(f"Took {time.perf_counter() - start_time} to get IMs")
 
-        # start_time = time.perf_counter()
-        # site_features = np.concatenate(
-        #     (
-        #         # self.station_df.loc[[site_int, site_obs], :].values.ravel(),
-        #         self.station_df.loc[site_int, :].values,
-        #         self.station_df.loc[site_obs, :].values,
-        #         [self.scaled_dist_matrix.loc[site_int, site_obs]],
-        #     )
-        # )
-        # print(f"Took {time.perf_counter() - start_time} to concatenate features")
-
-        # start_time = time.time()
         site_int_all_ix = self.all_sites_ix_lookup[site_int]
         site_obs_all_ix = self.all_sites_ix_lookup[site_obs]
         site_features = self.feature_tensor[site_int_all_ix, site_obs_all_ix, :]
-        # print(f"Took {time.time() - start_time} to get features 2")
 
         # Labels
-        # start_time = time.perf_counter()
-        # site_int_obs = self.obs_im_data[event].loc[site_int, :].values.astype(float)
-        # sim_score = self.sim_score_fn(site_int_obs, site_int_sim)
-        # print(f"Took {time.perf_counter() - start_time} to get labels")
-
         sim_score = self.sim_score[event][rel_ix, site_int_ix]
 
         return (
@@ -248,3 +249,43 @@ class ResponseSpectrumDataset(Dataset):
             sim_score,
             self.dist_matrix.iat[site_int_all_ix, site_obs_all_ix],
         )
+
+
+def preprocess_site_features(
+    station_df: pd.DataFrame, site_features: Sequence[str], stats: pd.DataFrame = None
+):
+    """Performs normalisation pre-processing of the site features"""
+    station_df = station_df.copy()
+    stats_comp = {}
+    for cur_feature in site_features:
+        if stats is None:
+            cur_mean, cur_std = (
+                station_df[cur_feature].mean(),
+                station_df[cur_feature].std(),
+            )
+            stats_comp[cur_feature] = {"mean": cur_mean, "std": cur_std}
+            station_df[cur_feature] = (station_df[cur_feature] - cur_mean) / cur_std
+        # Use given statistics
+        else:
+            station_df[cur_feature] = (
+                station_df[cur_feature] - stats.loc[cur_feature, "mean"]
+            ) / stats.loc[cur_feature, "std"]
+
+    if stats is None:
+        return station_df, pd.DataFrame(stats_comp)
+    return station_df
+
+
+class MetaDataDataset(Dataset):
+    def __init__(self, main_dataset: ResponseSpectrumDataset):
+        self.main_dataset = main_dataset
+
+        self.sites = main_dataset.sites
+        self.site_combs = main_dataset.site_combs
+        self.events = main_dataset.events
+
+    def __len__(self):
+        return self.main_dataset.n_samples
+
+    def __getitem__(self, idx):
+        return self.main_dataset.get_metadata(idx)

@@ -185,7 +185,6 @@ def draw_waveforms(
 
     Note: len(acc_data) == len(time_data) == len(colors)
 
-
     Parameters
     ----------
     fig: Figure
@@ -343,3 +342,5 @@ def draw_marginal(
         linewidth=1.0,
         linestyle="--",
     )
+
+
