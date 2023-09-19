@@ -1,10 +1,96 @@
+import time
+from pathlib import Path
 from typing import Dict, Sequence
+import multiprocessing as mp
 
 import numpy as np
 import pandas as pd
 
 from torch.utils.data import Dataset
 from . import similarity_score as ss
+from .. import data
+
+
+# def __process_event(cur_event: str, obs_df: pd.DataFrame, sim_imdb_ffp: Path, n_rels: int = None):
+#     # Load the observed IM data
+#     print(f"---------------------------------------")
+#     start_time = time.time()
+#     cur_obs_data = data.get_obs_rupture_data(obs_df, cur_event)
+#     print(f"Took {time.time() - start_time} to load observation data")
+#
+#     # Ensure we have observed data
+#     assert cur_obs_data.shape[0] > 0, f"No observation data for event {cur_event}"
+#
+#     # Load the simulation IM data
+#     start_time = time.time()
+#     cur_sim_data = data.load_sim_data(
+#         sim_imdb_ffp, cur_obs_data.index.values, event=cur_event
+#     )
+#     print(f"Took {time.time() - start_time} to load simulation data")
+#     if len(cur_sim_data) == 0:
+#         print(
+#             f"No overlapping simulation and observation data for event {cur_event}. Skipping!")
+#         return None, None, None, None
+#
+#     start_time = time.time()
+#     sim_sites = np.asarray(list(cur_sim_data.keys()))
+#     obs_sites = np.asarray(list(cur_obs_data.index.values.astype(str)))
+#     cur_sites = obs_sites[np.isin(obs_sites, sim_sites)]
+#     print(f"Took {time.time() - start_time} to find overlapping sites")
+#
+#     start_time = time.time()
+#     cur_obs_data = cur_obs_data.loc[cur_sites]
+#
+#     cur_rels = cur_sim_data[cur_sites[0]].index.values.astype(str)
+#     if len(cur_rels) > 1 and n_rels is not None:
+#         cur_rels = np.random.choice(
+#             cur_rels,
+#             size=n_rels,
+#             replace=False,
+#         )
+#     print(f"Took {time.time() - start_time} to do other")
+#
+#     return cur_obs_data, cur_sim_data, cur_rels, cur_sites
+
+def get_sim_obs_data_dicts(obs_df: pd.DataFrame, sim_im_dir: Path, events: Sequence[str], n_rels: int = None, n_procs: int = 4):
+    obs_im_data, sim_im_data = {}, {}
+    rels, event_sites = {}, {}
+    for i, cur_event in enumerate(events):
+        # Load the observed IM data
+        print(f"---------------------------------------")
+        cur_obs_data = data.get_obs_rupture_data(obs_df, cur_event)
+
+        # Ensure we have observed data
+        assert cur_obs_data.shape[0] > 0, f"No observation data for event {cur_event}"
+
+        # Load the simulation IM data
+        # cur_sim_data = pd.read_csv(sim_im_dir / f"{cur_event}.csv", index_col=0)
+
+
+        cur_sim_data = data.load_site_sim_data(
+            sim_im_dir, cur_obs_data.index.values, event=cur_event
+        )
+        if len(cur_sim_data) == 0:
+            print(
+                f"No overlapping simulation and observation data for event {cur_event}. Skipping!")
+            return None, None, None, None
+
+        sim_sites = np.asarray(list(cur_sim_data.keys()))
+        obs_sites = np.asarray(list(cur_obs_data.index.values.astype(str)))
+        cur_sites = obs_sites[np.isin(obs_sites, sim_sites)]
+
+        cur_obs_data = cur_obs_data.loc[cur_sites]
+
+        cur_rels = cur_sim_data[cur_sites[0]].index.values.astype(str)
+        if len(cur_rels) > 1 and n_rels is not None:
+            cur_rels = np.random.choice(
+                cur_rels,
+                size=n_rels,
+                replace=False,
+            )
+
+        print(f"wtf")
+
 
 
 def compute_site_combinations(
@@ -289,3 +375,5 @@ class MetaDataDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.main_dataset.get_metadata(idx)
+
+

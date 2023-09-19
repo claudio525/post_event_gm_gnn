@@ -418,7 +418,7 @@ def compute_sim_gm_params_total(simulation_imdb_ffp: Path):
     Does not use MERA, i.e. uses total residual only
     """
     # Get the simulation data
-    sim_data = load_sim_data(simulation_imdb_ffp)
+    sim_data = load_site_sim_data(simulation_imdb_ffp)
 
     sites = list(sim_data.keys())
     events = np.unique(sim_data[sites[0]].index.get_level_values(0))
@@ -507,7 +507,7 @@ def compute_sim_gm_params_mera(simulation_imdb_ffp: Path):
     from mera.mera_pymer4 import run_mera
 
     # Get the simulation data
-    sim_data = load_sim_data(simulation_imdb_ffp)
+    sim_data = load_site_sim_data(simulation_imdb_ffp)
 
     sites = list(sim_data.keys())
     events = np.unique(sim_data[sites[0]].index.get_level_values(0))
@@ -608,7 +608,7 @@ def compute_sim_gm_params_mera(simulation_imdb_ffp: Path):
     return results
 
 
-def load_sim_data(sim_imdb_ffp: Path, sites: Sequence[str] = None, event: str = None):
+def load_site_sim_data(sim_imdb_ffp: Path, sites: Sequence[str] = None, event: str = None):
     """Loads the simulation IM values for the specified sites"""
     sim_data = {}
     with gc.dbs.IMDB.get_imdb(str(sim_imdb_ffp)) as db:
@@ -627,19 +627,20 @@ def load_sim_data(sim_imdb_ffp: Path, sites: Sequence[str] = None, event: str = 
 
     return sim_data
 
-
 def load_avail_sim_events(sim_imdb_ffp: Path):
     """Loads the available simulations in the specified IMDB"""
     with gc.dbs.IMDB.get_imdb(str(sim_imdb_ffp)) as db:
         return db.rupture_names()
 
+def load_obs_data(obs_ffp: Path):
+    """Loads the observation data from the NZ-GMDB IM flat file"""
+    return pd.read_csv(obs_ffp, index_col=0, low_memory=False, dtype={"evid": str})
 
-def load_obs_rupture_data(obs_data_ffp: Path, rupture: str):
+def get_obs_rupture_data(obs_df: pd.DataFrame, rupture: str):
     """
     Loads the observation data for the specified
     data from the NZ-GMDB IM flat file
     """
-    obs_df = pd.read_csv(obs_data_ffp, index_col=0, low_memory=False)
     obs_df = obs_df.loc[obs_df.evid == rupture]
     obs_df = obs_df.set_index("sta").sort_index()
 

@@ -4,3 +4,4 @@ from . import data
 from . import conditional_MVN
 from . import constants
 from . import plots
+from . import db

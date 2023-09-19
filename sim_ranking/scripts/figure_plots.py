@@ -70,7 +70,7 @@ def plot_perturbed_response_spectrum(
     sim_imdb_ffp: Path, site: str, n_rels: int, output_ffp: Path
 ):
     # Load Simulation data
-    sim_df = sr.data.load_sim_data(sim_imdb_ffp, [site])[site]
+    sim_df = sr.data.load_site_sim_data(sim_imdb_ffp, [site])[site]
 
     # Select realisations
     rel_ids = np.random.choice(sim_df.index.values.astype(str), n_rels, replace=False)

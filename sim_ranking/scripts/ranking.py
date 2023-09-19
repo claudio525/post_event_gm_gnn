@@ -118,7 +118,7 @@ def run_emp_cmvn_ranking(
     int_stations = obs_df.index.values.astype(str)
 
     # Load the simulation IM data
-    sim_data = sr.data.load_sim_data(sim_imdb_ffp, sites=int_stations, event=rupture)
+    sim_data = sr.data.load_site_sim_data(sim_imdb_ffp, sites=int_stations, event=rupture)
 
     # Run the conditional MVN based ranking
     sr.conditional_MVN.run_conditional_mvn_ranking(
@@ -308,7 +308,7 @@ def run_sim_cmvn_ranking(
     int_stations = obs_df.index.values.astype(str)
 
     # Load the simulation IM data
-    sim_data = sr.data.load_sim_data(sim_imdb_ffp, sites=int_stations, event=rupture)
+    sim_data = sr.data.load_site_sim_data(sim_imdb_ffp, sites=int_stations, event=rupture)
 
     # IMs to use for ranking
     IMs = (

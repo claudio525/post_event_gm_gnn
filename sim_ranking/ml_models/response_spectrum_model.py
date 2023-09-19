@@ -37,7 +37,11 @@ def custom_loss(output, target, distance):
 
 
 def get_dataset_predictions(
-    train_dataset: sr.ml.data.MetaDataDataset, train_meta_dataset: sr.ml.data.ResponseSpectrumDataset, model: nn.Module, device: str):
+    train_dataset: sr.ml.data.MetaDataDataset,
+    train_meta_dataset: sr.ml.data.ResponseSpectrumDataset,
+    model: nn.Module,
+    device: str,
+):
     pred_train_meta_dataloader = DataLoader(
         train_meta_dataset, shuffle=False, batch_size=4096, num_workers=0
     )
@@ -57,15 +61,15 @@ def get_dataset_predictions(
         "distance": [],
     }
     for i, (
-            (
-                    rs_int_sim,
-                    rs_obs_sim,
-                    rs_obs_obs,
-                    site_features,
-                    sim_score,
-                    distance,
-            ),
-            (event, rel, site_int, site_obs),
+        (
+            rs_int_sim,
+            rs_obs_sim,
+            rs_obs_obs,
+            site_features,
+            sim_score,
+            distance,
+        ),
+        (event, rel, site_int, site_obs),
     ) in enumerate(zip(pred_train_dataloader, pred_train_meta_dataloader)):
         # Forward pass
         pred = _get_prediction(
@@ -103,6 +107,7 @@ def get_dataset_predictions(
     results_df = pd.DataFrame(results).set_index("index", drop=True)
 
     return results_df
+
 
 def _get_prediction(
     rs_int_sim, rs_obs_sim, rs_obs_obs, site_features, model: nn.Module, device: str
@@ -219,11 +224,22 @@ if __name__ == "__main__":
     np.random.seed(42)
 
     sim_imdb_ffp_orig = "$wdata/sim_ranking/sim_im_data/simulations.imdb"
+    # sim_imdb_ffp_orig = "$wdata/sim_ranking/sim_im_data/lee_val_dataset/simulations.imdb"
     sim_imdb_ffp = Path(os.path.expandvars(sim_imdb_ffp_orig))
+
+    sim_im_dir_orig = "$wdata/sim_ranking/sim_im_data/lee_val_dataset/raw_im_data"
+    sim_im_dir = Path(os.path.expandvars(sim_im_dir_orig))
+
+    # sim_imdb_lee_ffp_orig = (
+    #     "$wdata/sim_ranking/sim_im_data/lee_val_dataset/simulations.imdb"
+    # )
+    # sim_imdb_lee_ffp = Path(os.path.expandvars(sim_imdb_lee_ffp_orig))
+
     obs_ffp_orig = (
         "$wdata/gm_datasets/nz_gmdb/v3.0/Tables/ground_motion_im_table_rotd50_flat.csv"
     )
     obs_ffp = Path(os.path.expandvars(obs_ffp_orig))
+
     sites_dir_orig = "$wdata/gm_hazard/sites/23p1"
     sites_dir = Path(os.path.expandvars("$wdata/gm_hazard/sites/23p1"))
 
@@ -247,35 +263,19 @@ if __name__ == "__main__":
     station_df = pd.concat([station_df, vs30_df, z_df], axis=1)
     station_df = station_df.rename(columns={"Z_1.0(km)": "Z_1.0", "Z_2.5(km)": "Z_2.5"})
 
+    # Load the observed data
+    obs_df = sr.data.load_obs_data(obs_ffp)
+
     # Load the available events
     events = sr.data.load_avail_sim_events(sim_imdb_ffp)
+    events = np.intersect1d(events, obs_df.evid.values.astype(str))
+    print(f"Number of events: {len(events)}")
 
     # Load the IM data for each event
     print(f"Loading IM data")
-    obs_im_data, sim_im_data = {}, {}
-    rels, event_sites = {}, {}
-    for i, cur_event in enumerate(events):
-        # Load the observed IM data
-        cur_obs_data = sr.data.load_obs_rupture_data(obs_ffp, cur_event)
-
-        # Load the simulation IM data
-        cur_sim_data = sr.data.load_sim_data(
-            sim_imdb_ffp, cur_obs_data.index.values, event=cur_event
-        )
-
-        sim_sites = np.asarray(list(cur_sim_data.keys()))
-        obs_sites = np.asarray(list(cur_obs_data.index.values.astype(str)))
-        cur_sites = obs_sites[np.isin(obs_sites, sim_sites)]
-
-        sim_im_data[cur_event] = cur_sim_data
-        obs_im_data[cur_event] = cur_obs_data.loc[cur_sites]
-
-        rels[cur_event] = np.random.choice(
-            cur_sim_data[cur_sites[0]].index.values.astype(str),
-            size=N_RELS_USED,
-            replace=False,
-        )
-        event_sites[cur_event] = cur_sites
+    obs_im_data, sim_im_data, rels, event_sites = sr.ml.data.get_sim_obs_data_dicts(
+        obs_df, sim_imdb_ffp, events, n_rels=N_RELS_USED, n_procs=8
+    )
 
     # Get all relevant sites across all events
     all_sites = np.unique(np.concatenate(list(event_sites.values())))
@@ -402,9 +402,13 @@ if __name__ == "__main__":
     # Get predictions for the training and validation datasets
     print(f"Getting predictions")
     train_meta_dataset = sr.ml.data.MetaDataDataset(train_dataset)
-    train_results_df = get_dataset_predictions(train_dataset, train_meta_dataset, model, device)
+    train_results_df = get_dataset_predictions(
+        train_dataset, train_meta_dataset, model, device
+    )
     val_meta_dataset = sr.ml.data.MetaDataDataset(val_dataset)
-    val_results_df = get_dataset_predictions(val_dataset, val_meta_dataset, model, device)
+    val_results_df = get_dataset_predictions(
+        val_dataset, val_meta_dataset, model, device
+    )
 
     # Save the results
     print(f"Savings results")

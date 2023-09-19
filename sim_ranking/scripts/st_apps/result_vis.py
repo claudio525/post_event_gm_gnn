@@ -48,7 +48,7 @@ def _get_sim_data(results_dir: Path, sites: np.ndarray):
 
 @st.cache_data
 def _load_sim_data(sim_imdb_ffp: Path, sites: np.ndarray, event: str):
-    return sr.data.load_sim_data(sim_imdb_ffp, sites=sites, event=event)
+    return sr.data.load_site_sim_data(sim_imdb_ffp, sites=sites, event=event)
 
 
 def _get_sites(results_dir: Path):

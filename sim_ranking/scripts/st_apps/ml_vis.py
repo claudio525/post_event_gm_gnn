@@ -27,7 +27,9 @@ def _load_loss_history(results_dir: Path):
 
 @st.cache_data
 def _load_results(results_dir: Path):
-    train_results_df = pd.read_csv(results_dir / "train_results.csv", dtype=dict(event=str))
+    train_results_df = pd.read_csv(
+        results_dir / "train_results.csv", dtype=dict(event=str)
+    )
     val_results_df = pd.read_csv(results_dir / "val_results.csv", dtype=dict(event=str))
 
     return train_results_df, val_results_df
@@ -54,20 +56,36 @@ def plot_pred_vs_true(result_df: pd.DataFrame, ax: plt.Axes):
     ax.set_ylim(0, 1)
     ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
 
+
 def get_filtering_mask(results_df: pd.DataFrame, label: str):
     # Filtering
-    sel_events = st.multiselect("Events", results_df.event.unique().tolist(), key=f"{label}_events")
-    sel_sites = st.multiselect("Sites of Interest",
-                               results_df.site_int.unique().tolist(), key=f"{label}_sites")
+    sel_events = st.multiselect(
+        "Events", results_df.event.unique().tolist(), key=f"{label}_events"
+    )
+    sel_sites = st.multiselect(
+        "Sites of Interest", results_df.site_int.unique().tolist(), key=f"{label}_sites"
+    )
 
     col1, col2 = st.columns(2)
     with col1:
         min_distance = st.slider(
-            "Min Distance", 0, 100, value=0, step=1, format="%d km", key=f"{label}_min_distance"
+            "Min Distance",
+            0,
+            100,
+            value=0,
+            step=1,
+            format="%d km",
+            key=f"{label}_min_distance",
         )
     with col2:
         max_distance = st.slider(
-            "Max Distance", 0, 100, value=100, step=1, format="%d km", key=f"{label}_max_distance"
+            "Max Distance",
+            0,
+            100,
+            value=100,
+            step=1,
+            format="%d km",
+            key=f"{label}_max_distance",
         )
 
     m = np.ones(results_df.shape[0], dtype=bool)
@@ -81,6 +99,7 @@ def get_filtering_mask(results_df: pd.DataFrame, label: str):
         m = m & (results_df.distance.values <= max_distance)
 
     return m
+
 
 def run_general_tab(results_dir: Path):
     # Load the metadata
@@ -124,7 +143,6 @@ def run_general_tab(results_dir: Path):
         st.image(str(model_vis_ffp))
 
 
-
 def run_results_tab(results_dir: Path):
     # True vs Predicted plot
     train_results_df, val_results_df = _load_results(results_dir)
@@ -146,7 +164,6 @@ def run_results_tab(results_dir: Path):
         plot_pred_vs_true(val_results_df.loc[m], ax)
         fig.tight_layout()
         st.pyplot(fig, use_container_width=False)
-
 
 
 def main(results_dir: Path):
