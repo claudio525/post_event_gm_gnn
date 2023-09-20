@@ -207,7 +207,7 @@ def train(
 
 if __name__ == "__main__":
     ### CONFIG ###
-    N_RELS_USED = 10
+    N_RELS_USED = 5
     N_VAL_SITES = 10
 
     N_EPOCHS = 5
@@ -217,68 +217,78 @@ if __name__ == "__main__":
     RS_KERNEL_SIZES = [5, 3]
     FC_UNITS = [64, 32, 16]
 
-    SITE_FEATURES = ["vs30", "Z_1.0", "Z_2.5"]
+    SITE_FEATURES = ["vs30", "z1.0", "z2.5"]
     ### END CONFIG ###
 
     # Fixing the random seed
     np.random.seed(42)
 
-    sim_imdb_ffp_orig = "$wdata/sim_ranking/sim_im_data/simulations.imdb"
-    # sim_imdb_ffp_orig = "$wdata/sim_ranking/sim_im_data/lee_val_dataset/simulations.imdb"
-    sim_imdb_ffp = Path(os.path.expandvars(sim_imdb_ffp_orig))
+    db_ffp_orig = "$wdata/sim_ranking/db/gm_db.sqlite"
+    db_ffp = Path(os.path.expandvars(db_ffp_orig))
 
-    sim_im_dir_orig = "$wdata/sim_ranking/sim_im_data/lee_val_dataset/raw_im_data"
-    sim_im_dir = Path(os.path.expandvars(sim_im_dir_orig))
+    db = sr.db.DB(db_ffp)
+
+    # sim_imdb_ffp_orig = "$wdata/sim_ranking/sim_im_data/simulations.imdb"
+    # # sim_imdb_ffp_orig = "$wdata/sim_ranking/sim_im_data/lee_val_dataset/simulations.imdb"
+    # sim_imdb_ffp = Path(os.path.expandvars(sim_imdb_ffp_orig))
+    #
+    # sim_im_dir_orig = "$wdata/sim_ranking/sim_im_data/lee_val_dataset/raw_im_data"
+    # sim_im_dir = Path(os.path.expandvars(sim_im_dir_orig))
 
     # sim_imdb_lee_ffp_orig = (
     #     "$wdata/sim_ranking/sim_im_data/lee_val_dataset/simulations.imdb"
     # )
     # sim_imdb_lee_ffp = Path(os.path.expandvars(sim_imdb_lee_ffp_orig))
 
-    obs_ffp_orig = (
-        "$wdata/gm_datasets/nz_gmdb/v3.0/Tables/ground_motion_im_table_rotd50_flat.csv"
-    )
-    obs_ffp = Path(os.path.expandvars(obs_ffp_orig))
-
-    sites_dir_orig = "$wdata/gm_hazard/sites/23p1"
-    sites_dir = Path(os.path.expandvars("$wdata/gm_hazard/sites/23p1"))
+    # obs_ffp_orig = (
+    #     "$wdata/gm_datasets/nz_gmdb/v3.0/Tables/ground_motion_im_table_rotd50_flat.csv"
+    # )
+    # obs_ffp = Path(os.path.expandvars(obs_ffp_orig))
+    #
+    # sites_dir_orig = "$wdata/gm_hazard/sites/23p1"
+    # sites_dir = Path(os.path.expandvars("$wdata/gm_hazard/sites/23p1"))
 
     results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
 
     # Load the station data
-    station_df = sr.data.load_ll_file(
-        sites_dir / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.ll"
-    )
-    vs30_df = sr.data.load_vs30_file(
-        sites_dir / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.vs30"
-    )
-    z_df = pd.read_csv(
-        sites_dir / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.z",
-        index_col=0,
-    ).drop(columns=["sigma"])
+    # station_df = sr.data.load_ll_file(
+    #     sites_dir / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.ll"
+    # )
+    # vs30_df = sr.data.load_vs30_file(
+    #     sites_dir / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.vs30"
+    # )
+    # z_df = pd.read_csv(
+    #     sites_dir / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.z",
+    #     index_col=0,
+    # ).drop(columns=["sigma"])
 
-    assert np.all(station_df.index == vs30_df.index) and np.all(
-        station_df.index == z_df.index
-    )
-    station_df = pd.concat([station_df, vs30_df, z_df], axis=1)
-    station_df = station_df.rename(columns={"Z_1.0(km)": "Z_1.0", "Z_2.5(km)": "Z_2.5"})
+    # assert np.all(station_df.index == vs30_df.index) and np.all(
+    #     station_df.index == z_df.index
+    # )
+    # station_df = pd.concat([station_df, vs30_df, z_df], axis=1)
+    # station_df = station_df.rename(columns={"Z_1.0(km)": "Z_1.0", "Z_2.5(km)": "Z_2.5"})
+
+    station_df = db.get_site_data()
 
     # Load the observed data
-    obs_df = sr.data.load_obs_data(obs_ffp)
+    # obs_df = sr.data.load_obs_data(obs_ffp)
 
     # Load the available events
-    events = sr.data.load_avail_sim_events(sim_imdb_ffp)
-    events = np.intersect1d(events, obs_df.evid.values.astype(str))
+    # events = sr.data.load_avail_sim_events(sim_imdb_ffp)
+    # events = np.intersect1d(events, obs_df.evid.values.astype(str))
+
+    events = db.get_avail_events()
     print(f"Number of events: {len(events)}")
 
     # Load the IM data for each event
-    print(f"Loading IM data")
-    obs_im_data, sim_im_data, rels, event_sites = sr.ml.data.get_sim_obs_data_dicts(
-        obs_df, sim_imdb_ffp, events, n_rels=N_RELS_USED, n_procs=8
-    )
+    # print(f"Loading IM data")
+    # obs_im_data, sim_im_data, rels, event_sites = sr.ml.data.get_sim_obs_data_dicts(
+    #     obs_df, sim_imdb_ffp, events, n_rels=N_RELS_USED, n_procs=8
+    # )
 
     # Get all relevant sites across all events
-    all_sites = np.unique(np.concatenate(list(event_sites.values())))
+    # all_sites = np.unique(np.concatenate(list(event_sites.values())))
+    all_sites = db.get_avail_sites()
 
     # Compute the distance matrix
     print(f"Computing distance matrix")
@@ -286,12 +296,22 @@ if __name__ == "__main__":
 
     # Select one of the events for validation
     # val_events = np.random.choice(events, 1)
-    val_events = np.asarray(["2016p118944"])
-    train_events = events[np.isin(events, val_events, invert=True)]
+    # val_events = np.asarray(["2016p118944"])
+    # train_events = events[np.isin(events, val_events, invert=True)]
+    val_events = np.asarray(["3468575", "3528839"])
+    train_events = np.setdiff1d(events, val_events)
+
+    # Get the sites per event
+    event_sites = db.get_event_sites()
 
     # Select a subset of the stations (of the validation events) as the validation sites
+    # val_sites = np.random.choice(np.intersect1d() , N_VAL_SITES, replace=False)
     val_sites = np.random.choice(
-        np.concatenate([event_sites[cur_val_event] for cur_val_event in val_events]),
+        list(
+            set.intersection(
+                *[set(list(event_sites[cur_event])) for cur_event in val_events]
+            )
+        ),
         N_VAL_SITES,
         replace=False,
     )
@@ -307,9 +327,10 @@ if __name__ == "__main__":
     )
 
     # Get the periods and corresponding pSA keys
-    periods, pSA_keys = sr.utils.get_periods(
-        obs_im_data[events[0]].columns.values.astype(str)
-    )
+    # periods, pSA_keys = sr.utils.get_periods(
+    #     obs_im_data[events[0]].columns.values.astype(str)
+    # )
+    periods, pSA_keys = sr.constants.PERIODS, sr.constants.PERIOD_KEYS
 
     # Run pre-processing for the site features
     print(f"Pre-processing site features")
@@ -322,10 +343,8 @@ if __name__ == "__main__":
     train_dataset = sr.ml.data.ResponseSpectrumDataset(
         train_event_sites,
         train_site_combs,
-        train_events,
-        obs_im_data,
-        sim_im_data,
-        rels,
+        db,
+        N_RELS_USED,
         station_df_norm,
         periods,
         pSA_keys,
@@ -335,10 +354,8 @@ if __name__ == "__main__":
     val_dataset = sr.ml.data.ResponseSpectrumDataset(
         val_event_sites,
         val_site_combs,
-        val_events,
-        obs_im_data,
-        sim_im_data,
-        rels,
+        db,
+        N_RELS_USED,
         station_df_norm,
         periods,
         pSA_keys,
@@ -372,7 +389,7 @@ if __name__ == "__main__":
         RS_N_CHANNELS,
         padding,
         FC_UNITS,
-        periods.size,
+        len(periods),
         N_SCALAR_FEATURES,
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
@@ -437,9 +454,7 @@ if __name__ == "__main__":
             "best_epoch": best_epoch,
         },
         "data": {
-            "sim_imdb_ffp": str(sim_imdb_ffp_orig),
-            "obs_ffp": str(obs_ffp_orig),
-            "sites_dir": str(sites_dir_orig),
+            "db": str(db_ffp_orig),
         },
     }
     mlt.utils.write_to_yaml(meta_data, results_dir / "meta.yaml")

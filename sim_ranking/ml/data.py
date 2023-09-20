@@ -8,90 +8,7 @@ import pandas as pd
 
 from torch.utils.data import Dataset
 from . import similarity_score as ss
-from .. import data
-
-
-# def __process_event(cur_event: str, obs_df: pd.DataFrame, sim_imdb_ffp: Path, n_rels: int = None):
-#     # Load the observed IM data
-#     print(f"---------------------------------------")
-#     start_time = time.time()
-#     cur_obs_data = data.get_obs_rupture_data(obs_df, cur_event)
-#     print(f"Took {time.time() - start_time} to load observation data")
-#
-#     # Ensure we have observed data
-#     assert cur_obs_data.shape[0] > 0, f"No observation data for event {cur_event}"
-#
-#     # Load the simulation IM data
-#     start_time = time.time()
-#     cur_sim_data = data.load_sim_data(
-#         sim_imdb_ffp, cur_obs_data.index.values, event=cur_event
-#     )
-#     print(f"Took {time.time() - start_time} to load simulation data")
-#     if len(cur_sim_data) == 0:
-#         print(
-#             f"No overlapping simulation and observation data for event {cur_event}. Skipping!")
-#         return None, None, None, None
-#
-#     start_time = time.time()
-#     sim_sites = np.asarray(list(cur_sim_data.keys()))
-#     obs_sites = np.asarray(list(cur_obs_data.index.values.astype(str)))
-#     cur_sites = obs_sites[np.isin(obs_sites, sim_sites)]
-#     print(f"Took {time.time() - start_time} to find overlapping sites")
-#
-#     start_time = time.time()
-#     cur_obs_data = cur_obs_data.loc[cur_sites]
-#
-#     cur_rels = cur_sim_data[cur_sites[0]].index.values.astype(str)
-#     if len(cur_rels) > 1 and n_rels is not None:
-#         cur_rels = np.random.choice(
-#             cur_rels,
-#             size=n_rels,
-#             replace=False,
-#         )
-#     print(f"Took {time.time() - start_time} to do other")
-#
-#     return cur_obs_data, cur_sim_data, cur_rels, cur_sites
-
-def get_sim_obs_data_dicts(obs_df: pd.DataFrame, sim_im_dir: Path, events: Sequence[str], n_rels: int = None, n_procs: int = 4):
-    obs_im_data, sim_im_data = {}, {}
-    rels, event_sites = {}, {}
-    for i, cur_event in enumerate(events):
-        # Load the observed IM data
-        print(f"---------------------------------------")
-        cur_obs_data = data.get_obs_rupture_data(obs_df, cur_event)
-
-        # Ensure we have observed data
-        assert cur_obs_data.shape[0] > 0, f"No observation data for event {cur_event}"
-
-        # Load the simulation IM data
-        # cur_sim_data = pd.read_csv(sim_im_dir / f"{cur_event}.csv", index_col=0)
-
-
-        cur_sim_data = data.load_site_sim_data(
-            sim_im_dir, cur_obs_data.index.values, event=cur_event
-        )
-        if len(cur_sim_data) == 0:
-            print(
-                f"No overlapping simulation and observation data for event {cur_event}. Skipping!")
-            return None, None, None, None
-
-        sim_sites = np.asarray(list(cur_sim_data.keys()))
-        obs_sites = np.asarray(list(cur_obs_data.index.values.astype(str)))
-        cur_sites = obs_sites[np.isin(obs_sites, sim_sites)]
-
-        cur_obs_data = cur_obs_data.loc[cur_sites]
-
-        cur_rels = cur_sim_data[cur_sites[0]].index.values.astype(str)
-        if len(cur_rels) > 1 and n_rels is not None:
-            cur_rels = np.random.choice(
-                cur_rels,
-                size=n_rels,
-                replace=False,
-            )
-
-        print(f"wtf")
-
-
+from .. import db
 
 def compute_site_combinations(
     sites: Dict[str, np.ndarray],
@@ -102,9 +19,8 @@ def compute_site_combinations(
     """
     Compute the site combinations for each event
 
-    Note: The resulting indices are into the index/columns
-    of the distance matrix,
-    i.e. all stations, NOT the event specific sites
+    Returns allowed sites and site-combination
+    indices (for allowed sites) for each event
     """
     site_combs, used_sites = {}, {}
     for cur_event in events:
@@ -115,6 +31,9 @@ def compute_site_combinations(
             else cur_sites[np.isin(cur_sites, sites_to_use)]
         )
 
+        if len(cur_sites) < 2:
+            continue
+
         # Filter for the current event sites
         # and site-combinations less than 100km apart
         cur_dist_matrix = dist_matrix.loc[cur_sites, cur_sites]
@@ -123,6 +42,7 @@ def compute_site_combinations(
 
         # Get the site combinations
         # First is the site of interest, second is the observation site
+        # Indices into the sites to use for the current event
         cur_site_combs = np.stack((cur_row_ind, cur_col_ind), axis=1)
 
         site_combs[cur_event] = cur_site_combs
@@ -131,17 +51,13 @@ def compute_site_combinations(
     return site_combs, used_sites
 
 
-
-
 class ResponseSpectrumDataset(Dataset):
     def __init__(
         self,
-        sites: Dict[str, np.ndarray],
+        event_sites: Dict[str, np.ndarray],
         site_combs: Dict[str, np.ndarray],
-        events: Sequence[str],
-        obs_im_data: Dict[str, pd.DataFrame],
-        sim_im_data: Dict[str, pd.DataFrame],
-        rels: Dict[str, np.ndarray],
+        db: db.DB,
+        n_rels: int,
         station_df: pd.DataFrame,
         periods: np.ndarray,
         pSA_keys: np.ndarray,
@@ -151,53 +67,69 @@ class ResponseSpectrumDataset(Dataset):
         sim_score_fn=ss.similiarity_score,
     ):
         self.sim_score_fn = sim_score_fn
-        self.sites = sites
+
         self.site_combs = site_combs
-        self.events = events
-        self.rels = rels
         self.dist_matrix = dist_matrix
+
+        self.station_df = station_df
         self.site_features = site_features
+
+        self.event_sites = event_sites
+        self.events = np.asarray(list(self.event_sites.keys()))
+        self.n_rels = n_rels
 
         self.all_sites = dist_matrix.index.values.astype(str)
         self.all_sites_ix_lookup = {
             cur_site: ix for ix, cur_site in enumerate(self.all_sites)
         }
 
-        # Some sanity checking
-        for cur_event in sites.keys():
-            assert sites[cur_event].size == site_combs[cur_event].max() + 1
-
-        # Number of realisations have to be the same for all events
-        # TODO: Could in theory be different set of realisation
-        # per model epoch
-        assert np.all(
-            [rels[self.events[0]].size == rels[cur_event].size for cur_event in events]
-        )
-        self.n_rels_used = rels[self.events[0]].size
-
-        # Compute the number of samples per event
-        self.n_samples_event = np.asarray(
-            [
-                self.site_combs[cur_event].shape[0] * self.n_rels_used
-                for cur_event in self.events
-            ]
-        )
-        self._cum_n_samples = np.cumsum(self.n_samples_event)
-
         self.pSA_keys = pSA_keys
         self.periods = periods
 
-        # Observed IM data
-        # Only keep columns that are relevant, to save
-        # column lookup in __getitem__
-        self.obs_im_data = obs_im_data.copy()
-        self.obs_im_data = {
-            cur_event: cur_im_data.loc[:, self.pSA_keys]
-            for cur_event, cur_im_data in obs_im_data.items()
-        }
+        # Get the simulation and observation data
+        self.sim_im_dfs, self.obs_im_dfs = {}, {}
+        self.n_samples_event, self.rels = [], {}
+        for cur_event, cur_sites in event_sites.items():
+            cur_sim_data = db.get_sim_data(cur_event, cur_sites)
+            # Only use a subset of the available realisations to
+            # prevent over-fitting to these events
+            if np.any(cur_sim_data.data_source == "specific"):
+                self.rels[cur_event] = np.random.choice(
+                    cur_sim_data.rel_id.unique(), self.n_rels, replace=False
+                )
+                cur_mask = (cur_sim_data.data_source.values == "specific") & np.isin(
+                    cur_sim_data.rel_id.values, self.rels[cur_event]
+                )
+                cur_sim_data = cur_sim_data.loc[cur_mask]
 
-        # Normalise the station data
-        self.station_df = station_df.copy()
+                self.n_samples_event.append(
+                    self.site_combs[cur_event].shape[0] * self.n_rels
+                )
+            else:
+                self.rels[cur_event] = None
+                self.n_samples_event.append(self.site_combs[cur_event].shape[0])
+
+            # Get observation data
+            cur_obs_data = db.get_obs_data(cur_event, cur_sites)
+
+            # Sanity checks
+            assert np.all(cur_obs_data.columns == self.pSA_keys)
+            assert (
+                cur_sim_data.shape[0] == cur_obs_data.shape[0]
+                or cur_sim_data.shape[0] == cur_obs_data.shape[0] * self.n_rels
+            )
+
+            self.sim_im_dfs[cur_event] = cur_sim_data
+            self.obs_im_dfs[cur_event] = cur_obs_data
+
+
+
+        # Compute the number of samples per event
+        self.n_samples_event = np.asarray(self.n_samples_event)
+        self._cum_n_samples = np.cumsum(self.n_samples_event)
+        self.n_rels_used = {cur_event: 1 if cur_rels is None else cur_rels.size for cur_event, cur_rels in self.rels.items()}
+
+        # Only keep columns that are relevant
         self.station_df = self.station_df.loc[:, self.site_features]
 
         # Ensure pre-processing has been applied
@@ -239,16 +171,35 @@ class ResponseSpectrumDataset(Dataset):
         # in the format [n_rels, n_periods, n_sites]
         # per event
         self.sim_im_data = {}
+        # And observed response spectra in the format
+        # [n_periods, n_sites]
+        self.obs_im_data = {}
         for cur_event in self.events:
-            cur_sites = self.sites[cur_event]
+            cur_sites = self.event_sites[cur_event]
+            cur_sim_df = self.sim_im_dfs[cur_event]
 
-            cur_sim_im_data = []
-            for cur_site in cur_sites:
-                cur_sim_im_data.append(
-                    sim_im_data[cur_event][cur_site].loc[self.rels[cur_event], pSA_keys]
+            if self.rels[cur_event] is None:
+                self.sim_im_data[cur_event] = (
+                    cur_sim_df.set_index("site_id")
+                    .loc[cur_sites, pSA_keys]
+                    .values.T[np.newaxis, ...]
+                )
+            else:
+                assert cur_sim_df.shape[0] == cur_sites.size * self.n_rels
+                self.sim_im_data[cur_event] = np.stack(
+                    [
+                        cur_sim_df.loc[cur_sim_df.rel_id == cur_rel]
+                        .set_index("site_id")
+                        .loc[cur_sites, pSA_keys]
+                        .T.values
+                        for cur_rel in self.rels[cur_event]
+                    ],
+                    axis=0,
                 )
 
-            self.sim_im_data[cur_event] = np.stack(cur_sim_im_data, axis=2)
+            self.obs_im_data[cur_event] = (
+                self.obs_im_dfs[cur_event].loc[cur_sites, pSA_keys].values.T
+            )
 
         # Create similarity score lookup
         # with format [n_rels, n_sites]
@@ -256,10 +207,14 @@ class ResponseSpectrumDataset(Dataset):
         self.sim_score = {}
         for cur_event in self.events:
             cur_event_scores = []
-            for i, site_i in enumerate(self.sites[cur_event]):
+            for i, site_i in enumerate(self.event_sites[cur_event]):
                 site_int_obs = (
-                    self.obs_im_data[cur_event].loc[site_i, :].values.astype(float)
+                    self.obs_im_dfs[cur_event].loc[site_i, self.pSA_keys].values
                 )
+                # site_int_obs = (
+                #     self.obs_im_data[cur_event].loc[site_i, :].values.astype(float)
+                # )
+
                 site_int_sim = self.sim_im_data[cur_event][:, :, i]
                 cur_sim_scores = ss.similiarity_score(site_int_obs, site_int_sim)
 
@@ -269,10 +224,14 @@ class ResponseSpectrumDataset(Dataset):
 
         # Some more sanity checking
         for cur_event in self.events:
-            assert self.sim_im_data[cur_event].shape[0] == self.n_rels_used
-            assert self.sim_im_data[cur_event].shape[2] == self.sites[cur_event].size
-            assert self.sim_score[cur_event].shape[0] == self.n_rels_used
-            assert self.sim_score[cur_event].shape[1] == self.sites[cur_event].size
+            assert self.sim_im_data[cur_event].shape[0] in [1, self.n_rels]
+            assert (
+                self.sim_im_data[cur_event].shape[2] == self.event_sites[cur_event].size
+            )
+            assert self.sim_score[cur_event].shape[0] in [1, self.n_rels]
+            assert (
+                self.sim_score[cur_event].shape[1] == self.event_sites[cur_event].size
+            )
 
     @property
     def n_samples(self):
@@ -280,45 +239,51 @@ class ResponseSpectrumDataset(Dataset):
 
     def get_metadata(self, idx: int):
         """Get the metadata for a specific sample"""
-        event_ix, site_ix, rel_ix = self.get_indices(idx)
+        event, event_ix, site_ix, rel_ix = self.get_indices(idx)
 
         # Get the site of interest and observation site
-        event = self.events[event_ix]
         site_int_ix = self.site_combs[event][site_ix, 0]
         site_obs_ix = self.site_combs[event][site_ix, 1]
 
-        site_int = self.sites[event][site_int_ix]
-        site_obs = self.sites[event][site_obs_ix]
-        rel = self.rels[event][rel_ix]
+        site_int = self.event_sites[event][site_int_ix]
+        site_obs = self.event_sites[event][site_obs_ix]
+        rel = "None" if self.rels[event] is None else self.rels[event][rel_ix]
 
-        return event, rel, site_int, site_obs,
+        return (
+            event,
+            rel,
+            site_int,
+            site_obs,
+        )
 
     def __len__(self):
         return self.n_samples
 
     def get_indices(self, idx: int):
         event_ix = np.argmin(idx // self._cum_n_samples)
-        site_ix = (idx % self._cum_n_samples[max(event_ix - 1, 0)]) // self.n_rels_used
-        rel_ix = idx % self.n_rels_used
+        event = self.events[event_ix]
+        n_rels = self.n_rels_used[event]
 
-        return event_ix, site_ix, rel_ix
+        site_ix = (idx % self._cum_n_samples[max(event_ix - 1, 0)]) // n_rels
+        rel_ix = idx % n_rels
+
+        return event, event_ix, site_ix, rel_ix
 
     def __getitem__(self, idx: int):
         # Break the index down
-        event_ix, site_ix, rel_ix = self.get_indices(idx)
+        event, event_ix, site_ix, rel_ix = self.get_indices(idx)
 
         # Get the site of interest and observation site
-        event = self.events[event_ix]
         site_int_ix = self.site_combs[event][site_ix, 0]
         site_obs_ix = self.site_combs[event][site_ix, 1]
 
-        site_int = self.sites[event][site_int_ix]
-        site_obs = self.sites[event][site_obs_ix]
+        site_int = self.event_sites[event][site_int_ix]
+        site_obs = self.event_sites[event][site_obs_ix]
 
         # Features
         site_int_sim = self.sim_im_data[event][rel_ix, :, site_int_ix]
         site_obs_sim = self.sim_im_data[event][rel_ix, :, site_obs_ix]
-        site_obs_obs = self.obs_im_data[event].loc[site_obs].values.astype(float)
+        site_obs_obs = self.obs_im_data[event][:, site_obs_ix]
 
         site_int_all_ix = self.all_sites_ix_lookup[site_int]
         site_obs_all_ix = self.all_sites_ix_lookup[site_obs]
@@ -366,7 +331,7 @@ class MetaDataDataset(Dataset):
     def __init__(self, main_dataset: ResponseSpectrumDataset):
         self.main_dataset = main_dataset
 
-        self.sites = main_dataset.sites
+        self.sites = main_dataset.event_sites
         self.site_combs = main_dataset.site_combs
         self.events = main_dataset.events
 
@@ -375,5 +340,3 @@ class MetaDataDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.main_dataset.get_metadata(idx)
-
-

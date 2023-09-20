@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -21,6 +22,7 @@ class DB:
         source_ffp: Path,
         data_source: str,
     ):
+        """Adds the simulation and observation data to the database"""
         site_df = pd.read_csv(site_ffp, index_col="sta")
         event_df = pd.read_csv(source_ffp, index_col=0)
         obs_df = data.load_obs_data(obs_ffp)
@@ -50,11 +52,11 @@ class DB:
             cur_df["event_id"] = cur_event_id
             if cur_rel_id is None:
                 cur_df["record_id"] = np.char.add(
-                    f"{cur_event_id}_", cur_df.index.astype(str)
+                    f"{cur_event_id}_", cur_df.index.values.astype(str)
                 )
             else:
                 cur_df["record_id"] = np.char.add(
-                    np.char.add(f"{cur_event_id}_", cur_df.index.astype(str)),
+                    np.char.add(f"{cur_event_id}_", cur_df.index.values.astype(str)),
                     f"_{cur_rel_id}",
                 )
             cur_df["rel_id"] = cur_rel_id
@@ -114,15 +116,61 @@ class DB:
             "sites", self.con, if_exists="append", index=True, index_label="site_id"
         )
 
-    def get_avail_events(self):
-        return pd.read_sql(
-            "SELECT event_id FROM events", self.con, index_col="event_id"
-        ).index.values.astype(str)
+    def get_site_data(self):
+        """Gets the site data"""
+        return pd.read_sql("SELECT * FROM sites", self.con, index_col="site_id")
+
+    def get_avail_events(self, data_source: str = None):
+        """Gets the available events in the database"""
+        query = (
+            "SELECT event_id FROM events"
+            if data_source is None
+            else f"SELECT event_id FROM sim_im_data WHERE data_source = '{data_source}'"
+        )
+        return pd.read_sql(query, self.con, index_col="event_id").index.values.astype(
+            str
+        )
 
     def get_avail_sites(self):
+        """Gets the available sites in the database"""
         return pd.read_sql(
             "SELECT site_id FROM sites", self.con, index_col="site_id"
         ).index.values.astype(str)
+
+    def get_event_sites(self):
+        """Retrieves the available sites per event"""
+        events = self.get_avail_events()
+        event_sites = {}
+        for cur_event in events:
+            cur_sim_sites = pd.read_sql(
+                f"SELECT site_id FROM sim_im_data WHERE event_id = (?)",
+                self.con,
+                params=(cur_event,),
+                index_col="site_id",
+            ).index.values.astype(str)
+            cur_obs_sites = pd.read_sql(
+                f"SELECT site_id FROM obs_im_data WHERE event_id = (?)",
+                self.con,
+                params=(cur_event,),
+                index_col="site_id",
+            ).index.values.astype(str)
+            event_sites[cur_event] = np.intersect1d(cur_sim_sites, cur_obs_sites)
+
+        return event_sites
+
+    def get_sim_data(self, event: str, sites: Sequence[str]):
+        """Retrieves the simulation data for the given event and sites"""
+        query = f"SELECT * FROM sim_im_data WHERE event_id = (?) AND site_id IN ({','.join(['?']*len(sites))})"
+        return pd.read_sql(
+            query, self.con, params=(event, *sites), index_col="record_id"
+        ).drop(columns=["event_id"])
+
+    def get_obs_data(self, event: str, sites: Sequence[str]):
+        """Retrieves the observation data for the given event and sites"""
+        query = f"SELECT * FROM obs_im_data WHERE event_id = (?) AND site_id IN ({','.join(['?']*len(sites))})"
+        return pd.read_sql(
+            query, self.con, params=(event, *sites), index_col="site_id"
+        ).drop(columns=["event_id", "record_id"])
 
     @classmethod
     def create(cls, db_ffp: Path):

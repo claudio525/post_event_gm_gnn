@@ -373,7 +373,7 @@ def sim_site_correlations(sim_corr_dir: Path, site_ffp: Path, ims: List[str], ev
     sim_corrs = sr.data.load_correlations(sim_corr_dir)[event]
     site_df = sr.data.load_ll_file(site_ffp)
 
-    dist_matrix = sh.im_dist.calculate_distance_matrix(sim_corrs.sites, site_df)
+    dist_matrix = sh.im_dist.calculate_distance_matrix(sim_corrs.event_sites, site_df)
 
     for cur_im in ims:
         # Get the model values
