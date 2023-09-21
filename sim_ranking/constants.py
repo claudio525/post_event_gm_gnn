@@ -51,7 +51,7 @@ PERIODS = [
     7.5,
     10.0,
 ]
-PERIOD_KEYS = [f"pSA_{x}" for x in PERIODS]
+PSA_KEYS = [f"pSA_{x}" for x in PERIODS]
 
 COMPONENTS = ["090", "000", "ver"]
 

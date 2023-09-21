@@ -18,6 +18,7 @@ import numpy as np
 from torch.utils.data import DataLoader
 from torchinfo import summary
 from torchview import draw_graph
+import typer
 
 import sim_ranking as sr
 import spatial_hazard as sh
@@ -32,7 +33,7 @@ print(f"Using device: {device}")
 
 
 def custom_loss(output, target, distance):
-    w = (-1 / 100) * distance + 1
+    w = ((-1 / 100) * distance + 1) * 100
     return torch.mean(w * (target - output) ** 2)
 
 
@@ -128,8 +129,10 @@ def train(
     n_epochs: int,
     device: str,
     optimizer: torch.optim.Optimizer,
+    loss_fn_key: str,
 ):
     loss_hist_train, loss_hist_val = torch.zeros(n_epochs), torch.zeros(n_epochs)
+    loss_fn = nn.L1Loss()
 
     best_val_loss = np.inf
     best_model_state = None
@@ -156,8 +159,10 @@ def train(
             # Compute the loss
             distance = distance.to(device, dtype=torch.float32)
             sim_score = sim_score.to(device, dtype=torch.float32)
-            loss = custom_loss(pred, sim_score, distance)
-            # loss = loss_fn(pred, sim_score)
+            if loss_fn_key == "custom":
+                loss = custom_loss(pred, sim_score, distance)
+            else:
+                loss = loss_fn(pred, sim_score)
 
             # Update weights
             loss.backward()
@@ -187,8 +192,10 @@ def train(
                 # Loss
                 distance = distance.to(device, dtype=torch.float32)
                 sim_score = sim_score.to(device, dtype=torch.float32)
-                loss = custom_loss(pred, sim_score, distance)
-                # loss = loss_fn(pred, sim_score)
+                if loss_fn == "custom":
+                    loss = custom_loss(pred, sim_score, distance)
+                else:
+                    loss = loss_fn(pred, sim_score)
                 loss_hist_val[epoch] += loss.item() * sim_score.shape[0]
 
             loss_hist_val[epoch] /= len(val_dataloader.dataset)
@@ -205,13 +212,18 @@ def train(
     return loss_hist_train, loss_hist_val, best_model_state, best_model_epoch
 
 
-if __name__ == "__main__":
+def main(
+    n_epochs: int = 25,
+    batch_size: int = 2048,
+    n_rels_used: int = 5,
+    comment: str = "",
+    loss_fn_key: str = "custom",
+    max_dist: float = 100.0,
+    save_best_val_model: bool = True,
+):
     ### CONFIG ###
-    N_RELS_USED = 5
-    N_VAL_SITES = 10
+    # N_VAL_SITES = 10
 
-    N_EPOCHS = 5
-    BATCH_SIZE = 1024
     N_SCALAR_FEATURES = 7
     RS_N_CHANNELS = [1, 16, 32]
     RS_KERNEL_SIZES = [5, 3]
@@ -268,7 +280,7 @@ if __name__ == "__main__":
     # station_df = pd.concat([station_df, vs30_df, z_df], axis=1)
     # station_df = station_df.rename(columns={"Z_1.0(km)": "Z_1.0", "Z_2.5(km)": "Z_2.5"})
 
-    station_df = db.get_site_data()
+    station_df = db.get_site_df()
 
     # Load the observed data
     # obs_df = sr.data.load_obs_data(obs_ffp)
@@ -306,31 +318,37 @@ if __name__ == "__main__":
 
     # Select a subset of the stations (of the validation events) as the validation sites
     # val_sites = np.random.choice(np.intersect1d() , N_VAL_SITES, replace=False)
-    val_sites = np.random.choice(
-        list(
-            set.intersection(
-                *[set(list(event_sites[cur_event])) for cur_event in val_events]
-            )
-        ),
-        N_VAL_SITES,
-        replace=False,
-    )
-    train_sites = all_sites[np.isin(all_sites, val_sites, invert=True)]
+    # val_sites = np.random.choice(
+    #     list(
+    #         set.intersection(
+    #             *[set(list(event_sites[cur_event])) for cur_event in val_events]
+    #         )
+    #     ),
+    #     N_VAL_SITES,
+    #     replace=False,
+    # )
+    # train_sites = all_sites[np.isin(all_sites, val_sites, invert=True)]
+
+    # Use all sites for training & validation for now
+    # Once the model learns, this needs to be updated
+    # TODO: Update this!!
+    train_sites = all_sites
+    val_sites = all_sites
 
     # Get the training and validation dataset site combinations
     print(f"Creating site combinations")
     train_site_combs, train_event_sites = sr.ml.data.compute_site_combinations(
-        event_sites, train_events, dist_matrix, sites_to_use=train_sites
+        event_sites, train_events, dist_matrix, sites_to_use=train_sites, max_dist=max_dist
     )
     val_site_combs, val_event_sites = sr.ml.data.compute_site_combinations(
-        event_sites, val_events, dist_matrix, sites_to_use=val_sites
+        event_sites, val_events, dist_matrix, sites_to_use=val_sites, max_dist=max_dist
     )
 
     # Get the periods and corresponding pSA keys
     # periods, pSA_keys = sr.utils.get_periods(
     #     obs_im_data[events[0]].columns.values.astype(str)
     # )
-    periods, pSA_keys = sr.constants.PERIODS, sr.constants.PERIOD_KEYS
+    periods, pSA_keys = sr.constants.PERIODS, sr.constants.PSA_KEYS
 
     # Run pre-processing for the site features
     print(f"Pre-processing site features")
@@ -344,7 +362,7 @@ if __name__ == "__main__":
         train_event_sites,
         train_site_combs,
         db,
-        N_RELS_USED,
+        n_rels_used,
         station_df_norm,
         periods,
         pSA_keys,
@@ -355,7 +373,7 @@ if __name__ == "__main__":
         val_event_sites,
         val_site_combs,
         db,
-        N_RELS_USED,
+        n_rels_used,
         station_df_norm,
         periods,
         pSA_keys,
@@ -366,13 +384,13 @@ if __name__ == "__main__":
     # Create the dataloaders
     train_dataloader = DataLoader(
         train_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=batch_size,
         shuffle=True,
         num_workers=2,
         pin_memory=True,
     )
     val_dataloader = DataLoader(
-        val_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True
+        val_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True
     )
 
     # Create the model
@@ -397,10 +415,10 @@ if __name__ == "__main__":
     summary(
         model,
         input_size=[
-            (BATCH_SIZE, 1, 31),
-            (BATCH_SIZE, 1, 31),
-            (BATCH_SIZE, 1, 31),
-            (BATCH_SIZE, N_SCALAR_FEATURES),
+            (batch_size, 1, 31),
+            (batch_size, 1, 31),
+            (batch_size, 1, 31),
+            (batch_size, N_SCALAR_FEATURES),
         ],
     )
 
@@ -410,11 +428,18 @@ if __name__ == "__main__":
     print(f"Number of training batches: {len(train_dataloader)}")
     print(f"Number of validation batches: {len(val_dataloader)}")
     loss_hist_train, loss_hist_val, best_model_state, best_epoch = train(
-        model, train_dataloader, val_dataloader, N_EPOCHS, device, optimizer
+        model,
+        train_dataloader,
+        val_dataloader,
+        n_epochs,
+        device,
+        optimizer,
+        loss_fn_key,
     )
 
     # Load the best model
-    model.load_state_dict(best_model_state)
+    if save_best_val_model:
+        model.load_state_dict(best_model_state)
 
     # Get predictions for the training and validation datasets
     print(f"Getting predictions")
@@ -438,19 +463,22 @@ if __name__ == "__main__":
     # Write the metadata
     meta_data = {
         **site_feature_stats.to_dict(),
-        "n_rels_used": N_RELS_USED,
-        "n_val_sites": N_VAL_SITES,
+        "n_rels_used": n_rels_used,
+        # "n_val_sites": N_VAL_SITES,
         "val_events": val_events.astype(str).tolist(),
+        "n_train_samples": len(train_dataset),
+        "n_val_samples": len(val_dataset),
         "train_events": train_events.astype(str).tolist(),
         "site_features": SITE_FEATURES,
+        "comment": comment,
         "model": {
             "n_channels": RS_N_CHANNELS,
             "kernel_sizes": RS_KERNEL_SIZES,
             "fc_units": FC_UNITS,
         },
         "training": {
-            "batch_size": BATCH_SIZE,
-            "n_epochs": N_EPOCHS,
+            "batch_size": batch_size,
+            "n_epochs": n_epochs,
             "best_epoch": best_epoch,
         },
         "data": {
@@ -470,13 +498,17 @@ if __name__ == "__main__":
     model_graph = draw_graph(
         model,
         input_size=[
-            (BATCH_SIZE, 1, 31),
-            (BATCH_SIZE, 1, 31),
-            (BATCH_SIZE, 1, 31),
-            (BATCH_SIZE, N_SCALAR_FEATURES),
+            (batch_size, 1, 31),
+            (batch_size, 1, 31),
+            (batch_size, 1, 31),
+            (batch_size, N_SCALAR_FEATURES),
         ],
         expand_nested=True,
         filename="model_vis",
         save_graph=True,
         directory=str(results_dir),
     )
+
+
+if __name__ == "__main__":
+    typer.run(main)

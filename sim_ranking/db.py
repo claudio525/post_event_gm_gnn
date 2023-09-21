@@ -46,7 +46,7 @@ class DB:
             # Read simulation IM data
             cur_im_df = pd.read_csv(cur_ffp, index_col=0)
             cur_im_df = cur_im_df.loc[cur_im_df["component"] == "rotd50"]
-            cur_df = cur_im_df.loc[:, constants.PERIOD_KEYS]
+            cur_df = cur_im_df.loc[:, constants.PSA_KEYS]
 
             # Add extra columns and update index
             cur_df["event_id"] = cur_event_id
@@ -70,8 +70,7 @@ class DB:
             # Re-order and add to db
             cur_df = cur_df.loc[
                 :,
-                ["event_id", "rel_id", "site_id", "data_source"]
-                + constants.PERIOD_KEYS,
+                ["event_id", "rel_id", "site_id", "data_source"] + constants.PSA_KEYS,
             ]
             cur_df.to_sql("sim_im_data", self.con, if_exists="append")
 
@@ -81,7 +80,7 @@ class DB:
             # Only need to add observed IM data first time
             if cur_event_id not in events:
                 cur_obs_df = obs_df.loc[obs_df["evid"] == cur_event_id]
-                cur_obs_df = cur_obs_df[["evid", "sta"] + constants.PERIOD_KEYS]
+                cur_obs_df = cur_obs_df[["evid", "sta"] + constants.PSA_KEYS]
                 cur_obs_df = cur_obs_df.rename(
                     columns={"evid": "event_id", "sta": "site_id"}
                 )
@@ -116,16 +115,59 @@ class DB:
             "sites", self.con, if_exists="append", index=True, index_label="site_id"
         )
 
-    def get_site_data(self):
+    def get_site_df(self):
         """Gets the site data"""
         return pd.read_sql("SELECT * FROM sites", self.con, index_col="site_id")
+
+    def get_event_df(self):
+        """Gets the event data"""
+        return pd.read_sql("SELECT * FROM events", self.con, index_col="event_id")
+
+    def get_sim_df(self):
+        """Gets the simulation data"""
+        return pd.read_sql("SELECT * FROM sim_im_data", self.con, index_col="record_id")
+
+    def get_obs_df(self):
+        """Gets the observation IM data"""
+        return pd.read_sql("SELECT * FROM obs_im_data", self.con, index_col="record_id")
+
+    def get_full_obs_df(self):
+        """Gets the observation IM data, event and site information"""
+        query = (
+            "SELECT * FROM obs_im_data "
+            "  LEFT JOIN events ON obs_im_data.event_id == events.event_id "
+            "  INNER JOIN sites ON obs_im_data.site_id == sites.site_id"
+        )
+
+        result_df = pd.read_sql(query, self.con, index_col="record_id")
+
+        # Drop duplicated columns due to the join
+        result_df = result_df.loc[:, ~result_df.columns.duplicated()]
+        return result_df
+
+    def get_sim_obs_df(self):
+        """Gets the simulation and observation IM data"""
+        sim_df = self.get_sim_df()
+        sim_df["record_id"] = sim_df.index.values
+        obs_df = self.get_obs_df()
+
+        sim_obs_df = pd.merge(
+            sim_df,
+            obs_df,
+            how="inner",
+            on=["event_id", "site_id"],
+            suffixes=("_sim", "_obs"),
+        )
+        sim_obs_df = sim_obs_df.set_index("record_id")
+
+        return sim_obs_df
 
     def get_avail_events(self, data_source: str = None):
         """Gets the available events in the database"""
         query = (
             "SELECT event_id FROM events"
             if data_source is None
-            else f"SELECT event_id FROM sim_im_data WHERE data_source = '{data_source}'"
+            else f"SELECT DISTINCT event_id FROM sim_im_data WHERE data_source = '{data_source}'"
         )
         return pd.read_sql(query, self.con, index_col="event_id").index.values.astype(
             str

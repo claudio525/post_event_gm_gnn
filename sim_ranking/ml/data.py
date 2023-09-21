@@ -15,6 +15,7 @@ def compute_site_combinations(
     events: Sequence[str],
     dist_matrix: pd.DataFrame,
     sites_to_use: np.ndarray = None,
+    max_dist: float = 100,
 ):
     """
     Compute the site combinations for each event
@@ -37,7 +38,7 @@ def compute_site_combinations(
         # Filter for the current event sites
         # and site-combinations less than 100km apart
         cur_dist_matrix = dist_matrix.loc[cur_sites, cur_sites]
-        cur_dist_mask = (cur_dist_matrix.values < 100) & (cur_dist_matrix.values > 0)
+        cur_dist_mask = (cur_dist_matrix.values < max_dist) & (cur_dist_matrix.values > 0)
         cur_row_ind, cur_col_ind = np.nonzero(cur_dist_mask)
 
         # Get the site combinations

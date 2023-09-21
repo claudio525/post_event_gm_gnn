@@ -22,21 +22,8 @@ def get_avail_ims(sim_site_corr_dir: Path, event: str):
     return sim_site_corrs.ims
 
 
-    # return np.sort(
-    #     [
-    #         sr.utils.reverse_im_filename(cur_ffp.stem)
-    #         for cur_ffp in (sim_site_corr_dir / event).iterdir()
-    #         if cur_ffp.is_file()
-    #     ]
-    # )
-
-
 @st.cache_data
 def load_sim_site_correlations(sim_site_corr_dir: Path, event: str):
-    # sim_site_corrs = sr.data.SimWithinEventSiteCorrelations.load(
-    #     sim_site_corr_dir / event
-    # )
-
     sim_site_corrs = sr.data.SiteCorrelations.load(sim_site_corr_dir / f"{event}.pickle")
 
     return sim_site_corrs

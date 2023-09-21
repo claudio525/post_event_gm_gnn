@@ -52,8 +52,8 @@ def plot_pred_vs_true(result_df: pd.DataFrame, ax: plt.Axes):
 
     ax.set_xlabel("True Similarity Score")
     ax.set_ylabel("Predicted Similarity Score")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
+    ax.set_xlim(-0.025, 1)
+    ax.set_ylim(-0.025, 1)
     ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
 
 
@@ -110,13 +110,17 @@ def run_general_tab(results_dir: Path):
         st.markdown(
             f"""
             ### Data
-            Observed Data: \{meta["data"]['obs_ffp']}\n
-            Simulation IMDB: \{meta["data"]['sim_imdb_ffp']}\n
-            Sites Directory: \{meta["data"]['sites_dir']}\n
+            DB File: {meta["data"]['db']}\n
 
             Site Features: {meta['site_features']}\n
-            Train Events: {meta['train_events']}\n
+            
+            Number of Training Events: {len(meta['train_events'])}\n
             Validation Events: {meta['val_events']}\n
+            
+            Number of Training Samples: {meta['n_train_samples']}\n
+            Validation Samples: {meta['n_val_samples']}\n
+            
+            Comment: {meta['comment']}\n
             """
         )
     with col_2:
@@ -143,7 +147,7 @@ def run_general_tab(results_dir: Path):
         st.image(str(model_vis_ffp))
 
 
-def run_results_tab(results_dir: Path):
+def run_one_to_one_tab(results_dir: Path):
     # True vs Predicted plot
     train_results_df, val_results_df = _load_results(results_dir)
 
@@ -166,6 +170,8 @@ def run_results_tab(results_dir: Path):
         st.pyplot(fig, use_container_width=False)
 
 
+# def loss_exp_tab()
+
 def main(results_dir: Path):
     st.set_page_config(layout="wide")
 
@@ -179,13 +185,13 @@ def main(results_dir: Path):
     )
     cur_results_dir = results_dir / result_id
 
-    general_tab, results_tab = st.tabs(["General", "Results"])
+    general_tab, one_to_one_tab = st.tabs(["General", "One-To-One"])
 
     with general_tab:
         run_general_tab(cur_results_dir)
 
-    with results_tab:
-        run_results_tab(cur_results_dir)
+    with one_to_one_tab:
+        run_one_to_one_tab(cur_results_dir)
 
 
 if __name__ == "__main__":
