@@ -36,7 +36,7 @@ def compute_site_combinations(
             continue
 
         # Filter for the current event sites
-        # and site-combinations less than 100km apart
+        # and site-combinations less than max_dist km apart
         cur_dist_matrix = dist_matrix.loc[cur_sites, cur_sites]
         cur_dist_mask = (cur_dist_matrix.values < max_dist) & (cur_dist_matrix.values > 0)
         cur_row_ind, cur_col_ind = np.nonzero(cur_dist_mask)
@@ -122,7 +122,6 @@ class ResponseSpectrumDataset(Dataset):
 
             self.sim_im_dfs[cur_event] = cur_sim_data
             self.obs_im_dfs[cur_event] = cur_obs_data
-
 
 
         # Compute the number of samples per event
@@ -212,9 +211,6 @@ class ResponseSpectrumDataset(Dataset):
                 site_int_obs = (
                     self.obs_im_dfs[cur_event].loc[site_i, self.pSA_keys].values
                 )
-                # site_int_obs = (
-                #     self.obs_im_data[cur_event].loc[site_i, :].values.astype(float)
-                # )
 
                 site_int_sim = self.sim_im_data[cur_event][:, :, i]
                 cur_sim_scores = ss.similiarity_score(site_int_obs, site_int_sim)
@@ -248,7 +244,7 @@ class ResponseSpectrumDataset(Dataset):
 
         site_int = self.event_sites[event][site_int_ix]
         site_obs = self.event_sites[event][site_obs_ix]
-        rel = "None" if self.rels[event] is None else self.rels[event][rel_ix]
+        rel = "NA" if self.rels[event] is None else self.rels[event][rel_ix]
 
         return (
             event,
@@ -291,14 +287,15 @@ class ResponseSpectrumDataset(Dataset):
         site_features = self.feature_tensor[site_int_all_ix, site_obs_all_ix, :]
 
         # Labels
-        sim_score = self.sim_score[event][rel_ix, site_int_ix]
+        # sim_score = self.sim_score[event][rel_ix, site_int_ix]
+        site_int_obs = self.obs_im_data[event][:, site_int_ix]
 
         return (
-            site_int_sim,
-            site_obs_sim,
-            site_obs_obs,
+            np.log(site_int_sim),
+            np.log(site_obs_sim),
+            np.log(site_obs_obs),
             site_features,
-            sim_score,
+            np.log(site_int_obs),
             self.dist_matrix.iat[site_int_all_ix, site_obs_all_ix],
         )
 

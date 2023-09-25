@@ -14,6 +14,8 @@ class ResponseSpectrumSimModel(nn.Module):
         fc_units: List[int],
         rs_input_length: int,
         n_scalar_inputs: int,
+        n_outputs: int,
+        apply_sigmoid: bool = True,
     ):
         super().__init__()
 
@@ -48,8 +50,9 @@ class ResponseSpectrumSimModel(nn.Module):
 
             self.fc_layers.append(nn.ELU())
 
-        self.fc_layers.append(nn.Linear(self.fc_layers[-2].out_features, 1))
-        self.fc_layers.append(nn.Sigmoid())
+        self.fc_layers.append(nn.Linear(self.fc_layers[-2].out_features, n_outputs))
+        if apply_sigmoid:
+            self.fc_layers.append(nn.Sigmoid())
 
     def forward(self, rs_int_sim, rs_obs_sim, rs_obs_obs, scalar_features):
         rs_int_sim_out = self.rs_layers(rs_int_sim)

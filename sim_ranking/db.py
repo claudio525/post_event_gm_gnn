@@ -35,7 +35,7 @@ class DB:
             if "REL" in cur_ffp.stem:
                 cur_event_id, cur_rel_id = cur_ffp.stem.split("_")
             else:
-                cur_event_id, cur_rel_id = cur_ffp.stem, None
+                cur_event_id, cur_rel_id = cur_ffp.stem, "NA"
 
             # Only interested in events with observation data
             if cur_event_id not in event_df.index:
@@ -109,7 +109,7 @@ class DB:
 
         cur_site_df = site_df.loc[sites, ["lat", "lon", "Vs30", "Z1.0", "Z2.5"]]
         cur_site_df = cur_site_df.rename(
-            columns={"Vs30": "vs30", "Z1.0": "z1.0", "Z2.5": "z2.5"}
+            columns={"Vs30": "vs30", "Z1.0": "z1.0", "Z2.5": "z2.5", "Tsite": "tsite"}
         )
         cur_site_df.to_sql(
             "sites", self.con, if_exists="append", index=True, index_label="site_id"

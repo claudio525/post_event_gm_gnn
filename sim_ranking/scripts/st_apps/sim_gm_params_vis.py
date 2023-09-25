@@ -172,7 +172,6 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
                     hoverinfo="text",
                 )
             )
-            # fig.update_mapboxes(fitbounds="locations")
             fig.update_layout(height=900, width=1400)
             fig.update_mapboxes(
                 accesstoken="pk.eyJ1IjoiY3MyMyIsImEiOiJjbGtpeXIxNnkwbDQ3M25xbDFrZWFnNHo3In0.OD7TJ_1PegpGvCOCxfHsnA",

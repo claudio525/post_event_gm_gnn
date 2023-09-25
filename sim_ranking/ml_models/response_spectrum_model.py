@@ -42,6 +42,7 @@ def get_dataset_predictions(
     train_meta_dataset: sr.ml.data.ResponseSpectrumDataset,
     model: nn.Module,
     device: str,
+    loss_fn_key: str,
 ):
     pred_train_meta_dataloader = DataLoader(
         train_meta_dataset, shuffle=False, batch_size=4096, num_workers=0
@@ -57,24 +58,30 @@ def get_dataset_predictions(
         "rel": [],
         "site_int": [],
         "site_obs": [],
-        "sim_score": [],
-        "predicted_sim_score": [],
+        # "sim_score": [],
+        # "predicted_sim_score": [],
+        "loss": [],
         "distance": [],
     }
+    pred_rs_results, true_rs_results = [], []
     for i, (
         (
             rs_int_sim,
             rs_obs_sim,
             rs_obs_obs,
             site_features,
-            sim_score,
+            true_rs,
             distance,
         ),
         (event, rel, site_int, site_obs),
     ) in enumerate(zip(pred_train_dataloader, pred_train_meta_dataloader)):
         # Forward pass
-        pred = _get_prediction(
-            rs_int_sim, rs_obs_sim, rs_obs_obs, site_features, model, device
+        pred = (
+            _get_prediction(
+                rs_int_sim, rs_obs_sim, rs_obs_obs, site_features, model, device
+            )
+            .cpu()
+            .detach()
         )
 
         results["index"] = np.concatenate(
@@ -83,7 +90,11 @@ def get_dataset_predictions(
                 np.char.add(
                     np.char.add(
                         np.char.add(
-                            np.char.add(np.asarray(rel), "_"), np.asarray(site_int)
+                            np.char.add(
+                                np.char.add(event, "_"),
+                                np.char.add(np.asarray(rel), "_"),
+                            ),
+                            np.asarray(site_int),
                         ),
                         "_",
                     ),
@@ -100,12 +111,30 @@ def get_dataset_predictions(
             (results["site_obs"], np.asarray(site_obs))
         )
         results["distance"] = np.concatenate((results["distance"], distance.numpy()))
-        results["sim_score"] = np.concatenate((results["sim_score"], sim_score.numpy()))
-        results["predicted_sim_score"] = np.concatenate(
-            (results["predicted_sim_score"], pred.cpu().detach().numpy())
+        results["loss"] = np.concatenate(
+            (
+                results["loss"],
+                _compute_loss(loss_fn_key, pred, true_rs, distance, reduction="none")
+                .cpu()
+                .detach()
+                .numpy()
+                .mean(axis=1),
+            )
         )
+        # results["sim_score"] = np.concatenate((results["sim_score"], sim_score.numpy()))
+        # results["predicted_sim_score"] = np.concatenate(
+        #     (results["predicted_sim_score"], pred.cpu().detach().numpy())
+        # )
+        true_rs_results.append(true_rs.numpy())
+        pred_rs_results.append(pred.numpy())
 
     results_df = pd.DataFrame(results).set_index("index", drop=True)
+    results_df.loc[:, np.char.add(sr.constants.PSA_KEYS, "_true")] = np.concatenate(
+        true_rs_results, axis=0
+    )
+    results_df.loc[:, np.char.add(sr.constants.PSA_KEYS, "_pred")] = np.concatenate(
+        pred_rs_results, axis=0
+    )
 
     return results_df
 
@@ -119,7 +148,15 @@ def _get_prediction(
     rs_obs_obs = rs_obs_obs.to(device, dtype=torch.float32)[:, None, :]
     site_features = site_features.to(device, dtype=torch.float32)
 
-    return model(rs_int_sim, rs_obs_sim, rs_obs_obs, site_features).ravel()
+    # return model(rs_int_sim, rs_obs_sim, rs_obs_obs, site_features).ravel()
+    return model(rs_int_sim, rs_obs_sim, rs_obs_obs, site_features)
+
+
+def _compute_loss(loss_fn_key: str, pred, sim_score, distance, reduction: str = "mean"):
+    if loss_fn_key == "custom":
+        return custom_loss(pred, sim_score, distance)
+    else:
+        return nn.functional.l1_loss(pred, sim_score, reduction=reduction)
 
 
 def train(
@@ -132,7 +169,6 @@ def train(
     loss_fn_key: str,
 ):
     loss_hist_train, loss_hist_val = torch.zeros(n_epochs), torch.zeros(n_epochs)
-    loss_fn = nn.L1Loss()
 
     best_val_loss = np.inf
     best_model_state = None
@@ -159,10 +195,7 @@ def train(
             # Compute the loss
             distance = distance.to(device, dtype=torch.float32)
             sim_score = sim_score.to(device, dtype=torch.float32)
-            if loss_fn_key == "custom":
-                loss = custom_loss(pred, sim_score, distance)
-            else:
-                loss = loss_fn(pred, sim_score)
+            loss = _compute_loss(loss_fn_key, pred, sim_score, distance)
 
             # Update weights
             loss.backward()
@@ -192,19 +225,16 @@ def train(
                 # Loss
                 distance = distance.to(device, dtype=torch.float32)
                 sim_score = sim_score.to(device, dtype=torch.float32)
-                if loss_fn == "custom":
-                    loss = custom_loss(pred, sim_score, distance)
-                else:
-                    loss = loss_fn(pred, sim_score)
+                loss = _compute_loss(loss_fn_key, pred, sim_score, distance)
                 loss_hist_val[epoch] += loss.item() * sim_score.shape[0]
 
             loss_hist_val[epoch] /= len(val_dataloader.dataset)
 
         # Keep track of the best model
-        if loss_hist_val[i] < best_val_loss:
+        if loss_hist_val[epoch] < best_val_loss:
             best_model_state = model.state_dict()
-            best_val_loss = loss_hist_val[i]
-            best_model_epoch = i
+            best_val_loss = loss_hist_val[epoch]
+            best_model_epoch = epoch
 
         print(
             f"Epoch {epoch+1} Loss:\n Train {loss_hist_train[epoch]:.4f} Val {loss_hist_val[epoch]:.4f}"
@@ -220,14 +250,18 @@ def main(
     loss_fn_key: str = "custom",
     max_dist: float = 100.0,
     save_best_val_model: bool = True,
+    weight_decay: float = 0.0001,
 ):
     ### CONFIG ###
     # N_VAL_SITES = 10
 
     N_SCALAR_FEATURES = 7
-    RS_N_CHANNELS = [1, 16, 32]
-    RS_KERNEL_SIZES = [5, 3]
-    FC_UNITS = [64, 32, 16]
+    # RS_N_CHANNELS = [1, 16, 32]
+    RS_N_CHANNELS = []
+    RS_KERNEL_SIZES = []
+    # RS_KERNEL_SIZES = [5, 3]
+    # FC_UNITS = [128, 64, 32]
+    FC_UNITS = [64, 32]
 
     SITE_FEATURES = ["vs30", "z1.0", "z2.5"]
     ### END CONFIG ###
@@ -237,66 +271,13 @@ def main(
 
     db_ffp_orig = "$wdata/sim_ranking/db/gm_db.sqlite"
     db_ffp = Path(os.path.expandvars(db_ffp_orig))
-
-    db = sr.db.DB(db_ffp)
-
-    # sim_imdb_ffp_orig = "$wdata/sim_ranking/sim_im_data/simulations.imdb"
-    # # sim_imdb_ffp_orig = "$wdata/sim_ranking/sim_im_data/lee_val_dataset/simulations.imdb"
-    # sim_imdb_ffp = Path(os.path.expandvars(sim_imdb_ffp_orig))
-    #
-    # sim_im_dir_orig = "$wdata/sim_ranking/sim_im_data/lee_val_dataset/raw_im_data"
-    # sim_im_dir = Path(os.path.expandvars(sim_im_dir_orig))
-
-    # sim_imdb_lee_ffp_orig = (
-    #     "$wdata/sim_ranking/sim_im_data/lee_val_dataset/simulations.imdb"
-    # )
-    # sim_imdb_lee_ffp = Path(os.path.expandvars(sim_imdb_lee_ffp_orig))
-
-    # obs_ffp_orig = (
-    #     "$wdata/gm_datasets/nz_gmdb/v3.0/Tables/ground_motion_im_table_rotd50_flat.csv"
-    # )
-    # obs_ffp = Path(os.path.expandvars(obs_ffp_orig))
-    #
-    # sites_dir_orig = "$wdata/gm_hazard/sites/23p1"
-    # sites_dir = Path(os.path.expandvars("$wdata/gm_hazard/sites/23p1"))
-
     results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
 
-    # Load the station data
-    # station_df = sr.data.load_ll_file(
-    #     sites_dir / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.ll"
-    # )
-    # vs30_df = sr.data.load_vs30_file(
-    #     sites_dir / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.vs30"
-    # )
-    # z_df = pd.read_csv(
-    #     sites_dir / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.z",
-    #     index_col=0,
-    # ).drop(columns=["sigma"])
-
-    # assert np.all(station_df.index == vs30_df.index) and np.all(
-    #     station_df.index == z_df.index
-    # )
-    # station_df = pd.concat([station_df, vs30_df, z_df], axis=1)
-    # station_df = station_df.rename(columns={"Z_1.0(km)": "Z_1.0", "Z_2.5(km)": "Z_2.5"})
-
+    db = sr.db.DB(db_ffp)
     station_df = db.get_site_df()
-
-    # Load the observed data
-    # obs_df = sr.data.load_obs_data(obs_ffp)
-
-    # Load the available events
-    # events = sr.data.load_avail_sim_events(sim_imdb_ffp)
-    # events = np.intersect1d(events, obs_df.evid.values.astype(str))
 
     events = db.get_avail_events()
     print(f"Number of events: {len(events)}")
-
-    # Load the IM data for each event
-    # print(f"Loading IM data")
-    # obs_im_data, sim_im_data, rels, event_sites = sr.ml.data.get_sim_obs_data_dicts(
-    #     obs_df, sim_imdb_ffp, events, n_rels=N_RELS_USED, n_procs=8
-    # )
 
     # Get all relevant sites across all events
     # all_sites = np.unique(np.concatenate(list(event_sites.values())))
@@ -307,9 +288,6 @@ def main(
     dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, station_df)
 
     # Select one of the events for validation
-    # val_events = np.random.choice(events, 1)
-    # val_events = np.asarray(["2016p118944"])
-    # train_events = events[np.isin(events, val_events, invert=True)]
     val_events = np.asarray(["3468575", "3528839"])
     train_events = np.setdiff1d(events, val_events)
 
@@ -338,17 +316,19 @@ def main(
     # Get the training and validation dataset site combinations
     print(f"Creating site combinations")
     train_site_combs, train_event_sites = sr.ml.data.compute_site_combinations(
-        event_sites, train_events, dist_matrix, sites_to_use=train_sites, max_dist=max_dist
+        event_sites,
+        train_events,
+        dist_matrix,
+        sites_to_use=train_sites,
+        max_dist=max_dist,
     )
     val_site_combs, val_event_sites = sr.ml.data.compute_site_combinations(
         event_sites, val_events, dist_matrix, sites_to_use=val_sites, max_dist=max_dist
     )
 
     # Get the periods and corresponding pSA keys
-    # periods, pSA_keys = sr.utils.get_periods(
-    #     obs_im_data[events[0]].columns.values.astype(str)
-    # )
     periods, pSA_keys = sr.constants.PERIODS, sr.constants.PSA_KEYS
+    n_periods = len(periods)
 
     # Run pre-processing for the site features
     print(f"Pre-processing site features")
@@ -395,11 +375,11 @@ def main(
 
     # Create the model
     n_rs_layers = len(RS_KERNEL_SIZES)
-    padding = [
-        mlt.dl_utils.compute_same_conv_padding(31, RS_KERNEL_SIZES[0])
-    ] * n_rs_layers
-    out_size = mlt.dl_utils.get_conv_out_sizes(
-        31, RS_KERNEL_SIZES, [1] * n_rs_layers, padding, [2] * n_rs_layers
+    padding = (
+        [mlt.dl_utils.compute_same_conv_padding(n_periods, RS_KERNEL_SIZES[0])]
+        * n_rs_layers
+        if n_rs_layers > 0
+        else []
     )
 
     model = sr.ml.models.ResponseSpectrumSimModel(
@@ -409,8 +389,12 @@ def main(
         FC_UNITS,
         len(periods),
         N_SCALAR_FEATURES,
+        n_periods,
+        apply_sigmoid=False,
     ).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=0.001, weight_decay=weight_decay
+    )
 
     summary(
         model,
@@ -440,22 +424,26 @@ def main(
     # Load the best model
     if save_best_val_model:
         model.load_state_dict(best_model_state)
+        print(
+            f"Best model epoch: {best_epoch + 1}, "
+            f"with validation loss {loss_hist_val[best_epoch]:.4f}"
+        )
 
     # Get predictions for the training and validation datasets
     print(f"Getting predictions")
     train_meta_dataset = sr.ml.data.MetaDataDataset(train_dataset)
     train_results_df = get_dataset_predictions(
-        train_dataset, train_meta_dataset, model, device
+        train_dataset, train_meta_dataset, model, device, loss_fn_key
     )
     val_meta_dataset = sr.ml.data.MetaDataDataset(val_dataset)
     val_results_df = get_dataset_predictions(
-        val_dataset, val_meta_dataset, model, device
+        val_dataset, val_meta_dataset, model, device, loss_fn_key
     )
 
     # Save the results
-    print(f"Savings results")
     run_id = mlt.utils.create_run_id(False)
     (results_dir := results_dir / run_id).mkdir(exist_ok=False)
+    print(f"Savings results, run-id {run_id}")
 
     train_results_df.to_csv(results_dir / "train_results.csv", index=True)
     val_results_df.to_csv(results_dir / "val_results.csv", index=True)
@@ -495,7 +483,7 @@ def main(
     np.save(str(results_dir / "loss_hist_val.npy"), loss_hist_val.numpy())
 
     # Create a model visualisation
-    model_graph = draw_graph(
+    draw_graph(
         model,
         input_size=[
             (batch_size, 1, 31),
