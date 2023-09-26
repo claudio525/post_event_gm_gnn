@@ -32,11 +32,6 @@ if torch.cuda.is_available():
 print(f"Using device: {device}")
 
 
-def custom_loss(output, target, distance):
-    w = ((-1 / 100) * distance + 1) * 100
-    return torch.mean(w * (target - output) ** 2)
-
-
 def get_dataset_predictions(
     train_dataset: sr.ml.data.MetaDataDataset,
     train_meta_dataset: sr.ml.data.ResponseSpectrumDataset,
@@ -58,17 +53,16 @@ def get_dataset_predictions(
         "rel": [],
         "site_int": [],
         "site_obs": [],
-        # "sim_score": [],
-        # "predicted_sim_score": [],
         "loss": [],
         "distance": [],
     }
-    pred_rs_results, true_rs_results = [], []
+    pred_res_results, true_res_results = [], []
+
     for i, (
         (
-            rs_int_sim,
-            rs_obs_sim,
-            rs_obs_obs,
+            obs_obs_obs_sim_res,
+            obs_obs_int_sim_res,
+            obs_sim_int_sim_rel,
             site_features,
             true_rs,
             distance,
@@ -78,7 +72,7 @@ def get_dataset_predictions(
         # Forward pass
         pred = (
             _get_prediction(
-                rs_int_sim, rs_obs_sim, rs_obs_obs, site_features, model, device
+                obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features, model, device
             )
             .cpu()
             .detach()
@@ -121,42 +115,35 @@ def get_dataset_predictions(
                 .mean(axis=1),
             )
         )
-        # results["sim_score"] = np.concatenate((results["sim_score"], sim_score.numpy()))
-        # results["predicted_sim_score"] = np.concatenate(
-        #     (results["predicted_sim_score"], pred.cpu().detach().numpy())
-        # )
-        true_rs_results.append(true_rs.numpy())
-        pred_rs_results.append(pred.numpy())
+        true_res_results.append(true_rs.numpy())
+        pred_res_results.append(pred.numpy())
 
     results_df = pd.DataFrame(results).set_index("index", drop=True)
     results_df.loc[:, np.char.add(sr.constants.PSA_KEYS, "_true")] = np.concatenate(
-        true_rs_results, axis=0
+        true_res_results, axis=0
     )
     results_df.loc[:, np.char.add(sr.constants.PSA_KEYS, "_pred")] = np.concatenate(
-        pred_rs_results, axis=0
+        pred_res_results, axis=0
     )
 
     return results_df
 
-
 def _get_prediction(
-    rs_int_sim, rs_obs_sim, rs_obs_obs, site_features, model: nn.Module, device: str
+
+    obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features, model: nn.Module, device: str
 ):
     # Put data onto the device
-    rs_int_sim = rs_int_sim.to(device, dtype=torch.float32)[:, None, :]
-    rs_obs_sim = rs_obs_sim.to(device, dtype=torch.float32)[:, None, :]
-    rs_obs_obs = rs_obs_obs.to(device, dtype=torch.float32)[:, None, :]
+    obs_obs_obs_sim_res = obs_obs_obs_sim_res.to(device, dtype=torch.float32)[:, None, :]
+    obs_obs_int_sim_res = obs_obs_int_sim_res.to(device, dtype=torch.float32)[:, None, :]
+    obs_sim_int_sim_rel = obs_sim_int_sim_rel.to(device, dtype=torch.float32)[:, None, :]
     site_features = site_features.to(device, dtype=torch.float32)
 
     # return model(rs_int_sim, rs_obs_sim, rs_obs_obs, site_features).ravel()
-    return model(rs_int_sim, rs_obs_sim, rs_obs_obs, site_features)
+    return model(obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features)
 
 
 def _compute_loss(loss_fn_key: str, pred, sim_score, distance, reduction: str = "mean"):
-    if loss_fn_key == "custom":
-        return custom_loss(pred, sim_score, distance)
-    else:
-        return nn.functional.l1_loss(pred, sim_score, reduction=reduction)
+    return nn.functional.l1_loss(pred, sim_score, reduction=reduction)
 
 
 def train(
@@ -180,29 +167,29 @@ def train(
         ### Training
         model.train()
         for i, (
-            rs_int_sim,
-            rs_obs_sim,
-            rs_obs_obs,
+            obs_obs_obs_sim_res,
+            obs_obs_int_sim_res,
+            obs_sim_int_sim_rel,
             site_features,
-            sim_score,
+            int_obs_int_sim_res,
             distance,
         ) in enumerate(train_dataloader):
             # Forward pass
             pred = _get_prediction(
-                rs_int_sim, rs_obs_sim, rs_obs_obs, site_features, model, device
+                obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features, model, device
             )
 
             # Compute the loss
             distance = distance.to(device, dtype=torch.float32)
-            sim_score = sim_score.to(device, dtype=torch.float32)
-            loss = _compute_loss(loss_fn_key, pred, sim_score, distance)
+            int_obs_int_sim_res = int_obs_int_sim_res.to(device, dtype=torch.float32)
+            loss = _compute_loss(loss_fn_key, pred, int_obs_int_sim_res, distance)
 
             # Update weights
             loss.backward()
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
-            loss_hist_train[epoch] += loss.item() * sim_score.shape[0]
+            loss_hist_train[epoch] += loss.item() * int_obs_int_sim_res.shape[0]
 
         loss_hist_train[epoch] /= len(train_dataloader.dataset)
 
@@ -210,23 +197,23 @@ def train(
         model.eval()
         with torch.no_grad():
             for i, (
-                rs_int_sim,
-                rs_obs_sim,
-                rs_obs_obs,
+                obs_obs_obs_sim_res,
+                obs_obs_int_sim_res,
+                obs_sim_int_sim_rel,
                 site_features,
-                sim_score,
+                int_obs_int_sim_res,
                 distance,
             ) in enumerate(val_dataloader):
                 # Forward pass
                 pred = _get_prediction(
-                    rs_int_sim, rs_obs_sim, rs_obs_obs, site_features, model, device
+                    obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features, model, device
                 )
 
                 # Loss
                 distance = distance.to(device, dtype=torch.float32)
-                sim_score = sim_score.to(device, dtype=torch.float32)
-                loss = _compute_loss(loss_fn_key, pred, sim_score, distance)
-                loss_hist_val[epoch] += loss.item() * sim_score.shape[0]
+                int_obs_int_sim_res = int_obs_int_sim_res.to(device, dtype=torch.float32)
+                loss = _compute_loss(loss_fn_key, pred, int_obs_int_sim_res, distance)
+                loss_hist_val[epoch] += loss.item() * int_obs_int_sim_res.shape[0]
 
             loss_hist_val[epoch] /= len(val_dataloader.dataset)
 
@@ -255,7 +242,6 @@ def main(
     ### CONFIG ###
     # N_VAL_SITES = 10
 
-    N_SCALAR_FEATURES = 7
     # RS_N_CHANNELS = [1, 16, 32]
     RS_N_CHANNELS = []
     RS_KERNEL_SIZES = []
@@ -263,7 +249,8 @@ def main(
     # FC_UNITS = [128, 64, 32]
     FC_UNITS = [64, 32]
 
-    SITE_FEATURES = ["vs30", "z1.0", "z2.5"]
+    SITE_FEATURES = ["vs30", "z1.0", "z2.5", "tsite"]
+    N_SCALAR_FEATURES = 9
     ### END CONFIG ###
 
     # Fixing the random seed
@@ -288,7 +275,9 @@ def main(
     dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, station_df)
 
     # Select one of the events for validation
-    val_events = np.asarray(["3468575", "3528839"])
+    # val_events = np.asarray(["3468575", "3528839"])
+    val_events = np.asarray(["3528839", "3497857", "2017p161601",
+                             "2013p543121", "2016p355041", "2017p512943"])
     train_events = np.setdiff1d(events, val_events)
 
     # Get the sites per event
@@ -338,7 +327,7 @@ def main(
 
     # Create the training and validation dataset
     print(f"Creating datasets and dataloaders")
-    train_dataset = sr.ml.data.ResponseSpectrumDataset(
+    train_dataset = sr.ml.data.ResponseSpectrumResidualDataset(
         train_event_sites,
         train_site_combs,
         db,
@@ -349,7 +338,7 @@ def main(
         dist_matrix,
         SITE_FEATURES,
     )
-    val_dataset = sr.ml.data.ResponseSpectrumDataset(
+    val_dataset = sr.ml.data.ResponseSpectrumResidualDataset(
         val_event_sites,
         val_site_combs,
         db,

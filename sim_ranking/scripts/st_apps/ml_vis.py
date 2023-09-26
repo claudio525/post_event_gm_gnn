@@ -60,10 +60,16 @@ def get_site_df(results_dir: Path):
 @st.cache_data
 def _load_results(results_dir: Path):
     train_results_df = pd.read_csv(
-        results_dir / "train_results.csv", dtype=dict(event=str), index_col=0, na_filter=False
+        results_dir / "train_results.csv",
+        dtype=dict(event=str),
+        index_col=0,
+        na_filter=False,
     )
     val_results_df = pd.read_csv(
-        results_dir / "val_results.csv", dtype=dict(event=str), index_col=0, na_filter=False
+        results_dir / "val_results.csv",
+        dtype=dict(event=str),
+        index_col=0,
+        na_filter=False,
     )
 
     return train_results_df, val_results_df
@@ -214,12 +220,13 @@ def run_individual_samples_tab(results_dir: Path):
 
     site_df = get_site_df(results_dir)
 
-    def _sample_viewer(results_df: pd.DataFrame, events: np.ndarray):
-        event = st.selectbox("Event", events)
+    def _sample_viewer(results_df: pd.DataFrame, events: np.ndarray, type: str):
+        event = st.selectbox("Event", events, key=f"{type}_event")
 
         rel = st.selectbox(
             "Realisation",
             results_df[(results_df.event == event)].rel.unique().astype("str"),
+            key=f"{type}_rel",
         )
 
         site_int = st.selectbox(
@@ -227,6 +234,7 @@ def run_individual_samples_tab(results_dir: Path):
             results_df.loc[(results_df.event == event) & (results_df.rel == rel)]
             .site_int.unique()
             .astype("str"),
+            key=f"{type}_site_int",
         )
         site_obs = st.selectbox(
             "Observation Site",
@@ -235,24 +243,37 @@ def run_individual_samples_tab(results_dir: Path):
                 & (results_df.site_int == site_int)
                 & (results_df.rel == rel)
             ].site_obs,
+            key=f"{type}_site_obs",
         )
 
-        site_int_obs = obs_df.loc[
-            (obs_df.event_id == event) & (obs_df.site_id == site_int)
-        ].iloc[0][sr.constants.PSA_KEYS]
-        site_int_sim = sim_df.loc[
-            (sim_df.event_id == event)
-            & (sim_df.site_id == site_int)
-            & (sim_df.rel_id == rel)
-        ].iloc[0][sr.constants.PSA_KEYS]
-        site_obs_obs = obs_df.loc[
-            (obs_df.event_id == event) & (obs_df.site_id == site_obs)
-        ].iloc[0][sr.constants.PSA_KEYS]
-        site_obs_sim = sim_df.loc[
-            (sim_df.event_id == event)
-            & (sim_df.site_id == site_obs)
-            & (sim_df.rel_id == rel)
-        ].iloc[0][sr.constants.PSA_KEYS]
+        site_int_obs = (
+            obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_int)]
+            .iloc[0][sr.constants.PSA_KEYS]
+            .astype(float)
+        )
+        site_int_sim = (
+            sim_df.loc[
+                (sim_df.event_id == event)
+                & (sim_df.site_id == site_int)
+                & (sim_df.rel_id == rel)
+            ]
+            .iloc[0][sr.constants.PSA_KEYS]
+            .astype(float)
+        )
+        site_obs_obs = (
+            obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_obs)]
+            .iloc[0][sr.constants.PSA_KEYS]
+            .astype(float)
+        )
+        site_obs_sim = (
+            sim_df.loc[
+                (sim_df.event_id == event)
+                & (sim_df.site_id == site_obs)
+                & (sim_df.rel_id == rel)
+            ]
+            .iloc[0][sr.constants.PSA_KEYS]
+            .astype(float)
+        )
 
         m = (
             (results_df.event == event)
@@ -268,15 +289,69 @@ def run_individual_samples_tab(results_dir: Path):
 
         st.markdown(f"##### Loss: {results_df.loc[m, ['loss']].iloc[0].values[0]}")
 
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.plot(
+        # Residuals
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        ax.semilogx(
+            sr.constants.PERIODS,
+            np.log(site_obs_obs.values) - np.log(site_int_sim.values),
+            label="Site Obs Obs - Site Int Sim (Input)",
+            c="magenta",
+            linestyle="--",
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            np.log(site_obs_obs.values) - np.log(site_obs_sim.values),
+            label="Site Obs Obs - Site Obs Sim (Input)",
+            c="blue",
+            linestyle="--",
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            np.log(site_obs_sim.values) - np.log(site_int_sim.values),
+            label="Site Obs Sim - Site Int Sim (Input)",
+            c="cyan",
+            linestyle="--",
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            pred,
+            c="k",
+            linestyle="-",
+            label="Site Int Obs - Site Int Sim (Predicted)",
+            linewidth=2.0,
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            np.log(site_int_obs.values) - np.log(site_int_sim.values),
+            c="r",
+            linestyle="-",
+            label="Site Int Obs - Site Int Sim (True)",
+            linewidth=2.0,
+        )
+
+        ax.set_xlabel("Period")
+        ax.set_ylabel("Residual")
+        ax.set_xlim(0.01, 10.0)
+        ax.set_ylim(-2.0, 2.0)
+        ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+        ax.legend()
+        fig.tight_layout()
+
+        st.pyplot(fig, use_container_width=False)
+
+        ## Response Spectrum
+        pred_pSA = site_int_sim * np.exp(pred)
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.semilogx(
             sr.constants.PERIODS,
             site_int_obs,
             label="Site of Interest (Observed)",
             linestyle="-",
             c="r",
         )
-        ax.plot(
+        ax.semilogx(
             sr.constants.PERIODS,
             site_int_sim,
             label="Site of Interest (Simulated)",
@@ -284,14 +359,14 @@ def run_individual_samples_tab(results_dir: Path):
             linestyle="--",
         )
 
-        ax.plot(
+        ax.semilogx(
             sr.constants.PERIODS,
             site_obs_obs,
             label="Observation Site (Observed)",
             linestyle="-",
             c="b",
         )
-        ax.plot(
+        ax.semilogx(
             sr.constants.PERIODS,
             site_obs_sim,
             label="Observation Site (Simulated)",
@@ -301,7 +376,7 @@ def run_individual_samples_tab(results_dir: Path):
 
         ax.semilogx(
             sr.constants.PERIODS,
-            np.exp(pred),
+            pred_pSA,
             label="Site of Interest (Predicted)",
             c="k",
             linestyle="-",
@@ -316,7 +391,8 @@ def run_individual_samples_tab(results_dir: Path):
 
         st.pyplot(fig, use_container_width=False)
 
-        cur_site_df = site_df.loc[[site_int, site_obs], ["vs30", "z1.0", "z2.5"]]
+        ## Info table
+        cur_site_df = site_df.loc[[site_int, site_obs], metadata["site_features"]]
         cur_site_df["distance"] = results_df["distance"].loc[m].iloc[0]
 
         st.dataframe(cur_site_df)
@@ -324,9 +400,9 @@ def run_individual_samples_tab(results_dir: Path):
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
-        _sample_viewer(train_results, metadata["train_events"])
+        _sample_viewer(train_results, metadata["train_events"], "train")
     with val_tab:
-        _sample_viewer(val_results, metadata["val_events"])
+        _sample_viewer(val_results, metadata["val_events"], "val")
 
 
 def run_rs_agg_tab(results_dir: Path):
@@ -352,6 +428,7 @@ def run_rs_agg_tab(results_dir: Path):
         ax.set_xlabel("Distance (km)")
         ax.set_ylabel("Loss")
         ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+        ax.set_ylim(0, 2.0)
         fig.tight_layout()
 
         st.pyplot(fig, use_container_width=False)

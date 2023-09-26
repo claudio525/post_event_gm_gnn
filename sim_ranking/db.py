@@ -107,7 +107,7 @@ class DB:
         existing_sites = self.get_avail_sites()
         sites = list(sites.difference(existing_sites))
 
-        cur_site_df = site_df.loc[sites, ["lat", "lon", "Vs30", "Z1.0", "Z2.5"]]
+        cur_site_df = site_df.loc[sites, ["lat", "lon", "Vs30", "Z1.0", "Z2.5", "Tsite"]]
         cur_site_df = cur_site_df.rename(
             columns={"Vs30": "vs30", "Z1.0": "z1.0", "Z2.5": "z2.5", "Tsite": "tsite"}
         )
@@ -224,7 +224,7 @@ class DB:
 
         # Create the event and site tables
         cur.execute(
-            "CREATE TABLE sites (site_id TEXT PRIMARY KEY, lat REAL, lon REAL, vs30 REAL, [z1.0] REAL, [z2.5] REAL)"
+            "CREATE TABLE sites (site_id TEXT PRIMARY KEY, lat REAL, lon REAL, vs30 REAL, [z1.0] REAL, [z2.5] REAL, tsite REAL)"
         )
         cur.execute(
             "CREATE TABLE events (event_id TEXT PRIMARY KEY, lat REAL, lon REAL, mag REAL)"
