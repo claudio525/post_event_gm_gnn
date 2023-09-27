@@ -76,16 +76,34 @@ class DB:
 
             sites.update(cur_df.site_id.values)
 
-            ### Add the observed IM data
+            ### Add the observed IM data and record data
             # Only need to add observed IM data first time
             if cur_event_id not in events:
+                # Get current event data
                 cur_obs_df = obs_df.loc[obs_df["evid"] == cur_event_id]
+
+                # Split into observed IM and record data
+                cur_record_df = cur_obs_df.loc[:, ["evid", "sta", "r_rup", "r_x"]]
                 cur_obs_df = cur_obs_df[["evid", "sta"] + constants.PSA_KEYS]
+
+                # Write observed IM data
                 cur_obs_df = cur_obs_df.rename(
                     columns={"evid": "event_id", "sta": "site_id"}
                 )
                 cur_obs_df.to_sql(
                     "obs_im_data",
+                    self.con,
+                    if_exists="append",
+                    index=True,
+                    index_label="record_id",
+                )
+
+                # Write record data
+                cur_record_df = cur_record_df.rename(
+                    columns={"evid": "event_id", "sta": "site_id"}
+                )
+                cur_record_df.to_sql(
+                    "records",
                     self.con,
                     if_exists="append",
                     index=True,
@@ -107,9 +125,11 @@ class DB:
         existing_sites = self.get_avail_sites()
         sites = list(sites.difference(existing_sites))
 
-        cur_site_df = site_df.loc[sites, ["lat", "lon", "Vs30", "Z1.0", "Z2.5", "Tsite"]]
+        cur_site_df = site_df.loc[
+            sites, ["lat", "lon", "Vs30", "Z1.0", "Z2.5", "T0"]
+        ]
         cur_site_df = cur_site_df.rename(
-            columns={"Vs30": "vs30", "Z1.0": "z1.0", "Z2.5": "z2.5", "Tsite": "tsite"}
+            columns={"Vs30": "vs30", "Z1.0": "z1.0", "Z2.5": "z2.5", "T0": "tsite"}
         )
         cur_site_df.to_sql(
             "sites", self.con, if_exists="append", index=True, index_label="site_id"
@@ -122,6 +142,10 @@ class DB:
     def get_event_df(self):
         """Gets the event data"""
         return pd.read_sql("SELECT * FROM events", self.con, index_col="event_id")
+
+    def get_record_df(self):
+        """Gets the record data"""
+        return pd.read_sql("SELECT * FROM records", self.con, index_col="record_id")
 
     def get_sim_df(self):
         """Gets the simulation data"""
@@ -245,5 +269,11 @@ class DB:
         )
         for cur_period in constants.PERIODS:
             cur.execute(f"ALTER TABLE obs_im_data ADD COLUMN [pSA_{cur_period}] REAL")
+
+        # Create the records table
+        cur.execute(
+            "CREATE TABLE records (record_id TEXT PRIMARY KEY, event_id TEXT, "
+            "site_id TEXT, r_rup REAL, r_x REAL, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
+        )
 
         return cls(db_ffp)

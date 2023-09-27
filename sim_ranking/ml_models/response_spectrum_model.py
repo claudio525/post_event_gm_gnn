@@ -33,92 +33,69 @@ print(f"Using device: {device}")
 
 
 def get_dataset_predictions(
-    train_dataset: sr.ml.data.MetaDataDataset,
-    train_meta_dataset: sr.ml.data.ResponseSpectrumDataset,
+    dataset: sr.ml.data.ResponseSpectrumDataset,
     model: nn.Module,
     device: str,
     loss_fn_key: str,
 ):
-    pred_train_meta_dataloader = DataLoader(
-        train_meta_dataset, shuffle=False, batch_size=4096, num_workers=0
-    )
+    # pred_train_meta_dataloader = DataLoader(
+    #     train_meta_dataset, shuffle=False, batch_size=4096, num_workers=0
+    # )
     pred_train_dataloader = DataLoader(
-        train_dataset, shuffle=False, batch_size=4096, num_workers=0
+        dataset, shuffle=False, batch_size=4096, num_workers=0
     )
 
     model.eval()
-    results = {
-        "index": [],
-        "event": [],
-        "rel": [],
-        "site_int": [],
-        "site_obs": [],
-        "loss": [],
-        "distance": [],
-    }
+
+    results = []
     pred_res_results, true_res_results = [], []
 
     for i, (
-        (
-            obs_obs_obs_sim_res,
-            obs_obs_int_sim_res,
-            obs_sim_int_sim_rel,
-            site_features,
-            true_rs,
-            distance,
-        ),
-        (event, rel, site_int, site_obs),
-    ) in enumerate(zip(pred_train_dataloader, pred_train_meta_dataloader)):
+        data_ind,
+        obs_obs_obs_sim_res,
+        obs_obs_int_sim_res,
+        obs_sim_int_sim_rel,
+        site_features,
+        true_res,
+    ) in enumerate(pred_train_dataloader):
         # Forward pass
         pred = (
             _get_prediction(
-                obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features, model, device
+                obs_obs_obs_sim_res,
+                obs_obs_int_sim_res,
+                obs_sim_int_sim_rel,
+                site_features,
+                model,
+                device,
             )
             .cpu()
             .detach()
         )
 
-        results["index"] = np.concatenate(
-            (
-                results["index"],
-                np.char.add(
+        meta_df = pd.DataFrame(
+            [dataset.get_metadata(data_ind[0]) for ix in data_ind],
+            columns=["event_id", "rel_id", "site_int", "site_obs"],
+        )
+        meta_df.index = np.char.add(
                     np.char.add(
                         np.char.add(
                             np.char.add(
-                                np.char.add(event, "_"),
-                                np.char.add(np.asarray(rel), "_"),
+                                np.char.add(meta_df.event_id.values.astype(str), "_"),
+                                np.char.add(meta_df.rel_id.values.astype(str), "_"),
                             ),
-                            np.asarray(site_int),
+                            meta_df.site_int.values.astype(str),
                         ),
                         "_",
                     ),
-                    np.asarray(site_obs),
-                ),
-            )
-        )
-        results["event"] = np.concatenate((results["event"], np.asarray(event)))
-        results["rel"] = np.concatenate((results["rel"], np.asarray(rel)))
-        results["site_int"] = np.concatenate(
-            (results["site_int"], np.asarray(site_int))
-        )
-        results["site_obs"] = np.concatenate(
-            (results["site_obs"], np.asarray(site_obs))
-        )
-        results["distance"] = np.concatenate((results["distance"], distance.numpy()))
-        results["loss"] = np.concatenate(
-            (
-                results["loss"],
-                _compute_loss(loss_fn_key, pred, true_rs, distance, reduction="none")
-                .cpu()
-                .detach()
-                .numpy()
-                .mean(axis=1),
-            )
-        )
-        true_res_results.append(true_rs.numpy())
+                    meta_df.site_obs.values.astype(str),
+                )
+        meta_df["loss"] = _compute_loss(loss_fn_key, pred, true_res, reduction="none").cpu().detach().numpy().mean(axis=1)
+
+        results.append(meta_df)
+        true_res_results.append(true_res.numpy())
         pred_res_results.append(pred.numpy())
 
-    results_df = pd.DataFrame(results).set_index("index", drop=True)
+    results_df = pd.concat(results)
     results_df.loc[:, np.char.add(sr.constants.PSA_KEYS, "_true")] = np.concatenate(
         true_res_results, axis=0
     )
@@ -128,21 +105,34 @@ def get_dataset_predictions(
 
     return results_df
 
-def _get_prediction(
 
-    obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features, model: nn.Module, device: str
+def _get_prediction(
+    obs_obs_obs_sim_res,
+    obs_obs_int_sim_res,
+    obs_sim_int_sim_rel,
+    site_features,
+    model: nn.Module,
+    device: str,
 ):
     # Put data onto the device
-    obs_obs_obs_sim_res = obs_obs_obs_sim_res.to(device, dtype=torch.float32)[:, None, :]
-    obs_obs_int_sim_res = obs_obs_int_sim_res.to(device, dtype=torch.float32)[:, None, :]
-    obs_sim_int_sim_rel = obs_sim_int_sim_rel.to(device, dtype=torch.float32)[:, None, :]
+    obs_obs_obs_sim_res = obs_obs_obs_sim_res.to(device, dtype=torch.float32)[
+        :, None, :
+    ]
+    obs_obs_int_sim_res = obs_obs_int_sim_res.to(device, dtype=torch.float32)[
+        :, None, :
+    ]
+    obs_sim_int_sim_rel = obs_sim_int_sim_rel.to(device, dtype=torch.float32)[
+        :, None, :
+    ]
     site_features = site_features.to(device, dtype=torch.float32)
 
     # return model(rs_int_sim, rs_obs_sim, rs_obs_obs, site_features).ravel()
-    return model(obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features)
+    return model(
+        obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features
+    )
 
 
-def _compute_loss(loss_fn_key: str, pred, sim_score, distance, reduction: str = "mean"):
+def _compute_loss(loss_fn_key: str, pred, sim_score, reduction: str = "mean"):
     return nn.functional.l1_loss(pred, sim_score, reduction=reduction)
 
 
@@ -167,22 +157,26 @@ def train(
         ### Training
         model.train()
         for i, (
+            _,
             obs_obs_obs_sim_res,
             obs_obs_int_sim_res,
             obs_sim_int_sim_rel,
             site_features,
             int_obs_int_sim_res,
-            distance,
         ) in enumerate(train_dataloader):
             # Forward pass
             pred = _get_prediction(
-                obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features, model, device
+                obs_obs_obs_sim_res,
+                obs_obs_int_sim_res,
+                obs_sim_int_sim_rel,
+                site_features,
+                model,
+                device,
             )
 
             # Compute the loss
-            distance = distance.to(device, dtype=torch.float32)
             int_obs_int_sim_res = int_obs_int_sim_res.to(device, dtype=torch.float32)
-            loss = _compute_loss(loss_fn_key, pred, int_obs_int_sim_res, distance)
+            loss = _compute_loss(loss_fn_key, pred, int_obs_int_sim_res)
 
             # Update weights
             loss.backward()
@@ -197,22 +191,28 @@ def train(
         model.eval()
         with torch.no_grad():
             for i, (
+                _,
                 obs_obs_obs_sim_res,
                 obs_obs_int_sim_res,
                 obs_sim_int_sim_rel,
                 site_features,
                 int_obs_int_sim_res,
-                distance,
             ) in enumerate(val_dataloader):
                 # Forward pass
                 pred = _get_prediction(
-                    obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features, model, device
+                    obs_obs_obs_sim_res,
+                    obs_obs_int_sim_res,
+                    obs_sim_int_sim_rel,
+                    site_features,
+                    model,
+                    device,
                 )
 
                 # Loss
-                distance = distance.to(device, dtype=torch.float32)
-                int_obs_int_sim_res = int_obs_int_sim_res.to(device, dtype=torch.float32)
-                loss = _compute_loss(loss_fn_key, pred, int_obs_int_sim_res, distance)
+                int_obs_int_sim_res = int_obs_int_sim_res.to(
+                    device, dtype=torch.float32
+                )
+                loss = _compute_loss(loss_fn_key, pred, int_obs_int_sim_res)
                 loss_hist_val[epoch] += loss.item() * int_obs_int_sim_res.shape[0]
 
             loss_hist_val[epoch] /= len(val_dataloader.dataset)
@@ -249,8 +249,10 @@ def main(
     # FC_UNITS = [128, 64, 32]
     FC_UNITS = [64, 32]
 
-    SITE_FEATURES = ["vs30", "z1.0", "z2.5", "tsite"]
-    N_SCALAR_FEATURES = 9
+    SITE_FEATURE_KEYS = ["vs30", "z1.0", "z2.5", "tsite"]
+    SITE_TO_SITE_FEATURE_KEYS = ["dist"]
+    EVENT_SITE_FEATURE_KEYS = ["r_rup"]
+    EVENT_SITE_TO_SITE_FEATURE_KEYS = ["angle"]
     ### END CONFIG ###
 
     # Fixing the random seed
@@ -262,6 +264,8 @@ def main(
 
     db = sr.db.DB(db_ffp)
     station_df = db.get_site_df()
+    event_df = db.get_event_df()
+    record_df = db.get_record_df()
 
     events = db.get_avail_events()
     print(f"Number of events: {len(events)}")
@@ -276,8 +280,16 @@ def main(
 
     # Select one of the events for validation
     # val_events = np.asarray(["3468575", "3528839"])
-    val_events = np.asarray(["3528839", "3497857", "2017p161601",
-                             "2013p543121", "2016p355041", "2017p512943"])
+    val_events = np.asarray(
+        [
+            "3528839",
+            "3497857",
+            "2017p161601",
+            "2013p543121",
+            "2016p355041",
+            "2017p512943",
+        ]
+    )
     train_events = np.setdiff1d(events, val_events)
 
     # Get the sites per event
@@ -320,9 +332,50 @@ def main(
     n_periods = len(periods)
 
     # Run pre-processing for the site features
+    # TODO: This should be updated such that the normalisation
+    # only happens on training sites, not all sites
     print(f"Pre-processing site features")
-    station_df_norm, site_feature_stats = sr.ml.data.preprocess_site_features(
-        station_df, SITE_FEATURES
+    site_features_df, site_feature_stats = sr.ml.features.preprocess_site_features(
+        station_df, SITE_FEATURE_KEYS
+    )
+
+    # Computed the site-to-site features
+    print(f"Computing scalar features")
+    ### Site-to-site features
+    site_to_site_features = {}
+
+    # Scale the (used) site-to-site distances
+    # such that they are between -1 and 1
+    # as per the maximum allowed site-to-site
+    # distance when computing the site combinations
+    site_to_site_features["dist"] = ((dist_matrix.copy() / max_dist) * 2) - 1
+
+    ### Event-site features
+    event_site_features = {}
+    for cur_event in events:
+        event_site_features[cur_event] = sr.ml.features.pre_process_event_site_features(
+            record_df.loc[record_df.event_id == cur_event]
+            .set_index("site_id")
+            .drop(columns=["event_id"])
+        )
+
+    ### Event-site-to-site features
+    event_site_to_site_features = {}
+
+    # Compute the site-to-site angle wrt. the epicentre
+    event_site_to_site_features["angle"] = sr.ml.features.compute_angular_distance(
+        station_df.copy(), event_df.copy(), events, event_sites
+    )
+
+    scalar_features = sr.ml.data.ScalarFeatures(
+        site_features_df,
+        SITE_FEATURE_KEYS,
+        site_to_site_features,
+        SITE_TO_SITE_FEATURE_KEYS,
+        event_site_features,
+        EVENT_SITE_FEATURE_KEYS,
+        event_site_to_site_features,
+        EVENT_SITE_TO_SITE_FEATURE_KEYS,
     )
 
     # Create the training and validation dataset
@@ -332,22 +385,20 @@ def main(
         train_site_combs,
         db,
         n_rels_used,
-        station_df_norm,
+        site_features_df,
         periods,
         pSA_keys,
-        dist_matrix,
-        SITE_FEATURES,
+        scalar_features,
     )
     val_dataset = sr.ml.data.ResponseSpectrumResidualDataset(
         val_event_sites,
         val_site_combs,
         db,
         n_rels_used,
-        station_df_norm,
+        site_features_df,
         periods,
         pSA_keys,
-        dist_matrix,
-        SITE_FEATURES,
+        scalar_features,
     )
 
     # Create the dataloaders
@@ -355,7 +406,7 @@ def main(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=2,
+        num_workers=0,
         pin_memory=True,
     )
     val_dataloader = DataLoader(
@@ -377,7 +428,7 @@ def main(
         padding,
         FC_UNITS,
         len(periods),
-        N_SCALAR_FEATURES,
+        scalar_features.n_scalar_features,
         n_periods,
         apply_sigmoid=False,
     ).to(device)
@@ -391,7 +442,7 @@ def main(
             (batch_size, 1, 31),
             (batch_size, 1, 31),
             (batch_size, 1, 31),
-            (batch_size, N_SCALAR_FEATURES),
+            (batch_size, scalar_features.n_scalar_features),
         ],
     )
 
@@ -420,14 +471,10 @@ def main(
 
     # Get predictions for the training and validation datasets
     print(f"Getting predictions")
-    train_meta_dataset = sr.ml.data.MetaDataDataset(train_dataset)
     train_results_df = get_dataset_predictions(
-        train_dataset, train_meta_dataset, model, device, loss_fn_key
+        train_dataset, model, device, loss_fn_key
     )
-    val_meta_dataset = sr.ml.data.MetaDataDataset(val_dataset)
-    val_results_df = get_dataset_predictions(
-        val_dataset, val_meta_dataset, model, device, loss_fn_key
-    )
+    val_results_df = get_dataset_predictions(val_dataset, model, device, loss_fn_key)
 
     # Save the results
     run_id = mlt.utils.create_run_id(False)
@@ -439,14 +486,17 @@ def main(
 
     # Write the metadata
     meta_data = {
-        **site_feature_stats.to_dict(),
+        "site_feature_stats": site_feature_stats.to_dict(),
         "n_rels_used": n_rels_used,
         # "n_val_sites": N_VAL_SITES,
         "val_events": val_events.astype(str).tolist(),
         "n_train_samples": len(train_dataset),
         "n_val_samples": len(val_dataset),
         "train_events": train_events.astype(str).tolist(),
-        "site_features": SITE_FEATURES,
+        "site_features": scalar_features.site_feature_keys,
+        "site_to_site_features": scalar_features.site_to_site_feature_keys,
+        "event_site_features": scalar_features.event_site_feature_keys,
+        "event_site_to_site_features": scalar_features.event_site_to_site_feature_keys,
         "comment": comment,
         "model": {
             "n_channels": RS_N_CHANNELS,
@@ -478,7 +528,7 @@ def main(
             (batch_size, 1, 31),
             (batch_size, 1, 31),
             (batch_size, 1, 31),
-            (batch_size, N_SCALAR_FEATURES),
+            (batch_size, scalar_features.n_scalar_features),
         ],
         expand_nested=True,
         filename="model_vis",

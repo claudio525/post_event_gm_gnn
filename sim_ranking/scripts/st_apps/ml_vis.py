@@ -6,6 +6,7 @@ import numpy as np
 
 import streamlit as st
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import typer
 
 import sim_ranking as sr
@@ -219,32 +220,94 @@ def run_individual_samples_tab(results_dir: Path):
     sim_df = get_sim_df(results_dir)
 
     site_df = get_site_df(results_dir)
+    event_df = get_event_df(results_dir)
 
     def _sample_viewer(results_df: pd.DataFrame, events: np.ndarray, type: str):
-        event = st.selectbox("Event", events, key=f"{type}_event")
+        col1, col2 = st.columns([1, 6])
 
-        rel = st.selectbox(
-            "Realisation",
-            results_df[(results_df.event == event)].rel.unique().astype("str"),
-            key=f"{type}_rel",
-        )
+        with col1:
+            event = st.selectbox("Event", events, key=f"{type}_event")
 
-        site_int = st.selectbox(
-            "Site of Interest",
-            results_df.loc[(results_df.event == event) & (results_df.rel == rel)]
-            .site_int.unique()
-            .astype("str"),
-            key=f"{type}_site_int",
-        )
-        site_obs = st.selectbox(
-            "Observation Site",
-            results_df.loc[
-                (results_df.event == event)
-                & (results_df.site_int == site_int)
-                & (results_df.rel == rel)
-            ].site_obs,
-            key=f"{type}_site_obs",
-        )
+            rel = st.selectbox(
+                "Realisation",
+                results_df[(results_df.event == event)].rel.unique().astype("str"),
+                key=f"{type}_rel",
+            )
+
+            site_int = st.selectbox(
+                "Site of Interest",
+                results_df.loc[(results_df.event == event) & (results_df.rel == rel)]
+                .site_int.unique()
+                .astype("str"),
+                key=f"{type}_site_int",
+            )
+            site_obs = st.selectbox(
+                "Observation Site",
+                results_df.loc[
+                    (results_df.event == event)
+                    & (results_df.site_int == site_int)
+                    & (results_df.rel == rel)
+                ].site_obs,
+                key=f"{type}_site_obs",
+            )
+
+        with col2:
+            # Map
+            event_sites = np.union1d(
+                results_df[results_df.event == event].site_int.values,
+                results_df[results_df.event == event].site_obs.values,
+            )
+            fig = go.Figure(
+                data=[
+                    go.Scattermapbox(
+                        lat=site_df.loc[event_sites].lat,
+                        lon=site_df.loc[event_sites].lon,
+                        mode="markers",
+                        marker=dict(size=10),
+                        hovertext=event_sites,
+                        hoverinfo="text",
+                        name="Sites"
+                    ),
+                    go.Scattermapbox(
+                        lat=[event_df.loc[event, "lat"]],
+                        lon=[event_df.loc[event, "lon"]],
+                        mode="markers",
+                        marker=dict(size=20, color="orange"),
+                        hovertext=event,
+                        hoverinfo="text",
+                        name="Event"
+                    ),
+                    go.Scattermapbox(
+                        lat=[site_df.loc[site_int, "lat"]],
+                        lon=[site_df.loc[site_int, "lon"]],
+                        mode="markers",
+                        marker=dict(size=10, color="red"),
+                        hovertext=site_int,
+                        hoverinfo="text",
+                        name="Site of Interest"
+                    ),
+                    go.Scattermapbox(
+                        lat=[site_df.loc[site_obs, "lat"]],
+                        lon=[site_df.loc[site_obs, "lon"]],
+                        mode="markers",
+                        marker=dict(size=10, color="maroon"),
+                        hovertext=site_obs,
+                        hoverinfo="text",
+                        name="Observation Site"
+                    ),
+                ]
+            )
+
+            fig.update_layout(height=600, margin=dict(l=0, r=0, t=0, b=0))
+            fig.update_mapboxes(
+                accesstoken="pk.eyJ1IjoiY3MyMyIsImEiOiJjbGtpeXIxNnkwbDQ3M25xbDFrZWFnNHo3In0.OD7TJ_1PegpGvCOCxfHsnA",
+                center=dict(
+                    lat=site_df.loc[event_sites].lat.mean(),
+                    lon=site_df.loc[event_sites].lon.mean(),
+                ),
+                zoom=8,
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
         site_int_obs = (
             obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_int)]
@@ -400,6 +463,7 @@ def run_individual_samples_tab(results_dir: Path):
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
+
         _sample_viewer(train_results, metadata["train_events"], "train")
     with val_tab:
         _sample_viewer(val_results, metadata["val_events"], "val")
