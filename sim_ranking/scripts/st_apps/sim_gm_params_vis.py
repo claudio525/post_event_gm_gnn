@@ -22,21 +22,8 @@ def get_avail_ims(sim_site_corr_dir: Path, event: str):
     return sim_site_corrs.ims
 
 
-    # return np.sort(
-    #     [
-    #         sr.utils.reverse_im_filename(cur_ffp.stem)
-    #         for cur_ffp in (sim_site_corr_dir / event).iterdir()
-    #         if cur_ffp.is_file()
-    #     ]
-    # )
-
-
 @st.cache_data
 def load_sim_site_correlations(sim_site_corr_dir: Path, event: str):
-    # sim_site_corrs = sr.data.SimWithinEventSiteCorrelations.load(
-    #     sim_site_corr_dir / event
-    # )
-
     sim_site_corrs = sr.data.SiteCorrelations.load(sim_site_corr_dir / f"{event}.pickle")
 
     return sim_site_corrs
@@ -185,7 +172,6 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
                     hoverinfo="text",
                 )
             )
-            # fig.update_mapboxes(fitbounds="locations")
             fig.update_layout(height=900, width=1400)
             fig.update_mapboxes(
                 accesstoken="pk.eyJ1IjoiY3MyMyIsImEiOiJjbGtpeXIxNnkwbDQ3M25xbDFrZWFnNHo3In0.OD7TJ_1PegpGvCOCxfHsnA",

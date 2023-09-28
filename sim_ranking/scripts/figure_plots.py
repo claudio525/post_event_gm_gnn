@@ -70,7 +70,7 @@ def plot_perturbed_response_spectrum(
     sim_imdb_ffp: Path, site: str, n_rels: int, output_ffp: Path
 ):
     # Load Simulation data
-    sim_df = sr.data.load_sim_data(sim_imdb_ffp, [site])[site]
+    sim_df = sr.data.load_site_sim_data(sim_imdb_ffp, [site])[site]
 
     # Select realisations
     rel_ids = np.random.choice(sim_df.index.values.astype(str), n_rels, replace=False)
@@ -373,7 +373,7 @@ def sim_site_correlations(sim_corr_dir: Path, site_ffp: Path, ims: List[str], ev
     sim_corrs = sr.data.load_correlations(sim_corr_dir)[event]
     site_df = sr.data.load_ll_file(site_ffp)
 
-    dist_matrix = sh.im_dist.calculate_distance_matrix(sim_corrs.sites, site_df)
+    dist_matrix = sh.im_dist.calculate_distance_matrix(sim_corrs.event_sites, site_df)
 
     for cur_im in ims:
         # Get the model values

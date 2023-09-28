@@ -40,7 +40,7 @@ def gen_cMVN_plots(
 
     # Load the observation & simulation data
     obs_df = sr.data.load_obs_rupture_data(obs_data_ffp, cMVN_result.rupture)
-    sim_data = sr.data.load_sim_data(sim_imdb_ffp, sites=sites, event=cMVN_result.rupture)
+    sim_data = sr.data.load_site_sim_data(sim_imdb_ffp, sites=sites, event=cMVN_result.rupture)
 
     # Drop any sites for which there is no simulation data
     mask = np.isin(sites, list(sim_data.keys()))

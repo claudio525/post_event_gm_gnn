@@ -21,18 +21,6 @@ import spatial_hazard as sh
 @st.cache_data
 def _get_meta(results_dir: Path):
     return sr.data.get_meta(results_dir)
-    # meta = mlt.utils.load_yaml(results_dir / "meta.yaml")
-    # meta = {
-    #     key: os.path.expandvars(val)
-    #     if isinstance(val, str) and (key.endswith("_ffp") or key.endswith("_dir"))
-    #     else val
-    #     for key, val in meta.items()
-    # }
-    # return meta
-
-
-# def _get_method_type(results_dir: Path):
-#     return sr.constants.RankingMethod(_get_meta(results_dir)["method_type"])
 
 
 @st.cache_data
@@ -60,7 +48,7 @@ def _get_sim_data(results_dir: Path, sites: np.ndarray):
 
 @st.cache_data
 def _load_sim_data(sim_imdb_ffp: Path, sites: np.ndarray, event: str):
-    return sr.data.load_sim_data(sim_imdb_ffp, sites=sites, event=event)
+    return sr.data.load_site_sim_data(sim_imdb_ffp, sites=sites, event=event)
 
 
 def _get_sites(results_dir: Path):
