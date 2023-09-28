@@ -38,11 +38,8 @@ def get_dataset_predictions(
     device: str,
     loss_fn_key: str,
 ):
-    # pred_train_meta_dataloader = DataLoader(
-    #     train_meta_dataset, shuffle=False, batch_size=4096, num_workers=0
-    # )
     pred_train_dataloader = DataLoader(
-        dataset, shuffle=False, batch_size=4096, num_workers=0
+        dataset, shuffle=False, batch_size=4096, num_workers=2
     )
 
     model.eval()
@@ -73,7 +70,7 @@ def get_dataset_predictions(
         )
 
         meta_df = pd.DataFrame(
-            [dataset.get_metadata(data_ind[0]) for ix in data_ind],
+            [dataset.get_metadata(ix) for ix in data_ind],
             columns=["event_id", "rel_id", "site_int", "site_obs"],
         )
         meta_df.index = np.char.add(
@@ -161,7 +158,7 @@ def train(
             obs_obs_obs_sim_res,
             obs_obs_int_sim_res,
             obs_sim_int_sim_rel,
-            site_features,
+            scalar_features,
             int_obs_int_sim_res,
         ) in enumerate(train_dataloader):
             # Forward pass
@@ -169,7 +166,7 @@ def train(
                 obs_obs_obs_sim_res,
                 obs_obs_int_sim_res,
                 obs_sim_int_sim_rel,
-                site_features,
+                scalar_features,
                 model,
                 device,
             )
@@ -195,7 +192,7 @@ def train(
                 obs_obs_obs_sim_res,
                 obs_obs_int_sim_res,
                 obs_sim_int_sim_rel,
-                site_features,
+                scalar_features,
                 int_obs_int_sim_res,
             ) in enumerate(val_dataloader):
                 # Forward pass
@@ -203,7 +200,7 @@ def train(
                     obs_obs_obs_sim_res,
                     obs_obs_int_sim_res,
                     obs_sim_int_sim_rel,
-                    site_features,
+                    scalar_features,
                     model,
                     device,
                 )
@@ -242,10 +239,10 @@ def main(
     ### CONFIG ###
     # N_VAL_SITES = 10
 
-    # RS_N_CHANNELS = [1, 16, 32]
-    RS_N_CHANNELS = []
-    RS_KERNEL_SIZES = []
-    # RS_KERNEL_SIZES = [5, 3]
+    RS_N_CHANNELS = [1, 16, 32]
+    # RS_N_CHANNELS = []
+    # RS_KERNEL_SIZES = []
+    RS_KERNEL_SIZES = [5, 3]
     # FC_UNITS = [128, 64, 32]
     FC_UNITS = [64, 32]
 
@@ -326,6 +323,8 @@ def main(
     val_site_combs, val_event_sites = sr.ml.data.compute_site_combinations(
         event_sites, val_events, dist_matrix, sites_to_use=val_sites, max_dist=max_dist
     )
+    train_events = np.asarray(list(train_event_sites.keys()))
+    val_events = np.asarray(list(val_event_sites.keys()))
 
     # Get the periods and corresponding pSA keys
     periods, pSA_keys = sr.constants.PERIODS, sr.constants.PSA_KEYS
@@ -507,6 +506,7 @@ def main(
             "batch_size": batch_size,
             "n_epochs": n_epochs,
             "best_epoch": best_epoch,
+            "weight_decay":weight_decay,
         },
         "data": {
             "db": str(db_ffp_orig),

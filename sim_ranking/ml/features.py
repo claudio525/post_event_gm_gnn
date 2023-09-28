@@ -34,7 +34,6 @@ def compute_angular_distance(
                 if i == j:
                     cur_site_to_site_angle[i, j] = 0.0
                 else:
-                    ## TODO: Finish this!!
                     v1 = cur_site_coords[i] - cur_epi
                     v2 = cur_site_coords[j] - cur_epi
                     cur_site_to_site_angle[i, j] = np.arccos(

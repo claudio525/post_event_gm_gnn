@@ -51,6 +51,7 @@ def compute_site_combinations(
             else cur_sites[np.isin(cur_sites, sites_to_use)]
         )
 
+        # Need at least two sites for the event
         if len(cur_sites) < 2:
             continue
 
@@ -61,6 +62,11 @@ def compute_site_combinations(
             cur_dist_matrix.values > 0
         )
         cur_row_ind, cur_col_ind = np.nonzero(cur_dist_mask)
+
+        # Need at least one site combination within the
+        # specified distance requirements
+        if cur_row_ind.size == 0:
+            continue
 
         # Get the site combinations
         # First is the site of interest, second is the observation site
@@ -288,11 +294,13 @@ class BaseDataset(Dataset):
         return self.n_samples
 
     def get_indices(self, idx: int):
-        event_ix = np.argmin(idx // self._cum_n_samples)
+        # Have to it this way, as some events may not have samples
+        event_ix = np.flatnonzero(idx - self._cum_n_samples < 0)[0]
+
         event = self.events[event_ix]
         n_rels = self.n_rels_used[event]
 
-        site_ix = (idx % self._cum_n_samples[max(event_ix - 1, 0)]) // n_rels
+        site_ix = (idx - self._cum_n_samples[max(event_ix - 1, 0)]) // n_rels
         rel_ix = idx % n_rels
 
         return event, event_ix, site_ix, rel_ix

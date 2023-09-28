@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import typer
 
+import spatial_hazard as sh
 import sim_ranking as sr
 import ml_tools as mlt
 
@@ -59,21 +60,63 @@ def get_site_df(results_dir: Path):
 
 
 @st.cache_data
+def get_record_df(results_dir: Path):
+    metadata = _get_metadata(results_dir)
+    db_ffp = os.path.expandvars(metadata["data"]["db"])
+
+    return sr.db.DB(db_ffp).get_record_df()
+
+@st.cache_data
+def get_event_sites(results_dir: Path):
+    metadata = _get_metadata(results_dir)
+    db_ffp = os.path.expandvars(metadata["data"]["db"])
+
+    return sr.db.DB(db_ffp).get_event_sites()
+
+
+@st.cache_data
 def _load_results(results_dir: Path):
     train_results_df = pd.read_csv(
         results_dir / "train_results.csv",
-        dtype=dict(event=str),
+        dtype=dict(event_id=str),
         index_col=0,
         na_filter=False,
     )
     val_results_df = pd.read_csv(
         results_dir / "val_results.csv",
-        dtype=dict(event=str),
+        dtype=dict(event_id=str),
         index_col=0,
         na_filter=False,
     )
 
+    # Add other stuff
+    dist_matrix = get_dist_matrix(results_dir)
+    train_results_df["s2s_distance"] = [dist_matrix.loc[cur_row.site_int, cur_row.site_obs] for cur_ix, cur_row in train_results_df.iterrows()]
+    val_results_df["s2s_distance"] = [dist_matrix.loc[cur_row.site_int, cur_row.site_obs] for cur_ix, cur_row in val_results_df.iterrows()]
+
+    angular_distances = get_event_angular_distances(results_dir)
+    train_results_df["angular_distance"] = np.rad2deg([angular_distances[cur_row.event_id].loc[cur_row.site_int, cur_row.site_obs] for cur_ix, cur_row in train_results_df.iterrows()])
+
+
     return train_results_df, val_results_df
+
+
+@st.cache_data
+def get_dist_matrix(results_dir: Path):
+    site_df = get_site_df(results_dir)
+
+    return sh.im_dist.calculate_distance_matrix(
+        site_df.index.values.astype(str), site_df
+    )
+
+@st.cache_data
+def get_event_angular_distances(results_dir: Path):
+    station_df = get_site_df(results_dir)
+    event_df = get_event_df(results_dir)
+    event_sites = get_event_sites(results_dir)
+
+    return sr.ml.features.compute_angular_distance(station_df, event_df, event_df.index.values.astype(str),  event_sites)
+
 
 
 def plot_pred_vs_true(result_df: pd.DataFrame, ax: plt.Axes):
@@ -97,48 +140,6 @@ def plot_pred_vs_true(result_df: pd.DataFrame, ax: plt.Axes):
     ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
 
 
-def get_filtering_mask(results_df: pd.DataFrame, label: str):
-    # Filtering
-    sel_events = st.multiselect(
-        "Events", results_df.event.unique().tolist(), key=f"{label}_events"
-    )
-    sel_sites = st.multiselect(
-        "Sites of Interest", results_df.site_int.unique().tolist(), key=f"{label}_sites"
-    )
-
-    col1, col2 = st.columns(2)
-    with col1:
-        min_distance = st.slider(
-            "Min Distance",
-            0,
-            100,
-            value=0,
-            step=1,
-            format="%d km",
-            key=f"{label}_min_distance",
-        )
-    with col2:
-        max_distance = st.slider(
-            "Max Distance",
-            0,
-            100,
-            value=100,
-            step=1,
-            format="%d km",
-            key=f"{label}_max_distance",
-        )
-
-    m = np.ones(results_df.shape[0], dtype=bool)
-    if len(sel_events) > 0:
-        m = m & np.isin(results_df.event.values, sel_events)
-    if len(sel_sites) > 0:
-        m = m & np.isin(results_df.site_int.values, sel_sites)
-    if min_distance > 0:
-        m = m & (results_df.distance.values >= min_distance)
-    if max_distance < 100:
-        m = m & (results_df.distance.values <= max_distance)
-
-    return m
 
 
 def run_general_tab(results_dir: Path):
@@ -151,16 +152,17 @@ def run_general_tab(results_dir: Path):
             f"""
             ### Data
             DB File: {meta["data"]['db']}\n
-
-            Site Features: {meta['site_features']}\n
-            
             Number of Realisations: {meta['n_rels_used']}\n
-            
             Number of Training Events: {len(meta['train_events'])}\n
-            Validation Events: {meta['val_events']}\n
-            
+            Number of Validation Events: {len(meta['val_events'])}\n
             Number of Training Samples: {meta['n_train_samples']}\n
-            Validation Samples: {meta['n_val_samples']}\n
+            Number of Validation Samples: {meta['n_val_samples']}\n
+            
+            #### Features
+            Site Features: {', '.join(meta['site_features'])}\n
+            Site-to-site Features: {', '.join(meta['site_to_site_features'])}\n
+            Event-site Features: {', '.join(meta['event_site_features'])}\n
+            Event-site-to-site Features: {', '.join(meta['event_site_to_site_features'])}\n
             
             Comment: {meta['comment']}\n
             """
@@ -172,10 +174,12 @@ def run_general_tab(results_dir: Path):
             Number of Channels: {meta["model"]['n_channels']}\n
             Kernel Sizes: {meta["model"]['kernel_sizes']}\n
             Fully Connected Units: {meta["model"]['fc_units']}\n
-
+            
+            
             ### Training
             Number of Epochs: {meta["training"]['n_epochs']}\n
             Batch Size: {meta["training"]['batch_size']}\n
+            Weight Decay (L2 Regularisation): {meta["training"].get("weight_decay")}
             """
         )
 
@@ -189,29 +193,6 @@ def run_general_tab(results_dir: Path):
         st.image(str(model_vis_ffp))
 
 
-def run_one_to_one_tab(results_dir: Path):
-    # True vs Predicted plot
-    train_results_df, val_results_df = _load_results(results_dir)
-
-    train_tab, val_tab = st.tabs(["Training", "Validation"])
-
-    with train_tab:
-        m = get_filtering_mask(train_results_df, "train")
-
-        fig, ax = plt.subplots(figsize=(12, 6))
-        plot_pred_vs_true(train_results_df.loc[m], ax)
-        fig.tight_layout()
-        st.pyplot(fig, use_container_width=False)
-
-    with val_tab:
-        m = get_filtering_mask(val_results_df, "val")
-
-        fig, ax = plt.subplots(figsize=(12, 6))
-        plot_pred_vs_true(val_results_df.loc[m], ax)
-        fig.tight_layout()
-        st.pyplot(fig, use_container_width=False)
-
-
 def run_individual_samples_tab(results_dir: Path):
     metadata = _get_metadata(results_dir)
     train_results, val_results = _load_results(results_dir)
@@ -222,6 +203,11 @@ def run_individual_samples_tab(results_dir: Path):
     site_df = get_site_df(results_dir)
     event_df = get_event_df(results_dir)
 
+    dist_df = get_dist_matrix(results_dir)
+    record_df = get_record_df(results_dir)
+
+    event_angular_distances = get_event_angular_distances(results_dir)
+
     def _sample_viewer(results_df: pd.DataFrame, events: np.ndarray, type: str):
         col1, col2 = st.columns([1, 6])
 
@@ -230,23 +216,29 @@ def run_individual_samples_tab(results_dir: Path):
 
             rel = st.selectbox(
                 "Realisation",
-                results_df[(results_df.event == event)].rel.unique().astype("str"),
+                results_df[(results_df.event_id == event)]
+                .rel_id.unique()
+                .astype("str"),
                 key=f"{type}_rel",
             )
 
             site_int = st.selectbox(
                 "Site of Interest",
-                results_df.loc[(results_df.event == event) & (results_df.rel == rel)]
+                results_df.loc[
+                    (results_df.event_id == event) & (results_df.rel_id == rel)
+                ]
                 .site_int.unique()
                 .astype("str"),
                 key=f"{type}_site_int",
             )
+            print(site_int)
+
             site_obs = st.selectbox(
                 "Observation Site",
                 results_df.loc[
-                    (results_df.event == event)
+                    (results_df.event_id == event)
                     & (results_df.site_int == site_int)
-                    & (results_df.rel == rel)
+                    & (results_df.rel_id == rel)
                 ].site_obs,
                 key=f"{type}_site_obs",
             )
@@ -254,8 +246,8 @@ def run_individual_samples_tab(results_dir: Path):
         with col2:
             # Map
             event_sites = np.union1d(
-                results_df[results_df.event == event].site_int.values,
-                results_df[results_df.event == event].site_obs.values,
+                results_df[results_df.event_id == event].site_int.values,
+                results_df[results_df.event_id == event].site_obs.values,
             )
             fig = go.Figure(
                 data=[
@@ -266,7 +258,7 @@ def run_individual_samples_tab(results_dir: Path):
                         marker=dict(size=10),
                         hovertext=event_sites,
                         hoverinfo="text",
-                        name="Sites"
+                        name="Sites",
                     ),
                     go.Scattermapbox(
                         lat=[event_df.loc[event, "lat"]],
@@ -275,7 +267,7 @@ def run_individual_samples_tab(results_dir: Path):
                         marker=dict(size=20, color="orange"),
                         hovertext=event,
                         hoverinfo="text",
-                        name="Event"
+                        name="Event",
                     ),
                     go.Scattermapbox(
                         lat=[site_df.loc[site_int, "lat"]],
@@ -284,7 +276,7 @@ def run_individual_samples_tab(results_dir: Path):
                         marker=dict(size=10, color="red"),
                         hovertext=site_int,
                         hoverinfo="text",
-                        name="Site of Interest"
+                        name="Site of Interest",
                     ),
                     go.Scattermapbox(
                         lat=[site_df.loc[site_obs, "lat"]],
@@ -293,7 +285,7 @@ def run_individual_samples_tab(results_dir: Path):
                         marker=dict(size=10, color="maroon"),
                         hovertext=site_obs,
                         hoverinfo="text",
-                        name="Observation Site"
+                        name="Observation Site",
                     ),
                 ]
             )
@@ -339,10 +331,10 @@ def run_individual_samples_tab(results_dir: Path):
         )
 
         m = (
-            (results_df.event == event)
+            (results_df.event_id == event)
             & (results_df.site_int == site_int)
             & (results_df.site_obs == site_obs)
-            & (results_df.rel == rel)
+            & (results_df.rel_id == rel)
         )
         pred = (
             results_df.loc[m]
@@ -455,10 +447,22 @@ def run_individual_samples_tab(results_dir: Path):
         st.pyplot(fig, use_container_width=False)
 
         ## Info table
-        cur_site_df = site_df.loc[[site_int, site_obs], metadata["site_features"]]
-        cur_site_df["distance"] = results_df["distance"].loc[m].iloc[0]
 
-        st.dataframe(cur_site_df)
+        cur_scalar_features_df = site_df.loc[
+            [site_int, site_obs], metadata["site_features"]
+        ]
+        cur_scalar_features_df["site_to_site_distance"] = dist_df.loc[
+            site_int, site_obs
+        ]
+        cur_scalar_features_df["r_rup"] = (
+            record_df.loc[(record_df.event_id == event)]
+            .set_index("site_id")
+            .loc[[site_int, site_obs], "r_rup"]
+            .values
+        )
+        cur_scalar_features_df["angular_distance"] = event_angular_distances[event].loc[site_int, site_obs]
+
+        st.dataframe(cur_scalar_features_df)
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
@@ -473,13 +477,17 @@ def run_rs_agg_tab(results_dir: Path):
     def create_loss_dist_plot(results_df: pd.DataFrame, mag_coloring: bool = False):
         fig, ax = plt.subplots(figsize=(12, 6))
 
+        dist_matrix = get_dist_matrix(results_dir)
+
         if mag_coloring:
             event_df = get_event_df(results_dir)
+
+            # TODO: Just add all metadata to the results_df to simplify everything...
             t = ax.scatter(
-                results_df.distance,
+                results_df.s2s_distance,
                 results_df.loss,
                 s=2.0,
-                c=event_df.loc[results_df.event, "mag"].values,
+                c=event_df.loc[results_df.event_id, "mag"].values,
                 cmap="viridis_r",
                 vmin=3.5,
                 vmax=7
@@ -487,9 +495,9 @@ def run_rs_agg_tab(results_dir: Path):
             )
             plt.colorbar(t, pad=0, label="Magnitude")
         else:
-            ax.scatter(results_df.distance, results_df.loss, s=2.0, c="k", alpha=0.5)
+            ax.scatter(results_df.s2s_distance, results_df.loss, s=2.0, c="k", alpha=0.5)
 
-        ax.set_xlabel("Distance (km)")
+        ax.set_xlabel("Site to Site Distance (km)")
         ax.set_ylabel("Loss")
         ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
         ax.set_ylim(0, 2.0)
@@ -498,6 +506,7 @@ def run_rs_agg_tab(results_dir: Path):
         st.pyplot(fig, use_container_width=False)
 
     train_results_df, val_results_df = _load_results(results_dir)
+
 
     mag_coloring = st.checkbox("Color by Magnitude", value=False)
 
@@ -524,16 +533,12 @@ def main(results_dir: Path):
     )
     cur_results_dir = results_dir / result_id
 
-    general_tab, one_to_one_tab, individual_samples_tab, rs_agg_tab = st.tabs(
-        ["General", "One-To-One", "Sample Explorer", "RS-Agg"]
+    general_tab, individual_samples_tab, rs_agg_tab = st.tabs(
+        ["General", "Sample Explorer", "RS-Agg"]
     )
 
     with general_tab:
         run_general_tab(cur_results_dir)
-
-    with one_to_one_tab:
-        pass
-        # run_one_to_one_tab(cur_results_dir)
 
     with individual_samples_tab:
         run_individual_samples_tab(cur_results_dir)
@@ -544,3 +549,47 @@ def main(results_dir: Path):
 
 if __name__ == "__main__":
     typer.run(main)
+
+
+# def get_filtering_mask(results_df: pd.DataFrame, label: str):
+#     # Filtering
+#     sel_events = st.multiselect(
+#         "Events", results_df.event.unique().tolist(), key=f"{label}_events"
+#     )
+#     sel_sites = st.multiselect(
+#         "Sites of Interest", results_df.site_int.unique().tolist(), key=f"{label}_sites"
+#     )
+#
+#     col1, col2 = st.columns(2)
+#     with col1:
+#         min_distance = st.slider(
+#             "Min Distance",
+#             0,
+#             100,
+#             value=0,
+#             step=1,
+#             format="%d km",
+#             key=f"{label}_min_distance",
+#         )
+#     with col2:
+#         max_distance = st.slider(
+#             "Max Distance",
+#             0,
+#             100,
+#             value=100,
+#             step=1,
+#             format="%d km",
+#             key=f"{label}_max_distance",
+#         )
+#
+#     m = np.ones(results_df.shape[0], dtype=bool)
+#     if len(sel_events) > 0:
+#         m = m & np.isin(results_df.event.values, sel_events)
+#     if len(sel_sites) > 0:
+#         m = m & np.isin(results_df.site_int.values, sel_sites)
+#     if min_distance > 0:
+#         m = m & (results_df.distance.values >= min_distance)
+#     if max_distance < 100:
+#         m = m & (results_df.distance.values <= max_distance)
+#
+#     return m
