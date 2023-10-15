@@ -7,6 +7,7 @@ import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+import torch
 import typer
 
 import spatial_hazard as sh
@@ -20,11 +21,12 @@ def _get_metadata(results_dir: Path):
 
 
 @st.cache_data
-def _load_loss_history(results_dir: Path):
-    return {
-        "loss": np.load(str(results_dir / "loss_hist_train.npy")),
-        "val_loss": np.load(str(results_dir / "loss_hist_val.npy")),
-    }
+def load_training_metrics(results_dir: Path):
+    # meta = _get_metadata(results_dir)
+
+    metrics = pd.read_pickle(results_dir / "metrics.pickle")
+
+    return metrics
 
 
 @st.cache_data
@@ -96,7 +98,11 @@ def _load_results(results_dir: Path):
 
     angular_distances = get_event_angular_distances(results_dir)
     train_results_df["angular_distance"] = np.rad2deg([angular_distances[cur_row.event_id].loc[cur_row.site_int, cur_row.site_obs] for cur_ix, cur_row in train_results_df.iterrows()])
+    val_results_df["angular_distance"] = np.rad2deg([angular_distances[cur_row.event_id].loc[cur_row.site_int, cur_row.site_obs] for cur_ix, cur_row in val_results_df.iterrows()])
 
+    event_df = get_event_df(results_dir)
+    train_results_df["mag"] = event_df.loc[train_results_df.event_id, "mag"].values
+    val_results_df["mag"] = event_df.loc[val_results_df.event_id, "mag"].values
 
     return train_results_df, val_results_df
 
@@ -184,13 +190,27 @@ def run_general_tab(results_dir: Path):
         )
 
     # Loss plot
+    metrics = load_training_metrics(results_dir)
+    metric_keys = list(metrics.keys())
+
+    avail_metrics = [key.rsplit("_", maxsplit=1)[0] for key in metric_keys[::2]]
+    sel_metric_keys = st.multiselect(
+        "Metrics", avail_metrics, default=[avail_metrics[0]]
+    )
+
     fig, ax = plt.subplots(figsize=(12, 6))
-    mlt.plotting.plot_loss(_load_loss_history(results_dir), ax=ax)
+    mlt.plotting.plot_metrics(metrics, sel_metric_keys, ax=ax, best_epoch=meta["training"]["best_epoch"])
+    # mlt.plotting.plot_metrics(load_training_metrics(results_dir), ax=ax)
     st.pyplot(fig, use_container_width=False)
 
     # Model visualization
-    if (model_vis_ffp := results_dir / "model_vis.png").exists():
-        st.image(str(model_vis_ffp))
+    col_1, col_2 = st.columns(2)
+    with col_1:
+        if (model_vis_ffp := results_dir / "res_model_vis.png").exists():
+            st.image(str(model_vis_ffp))
+    with col_2:
+        if (model_vis_ffp := results_dir / "weight_model_vis.png").exists():
+            st.image(str(model_vis_ffp))
 
 
 def run_individual_samples_tab(results_dir: Path):
@@ -231,7 +251,6 @@ def run_individual_samples_tab(results_dir: Path):
                 .astype("str"),
                 key=f"{type}_site_int",
             )
-            print(site_int)
 
             site_obs = st.selectbox(
                 "Observation Site",
@@ -342,7 +361,9 @@ def run_individual_samples_tab(results_dir: Path):
             .values.astype(float)
         )
 
-        st.markdown(f"##### Loss: {results_df.loc[m, ['loss']].iloc[0].values[0]}")
+        st.markdown(f"##### Misfit Loss: {results_df.loc[m, ['misfit_loss_term']].iloc[0].values[0]}")
+        st.markdown(f"##### Weight Penalty Loss: {results_df.loc[m, ['weight_penalty_loss_term']].iloc[0].values[0]}")
+        st.markdown(f"##### Sample Weight: {results_df.loc[m, ['weight']].iloc[0].values[0]}")
 
         # Residuals
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -350,21 +371,21 @@ def run_individual_samples_tab(results_dir: Path):
         ax.semilogx(
             sr.constants.PERIODS,
             np.log(site_obs_obs.values) - np.log(site_int_sim.values),
-            label="Site Obs Obs - Site Int Sim (Input)",
+            label=r"$lnIM^{obs}_i - lnIM^{sim}_s$ (Input)",
             c="magenta",
             linestyle="--",
         )
         ax.semilogx(
             sr.constants.PERIODS,
             np.log(site_obs_obs.values) - np.log(site_obs_sim.values),
-            label="Site Obs Obs - Site Obs Sim (Input)",
+            label=r"$lnIM^{obs}_i - lnIM^{sim}_i$ (Input)",
             c="blue",
             linestyle="--",
         )
         ax.semilogx(
             sr.constants.PERIODS,
             np.log(site_obs_sim.values) - np.log(site_int_sim.values),
-            label="Site Obs Sim - Site Int Sim (Input)",
+            label=r"$lnIM^{sim}_i - lnIM^{sim}_s$ (Input)",
             c="cyan",
             linestyle="--",
         )
@@ -373,7 +394,7 @@ def run_individual_samples_tab(results_dir: Path):
             pred,
             c="k",
             linestyle="-",
-            label="Site Int Obs - Site Int Sim (Predicted)",
+            label=r"$lnIM^{obs}_s - lnIM^{sim}_s$ (Predicted)",
             linewidth=2.0,
         )
         ax.semilogx(
@@ -381,7 +402,7 @@ def run_individual_samples_tab(results_dir: Path):
             np.log(site_int_obs.values) - np.log(site_int_sim.values),
             c="r",
             linestyle="-",
-            label="Site Int Obs - Site Int Sim (True)",
+            label=r"$lnIM^{obs}_s - lnIM^{sim}_s$ (True)",
             linewidth=2.0,
         )
 
@@ -402,14 +423,14 @@ def run_individual_samples_tab(results_dir: Path):
         ax.semilogx(
             sr.constants.PERIODS,
             site_int_obs,
-            label="Site of Interest (Observed)",
+            label=r"$lnIM^{obs}_s$",
             linestyle="-",
             c="r",
         )
         ax.semilogx(
             sr.constants.PERIODS,
             site_int_sim,
-            label="Site of Interest (Simulated)",
+            label=r"$lnIM^{sim}_s$",
             c="r",
             linestyle="--",
         )
@@ -417,14 +438,14 @@ def run_individual_samples_tab(results_dir: Path):
         ax.semilogx(
             sr.constants.PERIODS,
             site_obs_obs,
-            label="Observation Site (Observed)",
+            label=r"$lnIM^{obs}_i$",
             linestyle="-",
             c="b",
         )
         ax.semilogx(
             sr.constants.PERIODS,
             site_obs_sim,
-            label="Observation Site (Simulated)",
+            label=r"$lnIM^{sim}_i$",
             c="b",
             linestyle="--",
         )
@@ -432,7 +453,7 @@ def run_individual_samples_tab(results_dir: Path):
         ax.semilogx(
             sr.constants.PERIODS,
             pred_pSA,
-            label="Site of Interest (Predicted)",
+            label=r"$lnIM^{pred}_s$",
             c="k",
             linestyle="-",
         )
@@ -474,28 +495,33 @@ def run_individual_samples_tab(results_dir: Path):
 
 
 def run_rs_agg_tab(results_dir: Path):
-    def create_loss_dist_plot(results_df: pd.DataFrame, mag_coloring: bool = False):
+    def create_loss_dist_plot(results_df: pd.DataFrame, loss_key: str, color_key: str = None):
         fig, ax = plt.subplots(figsize=(12, 6))
 
-        dist_matrix = get_dist_matrix(results_dir)
-
-        if mag_coloring:
-            event_df = get_event_df(results_dir)
-
-            # TODO: Just add all metadata to the results_df to simplify everything...
+        if color_key == "mag":
             t = ax.scatter(
                 results_df.s2s_distance,
-                results_df.loss,
+                results_df[loss_key],
                 s=2.0,
-                c=event_df.loc[results_df.event_id, "mag"].values,
+                c=results_df.mag.values,
                 cmap="viridis_r",
                 vmin=3.5,
                 vmax=7
-                # alpha=0.5,
             )
             plt.colorbar(t, pad=0, label="Magnitude")
+        elif color_key == "weight":
+            t = ax.scatter(
+                results_df.s2s_distance,
+                results_df[loss_key],
+                s=2.0,
+                c=results_df.weight.values,
+                cmap="viridis_r",
+                vmin=0.0,
+                vmax=1.0
+            )
+            plt.colorbar(t, pad=0, label="Weight")
         else:
-            ax.scatter(results_df.s2s_distance, results_df.loss, s=2.0, c="k", alpha=0.5)
+            ax.scatter(results_df.s2s_distance, results_df[loss_key], s=2.0, c="k", alpha=0.5)
 
         ax.set_xlabel("Site to Site Distance (km)")
         ax.set_ylabel("Loss")
@@ -507,15 +533,26 @@ def run_rs_agg_tab(results_dir: Path):
 
     train_results_df, val_results_df = _load_results(results_dir)
 
+    col_1, col_2 = st.columns(2)
 
-    mag_coloring = st.checkbox("Color by Magnitude", value=False)
+    with col_1:
+        loss_key = st.selectbox("Loss type", ["total_loss", "misfit_loss_term", "weight_penalty_loss_term"], index=0)
+
+    with col_2:
+        color_key_options = ["weight", "mag"]
+        avail_options = [cur_option for cur_option in color_key_options if cur_option in train_results_df.columns] + ["no_color"]
+        color_key = st.selectbox("Color Key", avail_options, index=len(avail_options) - 1)
+
+
+    # mag_coloring = st.checkbox("Color by Magnitude", value=False)
+    # mag_coloring = True
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
-        create_loss_dist_plot(train_results_df, mag_coloring=mag_coloring)
+        create_loss_dist_plot(train_results_df, loss_key, color_key=color_key)
     with val_tab:
-        create_loss_dist_plot(val_results_df, mag_coloring=mag_coloring)
+        create_loss_dist_plot(val_results_df, loss_key, color_key=color_key)
 
 
 def main(results_dir: Path):

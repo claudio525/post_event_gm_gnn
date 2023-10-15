@@ -91,3 +91,41 @@ def preprocess_site_features(
     if stats is None:
         return station_df, pd.DataFrame(stats_comp)
     return station_df
+
+
+def compute_scalar_features(
+    events: np.ndarray,
+    event_sites: Dict[str, np.ndarray],
+    event_df: pd.DataFrame,
+    station_df: pd.DataFrame,
+    record_df: pd.DataFrame,
+    dist_matrix: pd.DataFrame,
+    max_dist: float,
+):
+    ### Site-to-site features
+    site_to_site_features = {}
+
+    # Scale the (used) site-to-site distances
+    # such that they are between -1 and 1
+    # as per the maximum allowed site-to-site
+    # distance when computing the site combinations
+    site_to_site_features["dist"] = ((dist_matrix.copy() / max_dist) * 2) - 1
+
+    ### Event-site features
+    event_site_features = {}
+    for cur_event in events:
+        event_site_features[cur_event] = pre_process_event_site_features(
+            record_df.loc[record_df.event_id == cur_event]
+            .set_index("site_id")
+            .drop(columns=["event_id"])
+        )
+
+    ### Event-site-to-site features
+    event_site_to_site_features = {}
+
+    # Compute the site-to-site angle wrt. the epicentre
+    event_site_to_site_features["angle"] = compute_angular_distance(
+        station_df.copy(), event_df.copy(), events, event_sites
+    )
+
+    return site_to_site_features, event_site_features, event_site_to_site_features

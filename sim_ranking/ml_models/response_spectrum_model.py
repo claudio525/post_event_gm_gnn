@@ -5,9 +5,10 @@ Trains a model that given
 - Response spectrum from simulation realisation at the site of interest
 - Site properties of observation site
 - Site properties of site of interest
-predicts the similarity score of the simulation realisation and the
-(unknown) observed GM at the site of interest
+predicts the residual between the simulation and observation at
+the site of interest.
 """
+import pickle
 import os
 from pathlib import Path
 
@@ -33,16 +34,17 @@ print(f"Using device: {device}")
 
 
 def get_dataset_predictions(
-    dataset: sr.ml.data.ResponseSpectrumDataset,
-    model: nn.Module,
+    dataset: sr.ml.data.BaseDataset,
+    res_model: nn.Module,
+    weight_model: nn.Module,
     device: str,
-    loss_fn_key: str,
+    weight_norm_penalty: float,
 ):
     pred_train_dataloader = DataLoader(
         dataset, shuffle=False, batch_size=4096, num_workers=2
     )
 
-    model.eval()
+    res_model.eval()
 
     results = []
     pred_res_results, true_res_results = [], []
@@ -56,17 +58,17 @@ def get_dataset_predictions(
         true_res,
     ) in enumerate(pred_train_dataloader):
         # Forward pass
-        pred = (
-            _get_prediction(
+        weights, pred_res = (
+            cur_r.cpu().detach()
+            for cur_r in _get_prediction(
                 obs_obs_obs_sim_res,
                 obs_obs_int_sim_res,
                 obs_sim_int_sim_rel,
                 site_features,
-                model,
+                res_model,
+                weight_model,
                 device,
             )
-            .cpu()
-            .detach()
         )
 
         meta_df = pd.DataFrame(
@@ -74,23 +76,32 @@ def get_dataset_predictions(
             columns=["event_id", "rel_id", "site_int", "site_obs"],
         )
         meta_df.index = np.char.add(
+            np.char.add(
+                np.char.add(
                     np.char.add(
-                        np.char.add(
-                            np.char.add(
-                                np.char.add(meta_df.event_id.values.astype(str), "_"),
-                                np.char.add(meta_df.rel_id.values.astype(str), "_"),
-                            ),
-                            meta_df.site_int.values.astype(str),
-                        ),
-                        "_",
+                        np.char.add(meta_df.event_id.values.astype(str), "_"),
+                        np.char.add(meta_df.rel_id.values.astype(str), "_"),
                     ),
-                    meta_df.site_obs.values.astype(str),
-                )
-        meta_df["loss"] = _compute_loss(loss_fn_key, pred, true_res, reduction="none").cpu().detach().numpy().mean(axis=1)
+                    meta_df.site_int.values.astype(str),
+                ),
+                "_",
+            ),
+            meta_df.site_obs.values.astype(str),
+        )
+        meta_df["misfit_loss_term"] = compute_misfit(
+            pred_res, true_res, weights, dim=1
+        ).numpy(force=True)
+        meta_df["weight_penalty_loss_term"] = compute_weight_norm_penalty(
+            weights, weight_norm_penalty, device
+        ).numpy(force=True)
+        meta_df["total_loss"] = (
+            meta_df["misfit_loss_term"] + meta_df["weight_penalty_loss_term"]
+        )
+        meta_df["weight"] = weights.numpy()
 
         results.append(meta_df)
         true_res_results.append(true_res.numpy())
-        pred_res_results.append(pred.numpy())
+        pred_res_results.append(pred_res.numpy())
 
     results_df = pd.concat(results)
     results_df.loc[:, np.char.add(sr.constants.PSA_KEYS, "_true")] = np.concatenate(
@@ -107,8 +118,9 @@ def _get_prediction(
     obs_obs_obs_sim_res,
     obs_obs_int_sim_res,
     obs_sim_int_sim_rel,
-    site_features,
-    model: nn.Module,
+    scalar_features,
+    res_model: nn.Module,
+    weight_model: nn.Module,
     device: str,
 ):
     # Put data onto the device
@@ -121,38 +133,94 @@ def _get_prediction(
     obs_sim_int_sim_rel = obs_sim_int_sim_rel.to(device, dtype=torch.float32)[
         :, None, :
     ]
-    site_features = site_features.to(device, dtype=torch.float32)
+    scalar_features = scalar_features.to(device, dtype=torch.float32)
 
-    # return model(rs_int_sim, rs_obs_sim, rs_obs_obs, site_features).ravel()
-    return model(
-        obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, site_features
+    res = res_model(
+        obs_obs_obs_sim_res, obs_obs_int_sim_res, obs_sim_int_sim_rel, scalar_features
+    )
+    weight = weight_model(scalar_features)
+
+    # Normalise weights
+    # if normalise_weights:
+    #     weight = (weight / weight.sum()) * weight.shape[0]
+    # assert weight.max() <= 1.0 and weight.min() >= 0.0, "Weights should be normalised"
+
+    return weight, res
+
+
+def compute_misfit(
+    pred_res: torch.Tensor,
+    true_res: torch.Tensor,
+    sample_weights: torch.Tensor,
+    dim: int = None,
+):
+    return torch.mean(torch.abs(pred_res - true_res) * sample_weights, dim=dim)
+
+
+def compute_weight_norm_penalty(sample_weights: torch.Tensor, lambda_p: float, device):
+    Nw = sample_weights.shape[0]
+    lambda_p = torch.tensor(lambda_p, device=device)
+
+    # See https://www.desmos.com/calculator/tyljt3ybpr
+    lp = lambda_p * (
+        (
+            torch.maximum(
+                torch.tensor(0.0, device=device), 0.75 * Nw - sample_weights.sum()
+            )
+            ** 2
+        )
+        / (Nw)
+    )
+    return lp
+    # return ((sample_weights.shape[0] * 0.75) - sample_weights.sum()) / sample_weights.shape[0]
+
+
+def compute_total_loss(
+    pred_res: torch.Tensor,
+    true_res: torch.Tensor,
+    sample_weights: torch.Tensor,
+    weight_norm_penalty: float,
+    dim: int = None,
+):
+    misfit_loss = compute_misfit(pred_res, true_res, sample_weights, dim=dim)
+    weight_penalty_loss = compute_weight_norm_penalty(
+        sample_weights, weight_norm_penalty, device
     )
 
-
-def _compute_loss(loss_fn_key: str, pred, sim_score, reduction: str = "mean"):
-    return nn.functional.l1_loss(pred, sim_score, reduction=reduction)
+    return misfit_loss + weight_penalty_loss, misfit_loss, weight_penalty_loss
 
 
 def train(
-    model: nn.Module,
+    res_model: nn.Module,
+    weight_model: nn.Module,
     train_dataloader: DataLoader,
     val_dataloader: DataLoader,
     n_epochs: int,
     device: str,
     optimizer: torch.optim.Optimizer,
-    loss_fn_key: str,
+    weight_norm_penalty: float,
 ):
-    loss_hist_train, loss_hist_val = torch.zeros(n_epochs), torch.zeros(n_epochs)
+    metrics = {
+        "loss_hist_train": torch.zeros(n_epochs),
+        "loss_hist_val": torch.zeros(n_epochs),
+        "misfit_loss_hist_train": torch.zeros(n_epochs),
+        "misfit_loss_hist_val": torch.zeros(n_epochs),
+        "weight_penalty_loss_hist_train": torch.zeros(n_epochs),
+        "weight_penalty_loss_hist_val": torch.zeros(n_epochs),
+        "weight_hist_train": torch.zeros(n_epochs),
+        "weight_hist_val": torch.zeros(n_epochs),
+    }
 
+    best_epoch_loss_key = "loss_hist_val"
     best_val_loss = np.inf
-    best_model_state = None
+    best_res_model_state = None
+    best_weight_model_state = None
     best_model_epoch = None
 
     for epoch in range(n_epochs):
-        print(f"Processing epoch {epoch+1}/{n_epochs}")
-
         ### Training
-        model.train()
+        res_model.train()
+        weight_model.train()
         for i, (
             _,
             obs_obs_obs_sim_res,
@@ -162,30 +230,50 @@ def train(
             int_obs_int_sim_res,
         ) in enumerate(train_dataloader):
             # Forward pass
-            pred = _get_prediction(
+            weight, res_pred = _get_prediction(
                 obs_obs_obs_sim_res,
                 obs_obs_int_sim_res,
                 obs_sim_int_sim_rel,
                 scalar_features,
-                model,
+                res_model,
+                weight_model,
                 device,
             )
 
             # Compute the loss
             int_obs_int_sim_res = int_obs_int_sim_res.to(device, dtype=torch.float32)
-            loss = _compute_loss(loss_fn_key, pred, int_obs_int_sim_res)
+            loss, misfit_loss, weight_penalty_loss = compute_total_loss(
+                res_pred, int_obs_int_sim_res, weight, weight_norm_penalty
+            )
 
             # Update weights
             loss.backward()
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
-            loss_hist_train[epoch] += loss.item() * int_obs_int_sim_res.shape[0]
+            metrics["loss_hist_train"][epoch] += (
+                loss.item() * int_obs_int_sim_res.shape[0]
+            )
+            metrics["misfit_loss_hist_train"][epoch] += (
+                misfit_loss.item() * int_obs_int_sim_res.shape[0]
+            )
+            metrics["weight_penalty_loss_hist_train"][epoch] += (
+                weight_penalty_loss.item() * int_obs_int_sim_res.shape[0]
+            )
+            metrics["weight_hist_train"][epoch] += (
+                weight.mean().item() * weight.shape[0]
+            )
 
-        loss_hist_train[epoch] /= len(train_dataloader.dataset)
+        metrics["loss_hist_train"][epoch] /= len(train_dataloader.dataset)
+        metrics["misfit_loss_hist_train"][epoch] /= len(train_dataloader.dataset)
+        metrics["weight_penalty_loss_hist_train"][epoch] /= len(
+            train_dataloader.dataset
+        )
+        metrics["weight_hist_train"][epoch] /= len(train_dataloader.dataset)
 
         ### Validation
-        model.eval()
+        res_model.eval()
+        weight_model.eval()
         with torch.no_grad():
             for i, (
                 _,
@@ -196,12 +284,13 @@ def train(
                 int_obs_int_sim_res,
             ) in enumerate(val_dataloader):
                 # Forward pass
-                pred = _get_prediction(
+                weight, res_pred = _get_prediction(
                     obs_obs_obs_sim_res,
                     obs_obs_int_sim_res,
                     obs_sim_int_sim_rel,
                     scalar_features,
-                    model,
+                    res_model,
+                    weight_model,
                     device,
                 )
 
@@ -209,21 +298,46 @@ def train(
                 int_obs_int_sim_res = int_obs_int_sim_res.to(
                     device, dtype=torch.float32
                 )
-                loss = _compute_loss(loss_fn_key, pred, int_obs_int_sim_res)
-                loss_hist_val[epoch] += loss.item() * int_obs_int_sim_res.shape[0]
+                # loss = _compute_loss(loss_fn_key, res_pred, int_obs_int_sim_res)
+                loss, misfit_loss, weight_penalty_loss = compute_total_loss(
+                    res_pred, int_obs_int_sim_res, weight, weight_norm_penalty
+                )
 
-            loss_hist_val[epoch] /= len(val_dataloader.dataset)
+                metrics["loss_hist_val"][epoch] += (
+                    loss.item() * int_obs_int_sim_res.shape[0]
+                )
+                metrics["misfit_loss_hist_val"][epoch] += (
+                    misfit_loss.item() * int_obs_int_sim_res.shape[0]
+                )
+                metrics["weight_penalty_loss_hist_val"][epoch] += (
+                    weight_penalty_loss.item() * int_obs_int_sim_res.shape[0]
+                )
+                metrics["weight_hist_val"][epoch] += (
+                    weight.mean().item() * weight.shape[0]
+                )
+
+            metrics["loss_hist_val"][epoch] /= len(val_dataloader.dataset)
+            metrics["misfit_loss_hist_val"][epoch] /= len(val_dataloader.dataset)
+            metrics["weight_penalty_loss_hist_val"][epoch] /= len(
+                val_dataloader.dataset
+            )
+            metrics["weight_hist_val"][epoch] /= len(val_dataloader.dataset)
 
         # Keep track of the best model
-        if loss_hist_val[epoch] < best_val_loss:
-            best_model_state = model.state_dict()
-            best_val_loss = loss_hist_val[epoch]
+        if metrics[best_epoch_loss_key][epoch] < best_val_loss:
+            best_res_model_state = res_model.state_dict()
+            best_weight_model_state = weight_model.state_dict()
+            best_val_loss = metrics[best_epoch_loss_key][epoch]
             best_model_epoch = epoch
 
         print(
-            f"Epoch {epoch+1} Loss:\n Train {loss_hist_train[epoch]:.4f} Val {loss_hist_val[epoch]:.4f}"
+            f"Epoch {epoch+1}\n"
+            f"\tLoss: Train {metrics['loss_hist_train'][epoch]:.4f} Val {metrics['loss_hist_val'][epoch]:.4f}\n"
+            f"\tMisfit Loss: Train {metrics['misfit_loss_hist_train'][epoch]:.4f}, Val {metrics['misfit_loss_hist_val'][epoch]:.4f}\n"
+            f"\tWeight Penalty Loss: Train {metrics['weight_penalty_loss_hist_train'][epoch]:.4f}, Val {metrics['weight_penalty_loss_hist_val'][epoch]:.4f}\n"
+            f"\tWeight: Train {metrics['weight_hist_train'][epoch]:.4f}, Val {metrics['weight_hist_val'][epoch]:.4f}"
         )
-    return loss_hist_train, loss_hist_val, best_model_state, best_model_epoch
+    return metrics, best_res_model_state, best_weight_model_state, best_model_epoch
 
 
 def main(
@@ -231,18 +345,18 @@ def main(
     batch_size: int = 2048,
     n_rels_used: int = 5,
     comment: str = "",
-    loss_fn_key: str = "custom",
     max_dist: float = 100.0,
     save_best_val_model: bool = True,
     weight_decay: float = 0.0001,
+    weight_norm_penalty: float = 0.005,
 ):
     ### CONFIG ###
     # N_VAL_SITES = 10
 
-    RS_N_CHANNELS = [1, 16, 32]
-    # RS_N_CHANNELS = []
-    # RS_KERNEL_SIZES = []
-    RS_KERNEL_SIZES = [5, 3]
+    # RS_N_CHANNELS = [1, 16, 32]
+    RS_N_CHANNELS = []
+    RS_KERNEL_SIZES = []
+    # RS_KERNEL_SIZES = [5, 3]
     # FC_UNITS = [128, 64, 32]
     FC_UNITS = [64, 32]
 
@@ -250,6 +364,8 @@ def main(
     SITE_TO_SITE_FEATURE_KEYS = ["dist"]
     EVENT_SITE_FEATURE_KEYS = ["r_rup"]
     EVENT_SITE_TO_SITE_FEATURE_KEYS = ["angle"]
+
+    WEIGHT_FC_UNITS = [16, 8]
     ### END CONFIG ###
 
     # Fixing the random seed
@@ -340,30 +456,12 @@ def main(
 
     # Computed the site-to-site features
     print(f"Computing scalar features")
-    ### Site-to-site features
-    site_to_site_features = {}
-
-    # Scale the (used) site-to-site distances
-    # such that they are between -1 and 1
-    # as per the maximum allowed site-to-site
-    # distance when computing the site combinations
-    site_to_site_features["dist"] = ((dist_matrix.copy() / max_dist) * 2) - 1
-
-    ### Event-site features
-    event_site_features = {}
-    for cur_event in events:
-        event_site_features[cur_event] = sr.ml.features.pre_process_event_site_features(
-            record_df.loc[record_df.event_id == cur_event]
-            .set_index("site_id")
-            .drop(columns=["event_id"])
-        )
-
-    ### Event-site-to-site features
-    event_site_to_site_features = {}
-
-    # Compute the site-to-site angle wrt. the epicentre
-    event_site_to_site_features["angle"] = sr.ml.features.compute_angular_distance(
-        station_df.copy(), event_df.copy(), events, event_sites
+    (
+        site_to_site_features,
+        event_site_features,
+        event_site_to_site_features,
+    ) = sr.ml.features.compute_scalar_features(
+        events, event_sites, event_df, station_df, record_df, dist_matrix, max_dist
     )
 
     scalar_features = sr.ml.data.ScalarFeatures(
@@ -409,7 +507,7 @@ def main(
         pin_memory=True,
     )
     val_dataloader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True
+        val_dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True
     )
 
     # Create the model
@@ -421,7 +519,7 @@ def main(
         else []
     )
 
-    model = sr.ml.models.ResponseSpectrumSimModel(
+    res_model = sr.ml.models.ResponseSpectrumSimModel(
         RS_KERNEL_SIZES,
         RS_N_CHANNELS,
         padding,
@@ -431,12 +529,22 @@ def main(
         n_periods,
         apply_sigmoid=False,
     ).to(device)
+
+    weight_model = sr.ml.models.WeightModel(
+        scalar_features.n_scalar_features,
+        WEIGHT_FC_UNITS,
+    ).to(device)
+
+    # See https://pytorch.org/docs/stable/optim.html#per-parameter-options
     optimizer = torch.optim.Adam(
-        model.parameters(), lr=0.001, weight_decay=weight_decay
+        list(res_model.parameters()) + list(weight_model.parameters()),
+        lr=0.001,
+        weight_decay=weight_decay,
     )
 
+    print(f"Residual model summary")
     summary(
-        model,
+        res_model,
         input_size=[
             (batch_size, 1, 31),
             (batch_size, 1, 31),
@@ -445,35 +553,48 @@ def main(
         ],
     )
 
+    print(f"Weight model summary")
+    summary(
+        weight_model,
+        input_size=(batch_size, scalar_features.n_scalar_features),
+    )
+
     print(f"Running training")
     print(f"Number of training samples: {len(train_dataset)}")
     print(f"Number of validation samples: {len(val_dataset)}")
     print(f"Number of training batches: {len(train_dataloader)}")
     print(f"Number of validation batches: {len(val_dataloader)}")
-    loss_hist_train, loss_hist_val, best_model_state, best_epoch = train(
-        model,
+    metrics, best_res_model_state, best_weight_model_state, best_epoch = train(
+        res_model,
+        weight_model,
         train_dataloader,
         val_dataloader,
         n_epochs,
         device,
         optimizer,
-        loss_fn_key,
+        weight_norm_penalty,
     )
 
     # Load the best model
     if save_best_val_model:
-        model.load_state_dict(best_model_state)
+        res_model.load_state_dict(best_res_model_state)
+        weight_model.load_state_dict(best_weight_model_state)
         print(
             f"Best model epoch: {best_epoch + 1}, "
-            f"with validation loss {loss_hist_val[best_epoch]:.4f}"
+            f"Vvalidation loss\n"
+            f"\tTotal {metrics['loss_hist_val'][best_epoch]:.4f}\n"
+            f"\tMisfit {metrics['misfit_loss_hist_val'][best_epoch]:.4f}\n"
+            f"\tWeight penalty {metrics['weight_penalty_loss_hist_val'][best_epoch]:.4f}\n"
         )
 
     # Get predictions for the training and validation datasets
     print(f"Getting predictions")
     train_results_df = get_dataset_predictions(
-        train_dataset, model, device, loss_fn_key
+        train_dataset, res_model, weight_model, device, weight_norm_penalty
     )
-    val_results_df = get_dataset_predictions(val_dataset, model, device, loss_fn_key)
+    val_results_df = get_dataset_predictions(
+        val_dataset, res_model, weight_model, device, weight_norm_penalty
+    )
 
     # Save the results
     run_id = mlt.utils.create_run_id(False)
@@ -506,7 +627,7 @@ def main(
             "batch_size": batch_size,
             "n_epochs": n_epochs,
             "best_epoch": best_epoch,
-            "weight_decay":weight_decay,
+            "weight_decay": weight_decay,
         },
         "data": {
             "db": str(db_ffp_orig),
@@ -515,15 +636,16 @@ def main(
     mlt.utils.write_to_yaml(meta_data, results_dir / "meta.yaml")
 
     # Save the model
-    torch.save(model, results_dir / "model.pt")
+    torch.save(res_model, results_dir / "model.pt")
+    torch.save(weight_model, results_dir / "weight_model.pt")
 
     # Save the loss history
-    np.save(str(results_dir / "loss_hist_train.npy"), loss_hist_train.numpy())
-    np.save(str(results_dir / "loss_hist_val.npy"), loss_hist_val.numpy())
+    with (results_dir / "metrics.pickle").open("wb") as f:
+        pickle.dump(metrics, f)
 
     # Create a model visualisation
     draw_graph(
-        model,
+        res_model,
         input_size=[
             (batch_size, 1, 31),
             (batch_size, 1, 31),
@@ -531,7 +653,16 @@ def main(
             (batch_size, scalar_features.n_scalar_features),
         ],
         expand_nested=True,
-        filename="model_vis",
+        filename="res_model_vis",
+        save_graph=True,
+        directory=str(results_dir),
+    )
+
+    draw_graph(
+        weight_model,
+        input_size=(batch_size, scalar_features.n_scalar_features),
+        expand_nested=True,
+        filename="weight_model_vis",
         save_graph=True,
         directory=str(results_dir),
     )

@@ -65,3 +65,27 @@ class ResponseSpectrumSimModel(nn.Module):
 
         return self.fc_layers(rs_conv_out)
 
+class WeightModel(nn.Module):
+
+    def __init__(
+        self,
+        n_inputs: int,
+        fc_units: List[int],
+    ):
+        super().__init__()
+
+        self.fc_layers = nn.Sequential()
+        for i in range(len(fc_units)):
+            if i == 0:
+                self.fc_layers.append(nn.Linear(n_inputs, fc_units[i]))
+            else:
+                self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
+
+            self.fc_layers.append(nn.ELU())
+
+        self.fc_layers.append(nn.Linear(self.fc_layers[-2].out_features, 1))
+        self.fc_layers.append(nn.Sigmoid())
+
+    def forward(self, scalar_features):
+        return self.fc_layers(scalar_features)
+
