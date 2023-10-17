@@ -16,6 +16,9 @@ def compute_angular_distance(
     Computes the angle between the site-pairs
     (for each event) with respect to the epicentre
     """
+    station_df = station_df.copy()
+    event_df = event_df.copy()
+
     event_angular_distances = {}
     transformer = Transformer.from_crs(4326, 2193, always_xy=True)
     station_df["nztm_x"], station_df["nztm_y"] = transformer.transform(
@@ -125,7 +128,7 @@ def compute_scalar_features(
 
     # Compute the site-to-site angle wrt. the epicentre
     event_site_to_site_features["angle"] = compute_angular_distance(
-        station_df.copy(), event_df.copy(), events, event_sites
+        station_df, event_df, events, event_sites
     )
 
     return site_to_site_features, event_site_features, event_site_to_site_features

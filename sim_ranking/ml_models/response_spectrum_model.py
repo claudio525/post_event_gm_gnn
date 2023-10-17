@@ -360,12 +360,18 @@ def main(
     # FC_UNITS = [128, 64, 32]
     FC_UNITS = [64, 32]
 
+    # Scalar features
     SITE_FEATURE_KEYS = ["vs30", "z1.0", "z2.5", "tsite"]
     SITE_TO_SITE_FEATURE_KEYS = ["dist"]
     EVENT_SITE_FEATURE_KEYS = ["r_rup"]
     EVENT_SITE_TO_SITE_FEATURE_KEYS = ["angle"]
 
+    # Weight model
     WEIGHT_FC_UNITS = [16, 8]
+
+    # Meta dataset
+    N_SAMPLES_PER_BIN = 10
+
     ### END CONFIG ###
 
     # Fixing the random seed
@@ -373,6 +379,10 @@ def main(
 
     db_ffp_orig = "$wdata/sim_ranking/db/gm_db.sqlite"
     db_ffp = Path(os.path.expandvars(db_ffp_orig))
+    obs_corr_ffp_orig = (
+        "$wdata/sim_ranking/obs_correlations/obs_site_correlations.pickle"
+    )
+    obs_corr_ffp = Path(os.path.expandvars(obs_corr_ffp_orig))
     results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
 
     db = sr.db.DB(db_ffp)
@@ -441,6 +451,18 @@ def main(
     )
     train_events = np.asarray(list(train_event_sites.keys()))
     val_events = np.asarray(list(val_event_sites.keys()))
+
+    # Create the meta-val dataset
+    print(f"Creating meta-val dataset")
+    sr.ml.data.create_meta_dataset(
+        train_event_sites,
+        train_site_combs,
+        station_df,
+        pd.read_pickle(obs_corr_ffp),
+        dist_matrix,
+        max_dist,
+        N_SAMPLES_PER_BIN,
+    )
 
     # Get the periods and corresponding pSA keys
     periods, pSA_keys = sr.constants.PERIODS, sr.constants.PSA_KEYS
