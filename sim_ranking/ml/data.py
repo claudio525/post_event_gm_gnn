@@ -309,6 +309,8 @@ class BaseDataset(Dataset):
         raise NotImplementedError()
 
 
+
+
 class ResponseSpectrumResidualDataset(BaseDataset):
     def __init__(
         self,
@@ -381,16 +383,10 @@ class ResponseSpectrumResidualDataset(BaseDataset):
             self.obs_sim_residuals[cur_event] = cur_obs_sim_residuals
             self.sim_sim_residuals[cur_event] = cur_sim_sim_residuals
 
-    def __getitem__(self, idx: int):
-        # Break the index down
-        event, event_ix, site_ix, rel_ix = self.get_indices(idx)
-
+    def _get_data(self, idx: int, event: str, site_ix: int, rel_ix: int):
         # Get the site of interest and observation site
         site_int_ix = self.site_combs[event][site_ix, 0]
         site_obs_ix = self.site_combs[event][site_ix, 1]
-
-        site_int = self.event_sites[event][site_int_ix]
-        site_obs = self.event_sites[event][site_obs_ix]
 
         # Features
         obs_obs_obs_sim_res = self.obs_sim_residuals[event][
@@ -403,11 +399,9 @@ class ResponseSpectrumResidualDataset(BaseDataset):
             site_obs_ix, site_int_ix, :, rel_ix
         ]
 
-        site_features = self.scalar_features_tensors[event][site_int_ix, site_obs_ix, :]
-
-        # site_int_all_ix = self.all_sites_ix_lookup[site_int]
-        # site_obs_all_ix = self.all_sites_ix_lookup[site_obs]
-        # site_features = self.feature_tensor[site_int_all_ix, site_obs_all_ix, :]
+        scalar_features = self.scalar_features_tensors[event][
+            site_int_ix, site_obs_ix, :
+        ]
 
         # Labels
         int_obs_int_sim_res = self.obs_sim_residuals[event][
@@ -419,14 +413,22 @@ class ResponseSpectrumResidualDataset(BaseDataset):
             obs_obs_obs_sim_res,
             obs_obs_int_sim_res,
             obs_sim_int_sim_rel,
-            site_features,
+            scalar_features,
             int_obs_int_sim_res,
         )
 
 
-class ResponseSpectrumDataset(BaseDataset):
-    def __init__(
-        self,
+    def __getitem__(self, idx: int):
+        # Break the index down
+        event, event_ix, site_ix, rel_ix = self.get_indices(idx)
+
+        return self._get_data(idx, event, site_ix, rel_ix)
+
+
+
+class WeigthValidationDataset(ResponseSpectrumResidualDataset):
+
+    def __init__(self,
         event_sites: Dict[str, np.ndarray],
         site_combs: Dict[str, np.ndarray],
         db: DB,
@@ -434,10 +436,9 @@ class ResponseSpectrumDataset(BaseDataset):
         station_df: pd.DataFrame,
         periods: np.ndarray,
         pSA_keys: np.ndarray,
-        dist_matrix: pd.DataFrame,
-        site_features: Sequence[str],
-        max_site_to_site_dist: float = 100,
-    ):
+        scalar_features: ScalarFeatures,
+        obs_corr: pd.DataFrame
+        ):
 
         # Base Class
         super().__init__(
@@ -448,84 +449,36 @@ class ResponseSpectrumDataset(BaseDataset):
             station_df,
             periods,
             pSA_keys,
-            dist_matrix,
-            site_features,
-            max_site_to_site_dist,
+            scalar_features,
         )
 
-        # Organize the sim response spectra such that it is
-        # in the format [n_rels, n_periods, n_sites]
-        # per event
-        self.sim_im_data = {}
-        # And observed response spectra in the format
-        # [n_periods, n_sites]
-        self.obs_im_data = {}
+        # Create the weight lookup
+        self.weight_lookup = {}
         for cur_event in self.events:
             cur_sites = self.event_sites[cur_event]
-            cur_sim_df = self.sim_im_dfs[cur_event]
-
-            if self.rels[cur_event] is None:
-                self.sim_im_data[cur_event] = (
-                    cur_sim_df.set_index("site_id")
-                    .loc[cur_sites, pSA_keys]
-                    .values.T[np.newaxis, ...]
-                )
-            else:
-                assert cur_sim_df.shape[0] == cur_sites.size * self.n_rels
-                self.sim_im_data[cur_event] = np.stack(
-                    [
-                        cur_sim_df.loc[cur_sim_df.rel_id == cur_rel]
-                        .set_index("site_id")
-                        .loc[cur_sites, pSA_keys]
-                        .T.values
-                        for cur_rel in self.rels[cur_event]
-                    ],
-                    axis=0,
-                )
-
-            self.obs_im_data[cur_event] = (
-                self.obs_im_dfs[cur_event].loc[cur_sites, pSA_keys].values.T
+            cur_tensor = np.full(
+                (
+                    cur_sites.size,
+                    cur_sites.size,
+                ),
+                fill_value=np.nan,
             )
 
-        # Some more sanity checking
-        for cur_event in self.events:
-            assert self.sim_im_data[cur_event].shape[0] in [1, self.n_rels]
-            assert (
-                self.sim_im_data[cur_event].shape[2] == self.event_sites[cur_event].size
-            )
+            cur_tensor = obs_corr.loc[cur_sites, cur_sites].values
+            self.weight_lookup[cur_event] = cur_tensor
 
     def __getitem__(self, idx: int):
         # Break the index down
         event, event_ix, site_ix, rel_ix = self.get_indices(idx)
 
+        data = self._get_data(idx, event, site_ix, rel_ix)
+
         # Get the site of interest and observation site
         site_int_ix = self.site_combs[event][site_ix, 0]
         site_obs_ix = self.site_combs[event][site_ix, 1]
+        weight = np.abs(self.weight_lookup[event][site_int_ix, site_obs_ix])
 
-        site_int = self.event_sites[event][site_int_ix]
-        site_obs = self.event_sites[event][site_obs_ix]
-
-        # Features
-        site_int_sim = self.sim_im_data[event][rel_ix, :, site_int_ix]
-        site_obs_sim = self.sim_im_data[event][rel_ix, :, site_obs_ix]
-        site_obs_obs = self.obs_im_data[event][:, site_obs_ix]
-
-        site_int_all_ix = self.all_sites_ix_lookup[site_int]
-        site_obs_all_ix = self.all_sites_ix_lookup[site_obs]
-        site_features = self.feature_tensor[site_int_all_ix, site_obs_all_ix, :]
-
-        # Labels
-        site_int_obs = self.obs_im_data[event][:, site_int_ix]
-
-        return (
-            np.log(site_int_sim),
-            np.log(site_obs_sim),
-            np.log(site_obs_obs),
-            site_features,
-            np.log(site_int_obs),
-            self.dist_matrix.iat[site_int_all_ix, site_obs_all_ix],
-        )
-
+        return (*data, weight)
 
 def create_meta_dataset(
     train_event_sites: Dict[str, np.ndarray],
@@ -536,6 +489,7 @@ def create_meta_dataset(
     max_dist: float,
     n_samples_per_bin: int,
 ):
+
     corrs = obs_corr["mean"]
 
     avail_sites = np.intersect1d(
@@ -571,9 +525,7 @@ def create_meta_dataset(
                 {
                     "event": cur_event,
                     "site_int": cur_site_int,
-                    "site_int_ix": train_site_combs[cur_event][:, 0],
                     "site_obs": cur_site_obs,
-                    "site_obs_ix": train_site_combs[cur_event][:, 1],
                     "corr": corrs.loc[cur_sites, cur_sites].values[
                         train_site_combs[cur_event][:, 0],
                         train_site_combs[cur_event][:, 1],
@@ -620,7 +572,7 @@ def create_meta_dataset(
     )
 
     # Sampling (is there no better way of doing this??)
-    meta_dataset = []
+    meta_dataset_df = []
     for dist_ix in np.unique(dist_bin_ind):
         for site_int_vs30_ix in np.unique(site_int_vs30_bin_ind):
             for site_obs_vs30_ix in np.unique(site_int_vs30_bin_ind):
@@ -631,7 +583,7 @@ def create_meta_dataset(
                 )
                 cur_samples_df = samples_df.loc[cur_mask]
                 if cur_samples_df.shape[0] > 0:
-                    meta_dataset.append(
+                    meta_dataset_df.append(
                         cur_samples_df.loc[
                             np.random.choice(
                                 cur_samples_df.index, n_samples_per_bin, replace=False
@@ -639,20 +591,45 @@ def create_meta_dataset(
                         ]
                     )
                 else:
-                    print(f"No samples for bin {dist_ix}, {site_int_vs30_ix}, {site_obs_vs30_ix}")
+                    print(
+                        f"No samples for bin {dist_ix}, {site_int_vs30_ix}, {site_obs_vs30_ix}"
+                    )
 
-    meta_dataset = pd.concat(meta_dataset, axis=0, ignore_index=True)
+    meta_dataset_df = pd.concat(meta_dataset_df, axis=0, ignore_index=True)
 
     # Convert to event - site-combs format
-    meta_site_combs = {}
-    for cur_event in np.unique(meta_dataset.event):
-        cur_mask = meta_dataset.event == cur_event
+    meta_site_combs, meta_event_sites = {}, {}
+    for cur_event in np.unique(meta_dataset_df.event):
+        cur_mask = meta_dataset_df.event == cur_event
+        cur_event_sites = meta_event_sites[cur_event] = np.unique(
+            np.concatenate(
+                [
+                    meta_dataset_df.loc[cur_mask].site_int.values.astype(str),
+                    meta_dataset_df.loc[cur_mask].site_obs.values.astype(str),
+                ]
+            )
+        )
+
+        # Get the site-combination indices
+        sort_ind = np.argsort(cur_event_sites)
         meta_site_combs[cur_event] = np.stack(
             (
-                meta_dataset.site_int_ix.loc[cur_mask].values,
-                meta_dataset.site_obs_ix.loc[cur_mask].values,
+                sort_ind[
+                    np.searchsorted(
+                        cur_event_sites,
+                        meta_dataset_df.loc[cur_mask, "site_int"].values.astype(str),
+                        sorter=sort_ind,
+                    )
+                ],
+                sort_ind[
+                    np.searchsorted(
+                        cur_event_sites,
+                        meta_dataset_df.loc[cur_mask, "site_obs"].values.astype(str),
+                        sorter=sort_ind,
+                    )
+                ],
             ),
             axis=1,
         )
 
-    print(f"wtf")
+    return meta_event_sites, meta_site_combs, meta_dataset_df

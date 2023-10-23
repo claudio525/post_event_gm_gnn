@@ -23,7 +23,6 @@ def _get_metadata(results_dir: Path):
 @st.cache_data
 def load_training_metrics(results_dir: Path):
     # meta = _get_metadata(results_dir)
-
     metrics = pd.read_pickle(results_dir / "metrics.pickle")
 
     return metrics
@@ -158,6 +157,8 @@ def run_general_tab(results_dir: Path):
             f"""
             ### Data
             DB File: {meta["data"]['db']}\n
+            Max Distance: {meta["data"].get('max_distance')}\n
+            
             Number of Realisations: {meta['n_rels_used']}\n
             Number of Training Events: {len(meta['train_events'])}\n
             Number of Validation Events: {len(meta['val_events'])}\n
@@ -193,10 +194,12 @@ def run_general_tab(results_dir: Path):
     metrics = load_training_metrics(results_dir)
     metric_keys = list(metrics.keys())
 
-    avail_metrics = [key.rsplit("_", maxsplit=1)[0] for key in metric_keys[::2]]
+    # avail_metrics = [key.rsplit("_", maxsplit=1)[0] for key in metric_keys[::2]]
+    avail_metrics = ["loss_hist", "misfit_loss_hist", "wval_misfit_loss_hist", "wval_loss"]
     sel_metric_keys = st.multiselect(
         "Metrics", avail_metrics, default=[avail_metrics[0]]
     )
+
 
     fig, ax = plt.subplots(figsize=(12, 6))
     mlt.plotting.plot_metrics(metrics, sel_metric_keys, ax=ax, best_epoch=meta["training"]["best_epoch"])
@@ -361,8 +364,8 @@ def run_individual_samples_tab(results_dir: Path):
             .values.astype(float)
         )
 
-        st.markdown(f"##### Misfit Loss: {results_df.loc[m, ['misfit_loss_term']].iloc[0].values[0]}")
-        st.markdown(f"##### Weight Penalty Loss: {results_df.loc[m, ['weight_penalty_loss_term']].iloc[0].values[0]}")
+        st.markdown(f"##### Misfit Loss: {results_df.loc[m, ['misfit_loss']].iloc[0].values[0]}")
+        st.markdown(f"##### Loss: {results_df.loc[m, ['loss']].iloc[0].values[0]}")
         st.markdown(f"##### Sample Weight: {results_df.loc[m, ['weight']].iloc[0].values[0]}")
 
         # Residuals
@@ -524,7 +527,7 @@ def run_rs_agg_tab(results_dir: Path):
             ax.scatter(results_df.s2s_distance, results_df[loss_key], s=2.0, c="k", alpha=0.5)
 
         ax.set_xlabel("Site to Site Distance (km)")
-        ax.set_ylabel("Loss")
+        ax.set_ylabel(f"{loss_key}")
         ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
         ax.set_ylim(0, 2.0)
         fig.tight_layout()
@@ -536,7 +539,7 @@ def run_rs_agg_tab(results_dir: Path):
     col_1, col_2 = st.columns(2)
 
     with col_1:
-        loss_key = st.selectbox("Loss type", ["total_loss", "misfit_loss_term", "weight_penalty_loss_term"], index=0)
+        loss_key = st.selectbox("Loss type", ["loss", "misfit_loss"], index=0)
 
     with col_2:
         color_key_options = ["weight", "mag"]
