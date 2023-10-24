@@ -5,6 +5,7 @@ from torch import nn
 import pandas as pd
 import numpy as np
 
+
 class ResponseSpectrumSimModel(nn.Module):
     def __init__(
         self,
@@ -65,27 +66,32 @@ class ResponseSpectrumSimModel(nn.Module):
 
         return self.fc_layers(rs_conv_out)
 
-class WeightModel(nn.Module):
 
+class ConstrainedWeightModel(nn.Module):
+    def __init__(self, n_periods: int):
+        super().__init__()
+        self.linear = nn.Linear(1, n_periods)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        return self.sigmoid(self.linear(x))
+
+
+class MLPWeightModel(nn.Module):
     def __init__(
-        self,
-        n_inputs: int,
-        fc_units: List[int],
+        self, n_periods: int, units: Sequence[int], n_scalar_inputs: int
     ):
         super().__init__()
-
-        self.fc_layers = nn.Sequential()
-        for i in range(len(fc_units)):
+        self.units = units
+        self.layers = nn.Sequential()
+        for i in range(len(units)):
             if i == 0:
-                self.fc_layers.append(nn.Linear(n_inputs, fc_units[i]))
+                self.layers.append(nn.Linear(n_scalar_inputs, units[i]))
             else:
-                self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
+                self.layers.append(nn.Linear(units[i - 1], units[i]))
+            self.layers.append(nn.ELU())
+        self.layers.append(nn.Linear(units[-1], n_periods))
+        self.sigmoid = nn.Sigmoid()
 
-            self.fc_layers.append(nn.ELU())
-
-        self.fc_layers.append(nn.Linear(self.fc_layers[-2].out_features, 1))
-        self.fc_layers.append(nn.Sigmoid())
-
-    def forward(self, scalar_features):
-        return self.fc_layers(scalar_features)
-
+    def forward(self, x):
+        return self.sigmoid(self.layers(x))

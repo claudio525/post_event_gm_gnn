@@ -8,7 +8,7 @@ Trains a model that given
 predicts the residual between the simulation and observation at
 the site of interest.
 """
-import copy
+import os
 import time
 import pickle
 import os
@@ -18,7 +18,6 @@ import torch
 from torch import nn
 import pandas as pd
 import numpy as np
-from torch import autograd
 from torch.utils.data import DataLoader
 from torchinfo import summary
 from torchview import draw_graph
@@ -42,9 +41,7 @@ def get_dataset_predictions(
     weight_model: nn.Module,
     device: str,
 ):
-    pred_dataloader = DataLoader(
-        dataset, shuffle=False, batch_size=4096, num_workers=0
-    )
+    pred_dataloader = DataLoader(dataset, shuffle=False, batch_size=4096, num_workers=0)
 
     res_model.eval()
 
@@ -61,13 +58,13 @@ def get_dataset_predictions(
     ) in enumerate(pred_dataloader):
         # Forward pass
         pred_res = _get_res_prediction(
-                obs_obs_obs_sim_res,
-                obs_obs_int_sim_res,
-                obs_sim_int_sim_rel,
-                site_features,
-                res_model,
-                device,
-            )
+            obs_obs_obs_sim_res,
+            obs_obs_int_sim_res,
+            obs_sim_int_sim_rel,
+            site_features,
+            res_model,
+            device,
+        )
         weights = _get_weight_prediction(site_features, weight_model)
 
         meta_df = pd.DataFrame(
@@ -87,15 +84,27 @@ def get_dataset_predictions(
             ),
             meta_df.site_obs.values.astype(str),
         )
-        misfit_loss = compute_misfit(
-            pred_res, true_res.to(device, dtype=torch.float32), dim=1
+        true_res = true_res.to(device, dtype=torch.float32)
+        misfit = compute_misfit(pred_res, true_res, aggregate=False)
+        weighted_misfit = compute_weighted_misfit(
+            pred_res, true_res, weights, aggregate=False
         )
-        meta_df["misfit_loss"] = misfit_loss.numpy(force=True)
-        meta_df["loss"] = (misfit_loss * weights).numpy(force=True)
-        meta_df["weight"] = weights.numpy(force=True)
+
+        misfit_keys = np.char.add(sr.constants.PSA_KEYS, "_misfit")
+        meta_df[misfit_keys] = misfit.numpy(force=True)
+
+        weighted_misfit_keys = np.char.add(sr.constants.PSA_KEYS, "_weighted_misfit")
+        meta_df[weighted_misfit_keys] = weighted_misfit.numpy(force=True)
+
+        weight_keys = np.char.add(sr.constants.PSA_KEYS, "_weight")
+        meta_df[weight_keys] = weights.numpy(force=True)
+
+        meta_df["misfit"] = torch.mean(misfit, dim=1).numpy(force=True)
+        meta_df["loss"] = torch.mean(weighted_misfit, dim=1).numpy(force=True)
+        meta_df["weight"] = torch.mean(weights, dim=1).numpy(force=True)
 
         results.append(meta_df)
-        true_res_results.append(true_res.numpy())
+        true_res_results.append(true_res.numpy(force=True))
         pred_res_results.append(pred_res.numpy(force=True))
 
     results_df = pd.concat(results)
@@ -111,11 +120,18 @@ def get_dataset_predictions(
 
 def _get_weight_prediction(
     scalar_features,
-    meta_model: nn.Module,
+    weight_model: nn.Module,
 ):
     # Put data onto the device
+    # scalar_features = scalar_features[:, [-2]].to(device, dtype=torch.float32)
     scalar_features = scalar_features.to(device, dtype=torch.float32)
-    weights = meta_model(scalar_features)
+    weights = weight_model(scalar_features)
+
+    # Normalise
+    weights = (weights / torch.sum(weights, dim=0)) * (
+        torch.ones(weights.shape[1], dtype=torch.float32).to(weights.device)
+        * weights.shape[0]
+    )
 
     return weights
 
@@ -150,26 +166,41 @@ def _get_res_prediction(
 def compute_misfit(
     pred_res: torch.Tensor,
     true_res: torch.Tensor,
+    aggregate: bool = True,
     dim: int = None,
 ):
-    return torch.mean(torch.abs(pred_res - true_res), dim=dim)
+    misfit = torch.abs(pred_res - true_res)
+    if aggregate:
+        return torch.mean(misfit, dim=dim)
+    return misfit
+
+
+def compute_weighted_misfit(
+    pred_res: torch.Tensor,
+    true_res: torch.Tensor,
+    weights: torch.Tensor,
+    aggregate: bool = True,
+    dim: int = None,
+):
+    weighted_misfit = weights * torch.abs(pred_res - true_res)
+    if aggregate:
+        return torch.mean(weighted_misfit, dim=dim)
+    return weighted_misfit
 
 
 def train(
     res_model: nn.Module,
     weight_model: nn.Module,
     train_dataloader: DataLoader,
-    meta_dataloader: DataLoader,
     val_dataloader: DataLoader,
     n_epochs: int,
     device: str,
     weight_decay: float,
+    lr: float,
 ):
     metrics = {
         "loss_hist_train": torch.zeros(n_epochs),
         "misfit_loss_hist_train": torch.zeros(n_epochs),
-        "wval_misfit_loss_hist": torch.zeros(n_epochs),
-        "wval_loss": torch.zeros(n_epochs),
         "loss_hist_val": torch.zeros(n_epochs),
         "misfit_loss_hist_val": torch.zeros(n_epochs),
     }
@@ -180,14 +211,12 @@ def train(
     best_weight_model_state = None
     best_model_epoch = None
 
-    meta_model = copy.deepcopy(res_model)
-
-    res_optimizer = torch.optim.Adam(
-        res_model.parameters(),
-        lr=0.001,
-        weight_decay=weight_decay,
+    optimizer = torch.optim.Adam(
+        [
+            dict(params=res_model.parameters(), lr=lr, weight_decay=weight_decay),
+            dict(params=weight_model.parameters(), lr=lr),
+        ]
     )
-    weight_optimizer = torch.optim.Adam(weight_model.parameters(), lr=0.001)
 
     for epoch in range(n_epochs):
         ### Training
@@ -203,59 +232,6 @@ def train(
         ) in enumerate(train_dataloader):
             int_obs_int_sim_res = int_obs_int_sim_res.to(device, dtype=torch.float32)
 
-            # Get minibatch from meta-dataset
-            (
-                _,
-                wval_obs_obs_obs_sim_res,
-                wval_obs_obs_int_sim_res,
-                wval_obs_sim_int_sim_res,
-                wval_scalar_features,
-                wval_int_obs_int_sim_res,
-                wval_sample_weights,
-            ) = next(iter(meta_dataloader))
-            wval_int_obs_int_sim_res = wval_int_obs_int_sim_res.to(
-                device, dtype=torch.float32
-            )
-            wval_sample_weights = wval_sample_weights.to(device, dtype=torch.float32)
-
-            # Meta model
-            meta_model.load_state_dict(res_model.state_dict())
-            meta_pred = _get_res_prediction(
-                obs_obs_obs_sim_res,
-                obs_obs_int_sim_res,
-                obs_sim_int_sim_res,
-                scalar_features,
-                meta_model,
-                device,
-            )
-            meta_misfit_loss = compute_misfit(meta_pred, int_obs_int_sim_res, dim=1)
-            meta_weights = _get_weight_prediction(scalar_features, weight_model)
-            meta_loss = torch.mean(meta_misfit_loss * meta_weights)
-
-            # Perform gradient step
-            meta_state_dict = meta_model.state_dict(keep_vars=True)
-            grads = autograd.grad(meta_loss, list(meta_state_dict.values()), create_graph=True)
-            for param_key, grad in zip(meta_state_dict.keys(), grads):
-                meta_state_dict[param_key] = meta_state_dict[param_key] - 0.01 * grad
-            meta_model.load_state_dict(meta_state_dict)
-
-            # Update the weight model
-            meta_wval_pred = _get_res_prediction(
-                wval_obs_obs_obs_sim_res,
-                wval_obs_obs_int_sim_res,
-                wval_obs_sim_int_sim_res,
-                wval_scalar_features,
-                meta_model,
-                device,
-            )
-            wval_misfit_loss = compute_misfit(meta_wval_pred, wval_int_obs_int_sim_res, dim=1)
-            wval_loss = torch.mean(wval_misfit_loss * wval_sample_weights)
-
-            weight_model.zero_grad(set_to_none=True)
-            wval_loss.backward()
-            weight_optimizer.step()
-
-            # Update the residual model
             pred = _get_res_prediction(
                 obs_obs_obs_sim_res,
                 obs_obs_int_sim_res,
@@ -264,13 +240,13 @@ def train(
                 res_model,
                 device,
             )
-            misfit_loss = compute_misfit(pred, int_obs_int_sim_res, dim=1)
-            weight = _get_weight_prediction(scalar_features, weight_model)
-            loss = torch.mean(misfit_loss * weight)
+            weights = _get_weight_prediction(scalar_features, weight_model)
+            loss = compute_weighted_misfit(pred, int_obs_int_sim_res, weights)
+            misfit_loss = compute_misfit(pred, int_obs_int_sim_res)
 
-            res_model.zero_grad(set_to_none=True)
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            res_optimizer.step()
+            optimizer.step()
 
             metrics["loss_hist_train"][epoch] += (
                 loss.item() * int_obs_int_sim_res.shape[0]
@@ -278,14 +254,9 @@ def train(
             metrics["misfit_loss_hist_train"][epoch] += (
                 torch.mean(misfit_loss).item() * int_obs_int_sim_res.shape[0]
             )
-            metrics["wval_loss"][epoch] += wval_loss.item() * wval_int_obs_int_sim_res.shape[0]
-            metrics["wval_misfit_loss_hist"][epoch] += torch.mean(wval_misfit_loss).item() * wval_int_obs_int_sim_res.shape[0]
-
 
         metrics["loss_hist_train"][epoch] /= len(train_dataloader.dataset)
         metrics["misfit_loss_hist_train"][epoch] /= len(train_dataloader.dataset)
-        metrics["wval_loss"][epoch] /= len(train_dataloader) * meta_dataloader.batch_size
-        metrics["wval_misfit_loss_hist"][epoch] /= len(train_dataloader) * meta_dataloader.batch_size
 
         ### Validation
         res_model.eval()
@@ -309,20 +280,24 @@ def train(
                     device,
                 )
 
-                val_sample_weights = _get_weight_prediction(scalar_features, weight_model)
+                val_sample_weights = _get_weight_prediction(
+                    scalar_features, weight_model
+                )
 
                 # Loss
                 int_obs_int_sim_res = int_obs_int_sim_res.to(
                     device, dtype=torch.float32
                 )
-                val_misfit_loss = compute_misfit(res_pred, int_obs_int_sim_res, dim=1)
-                val_loss = torch.mean(val_misfit_loss * val_sample_weights)
+                val_misfit_loss = compute_misfit(res_pred, int_obs_int_sim_res)
+                val_loss = compute_weighted_misfit(
+                    res_pred, int_obs_int_sim_res, val_sample_weights
+                )
 
                 metrics["loss_hist_val"][epoch] += (
                     val_loss.item() * int_obs_int_sim_res.shape[0]
                 )
                 metrics["misfit_loss_hist_val"][epoch] += (
-                    torch.mean(val_misfit_loss).item() * int_obs_int_sim_res.shape[0]
+                    val_misfit_loss.item() * int_obs_int_sim_res.shape[0]
                 )
 
             metrics["loss_hist_val"][epoch] /= len(val_dataloader.dataset)
@@ -339,8 +314,6 @@ def train(
             f"Epoch {epoch+1}\n"
             f"\tLoss: Train {metrics['loss_hist_train'][epoch]:.4f} Val {metrics['loss_hist_val'][epoch]:.4f}\n"
             f"\tMisfit: Train {metrics['misfit_loss_hist_train'][epoch]:.4f} Val {metrics['misfit_loss_hist_val'][epoch]:.4f}\n"
-            f"\tWVal: Misfit {metrics['wval_misfit_loss_hist'][epoch]:.4f} Loss {metrics['wval_loss'][epoch]:.4f}\n"
-
         )
     return metrics, best_res_model_state, best_weight_model_state, best_model_epoch
 
@@ -348,22 +321,23 @@ def train(
 def main(
     n_epochs: int = 25,
     batch_size: int = 2048,
-    meta_batch_size: int = 64,
     n_rels_used: int = 5,
     comment: str = "",
     max_dist: float = 100.0,
     save_best_val_model: bool = True,
     weight_decay: float = 0.0001,
-    debug: bool = False
+    debug: bool = False,
 ):
+    print(os.environ.get("LD_LIBRARY_PATH"))
+
     ### CONFIG ###
     # N_VAL_SITES = 10
 
-    # RS_N_CHANNELS = [1, 16, 32]
-    RS_N_CHANNELS = []
-    RS_KERNEL_SIZES = []
-    # RS_KERNEL_SIZES = [5, 3]
-    # FC_UNITS = [128, 64, 32]
+    # RS_N_CHANNELS = []
+    # RS_KERNEL_SIZES = []
+    # FC_UNITS = [64, 32]
+    RS_N_CHANNELS = [1, 16, 32]
+    RS_KERNEL_SIZES = [5, 3]
     FC_UNITS = [64, 32]
 
     # Scalar features
@@ -372,12 +346,6 @@ def main(
     EVENT_SITE_FEATURE_KEYS = ["r_rup"]
     EVENT_SITE_TO_SITE_FEATURE_KEYS = ["angle"]
 
-    # Weight model
-    WEIGHT_FC_UNITS = [16]
-
-    # Meta dataset
-    N_SAMPLES_PER_BIN = 20
-
     ### END CONFIG ###
 
     # Fixing the random seed
@@ -385,10 +353,6 @@ def main(
 
     db_ffp_orig = "$wdata/sim_ranking/db/gm_db.sqlite"
     db_ffp = Path(os.path.expandvars(db_ffp_orig))
-    obs_corr_ffp_orig = (
-        "$wdata/sim_ranking/obs_correlations/obs_site_correlations.pickle"
-    )
-    obs_corr_ffp = Path(os.path.expandvars(obs_corr_ffp_orig))
     results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
 
     db = sr.db.DB(db_ffp)
@@ -458,19 +422,6 @@ def main(
     train_events = np.asarray(list(train_event_sites.keys()))
     val_events = np.asarray(list(val_event_sites.keys()))
 
-    # Create the meta-val dataset
-    print(f"Creating meta-val dataset")
-    obs_corr = pd.read_pickle(obs_corr_ffp)
-    meta_event_sites, meta_site_combs, meta_dataset_df = sr.ml.data.create_meta_dataset(
-        train_event_sites,
-        train_site_combs,
-        station_df,
-        obs_corr,
-        dist_matrix,
-        max_dist,
-        N_SAMPLES_PER_BIN,
-    )
-
     # Get the periods and corresponding pSA keys
     periods, pSA_keys = sr.constants.PERIODS, sr.constants.PSA_KEYS
     n_periods = len(periods)
@@ -519,19 +470,6 @@ def main(
     )
     print(f"Took {time.time() - start_time} to create train dataset")
     start_time = time.time()
-    weight_val_dataset = sr.ml.data.WeigthValidationDataset(
-        meta_event_sites,
-        meta_site_combs,
-        db,
-        n_rels_used,
-        site_features_df,
-        periods,
-        pSA_keys,
-        scalar_features,
-        obs_corr["mean"]
-    )
-    print(f"Took {time.time() - start_time} to create meta dataset")
-    start_time = time.time()
     val_dataset = sr.ml.data.ResponseSpectrumResidualDataset(
         val_event_sites,
         val_site_combs,
@@ -549,14 +487,6 @@ def main(
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
-        num_workers=N_DATALOADER_WORKERS,
-        pin_memory=True,
-        persistent_workers=True if N_DATALOADER_WORKERS > 0 else False,
-    )
-    weight_val_dataloader = DataLoader(
-        weight_val_dataset,
-        batch_size=meta_batch_size,
         shuffle=True,
         num_workers=N_DATALOADER_WORKERS,
         pin_memory=True,
@@ -591,9 +521,9 @@ def main(
         apply_sigmoid=False,
     ).to(device)
 
-    weight_model = sr.ml.models.WeightModel(
-        scalar_features.n_scalar_features,
-        WEIGHT_FC_UNITS,
+    # weight_model = sr.ml.models.ConstrainedWeightModel(len(periods)).to(device)
+    weight_model = sr.ml.models.MLPWeightModel(
+        len(periods), [16], scalar_features.n_scalar_features
     ).to(device)
 
     print(f"Residual model summary")
@@ -622,11 +552,11 @@ def main(
         res_model,
         weight_model,
         train_dataloader,
-        weight_val_dataloader,
         val_dataloader,
         n_epochs,
         device,
         weight_decay,
+        lr=0.001,
     )
 
     # Load the best model
@@ -682,10 +612,7 @@ def main(
             "best_epoch": best_epoch,
             "weight_decay": weight_decay,
         },
-        "data": {
-            "db": str(db_ffp_orig),
-            "max_dist": max_dist
-        },
+        "data": {"db": str(db_ffp_orig), "max_dist": max_dist},
     }
     mlt.utils.write_to_yaml(meta_data, results_dir / "meta.yaml")
 

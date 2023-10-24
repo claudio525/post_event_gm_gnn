@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 
 from torch.utils.data import Dataset
-from . import similarity_score as ss
 from ..db import DB
 
 
@@ -26,7 +25,7 @@ class ScalarFeatures:
             + len(self.site_to_site_feature_keys)
             + len(self.event_site_feature_keys) * 2
             + len(self.event_site_to_site_feature_keys)
-        )
+         )
 
 
 def compute_site_combinations(
@@ -424,11 +423,10 @@ class ResponseSpectrumResidualDataset(BaseDataset):
 
         return self._get_data(idx, event, site_ix, rel_ix)
 
+class WeightRSResidualDataset(ResponseSpectrumResidualDataset):
 
-
-class WeigthValidationDataset(ResponseSpectrumResidualDataset):
-
-    def __init__(self,
+    def __init__(
+        self,
         event_sites: Dict[str, np.ndarray],
         site_combs: Dict[str, np.ndarray],
         db: DB,
@@ -437,9 +435,7 @@ class WeigthValidationDataset(ResponseSpectrumResidualDataset):
         periods: np.ndarray,
         pSA_keys: np.ndarray,
         scalar_features: ScalarFeatures,
-        obs_corr: pd.DataFrame
-        ):
-
+    ):
         # Base Class
         super().__init__(
             event_sites,
@@ -451,185 +447,3 @@ class WeigthValidationDataset(ResponseSpectrumResidualDataset):
             pSA_keys,
             scalar_features,
         )
-
-        # Create the weight lookup
-        self.weight_lookup = {}
-        for cur_event in self.events:
-            cur_sites = self.event_sites[cur_event]
-            cur_tensor = np.full(
-                (
-                    cur_sites.size,
-                    cur_sites.size,
-                ),
-                fill_value=np.nan,
-            )
-
-            cur_tensor = obs_corr.loc[cur_sites, cur_sites].values
-            self.weight_lookup[cur_event] = cur_tensor
-
-    def __getitem__(self, idx: int):
-        # Break the index down
-        event, event_ix, site_ix, rel_ix = self.get_indices(idx)
-
-        data = self._get_data(idx, event, site_ix, rel_ix)
-
-        # Get the site of interest and observation site
-        site_int_ix = self.site_combs[event][site_ix, 0]
-        site_obs_ix = self.site_combs[event][site_ix, 1]
-        weight = np.abs(self.weight_lookup[event][site_int_ix, site_obs_ix])
-
-        return (*data, weight)
-
-def create_meta_dataset(
-    train_event_sites: Dict[str, np.ndarray],
-    train_site_combs: Dict[str, np.ndarray],
-    station_df: pd.DataFrame,
-    obs_corr: Dict[str, pd.DataFrame],
-    dist_matrix: pd.DataFrame,
-    max_dist: float,
-    n_samples_per_bin: int,
-):
-
-    corrs = obs_corr["mean"]
-
-    avail_sites = np.intersect1d(
-        station_df.index.values.astype(str), corrs.index.values.astype(str)
-    )
-    corrs = corrs.loc[avail_sites, avail_sites]
-
-    ## Compute the site-combinations with correlation values
-    # ind = np.nonzero(~corrs.isna().values & ~np.eye(corrs.shape[0], dtype=bool))
-    # sites_1 = corrs.index.values[ind[0]].astype(str)
-    # sites_2 = corrs.index.values[ind[1]].astype(str)
-    # assert np.all(sites_1 != sites_2)
-    #
-    # site_pairs_df = pd.DataFrame(
-    #     {
-    #         "site_int": sites_1,
-    #         "site_obs": sites_2,
-    #         "corr": corrs.values[ind],
-    #         # "dist": [dist_matrix.at[cur_site_1, cur_site_2] for cur_site_1, cur_site_2 in
-    #         #          zip(sites_1, sites_2)]
-    #     }
-    # )
-    # site_pairs_df.index = np.char.add(np.char.add(sites_1, "_"), sites_2)
-
-    # Create samples df
-    samples_df = []
-    for cur_event, cur_sites in train_event_sites.items():
-        cur_site_int = cur_sites[train_site_combs[cur_event][:, 0]]
-        cur_site_obs = cur_sites[train_site_combs[cur_event][:, 1]]
-
-        samples_df.append(
-            pd.DataFrame(
-                {
-                    "event": cur_event,
-                    "site_int": cur_site_int,
-                    "site_obs": cur_site_obs,
-                    "corr": corrs.loc[cur_sites, cur_sites].values[
-                        train_site_combs[cur_event][:, 0],
-                        train_site_combs[cur_event][:, 1],
-                    ],
-                    "distance": [
-                        dist_matrix.at[cur_site_1, cur_site_2]
-                        for cur_site_1, cur_site_2 in zip(cur_site_int, cur_site_obs)
-                    ],
-                    "site_int_vs30": station_df.loc[cur_site_int, "vs30"].values,
-                    "site_obs_vs30": station_df.loc[cur_site_obs, "vs30"].values,
-                }
-            )
-        )
-    samples_df = pd.concat(samples_df, axis=0, ignore_index=True)
-
-    # Drop samples with no correlation
-    samples_df = samples_df.dropna(axis=0, subset=["corr"])
-
-    # Site-to-site distance binning
-    if max_dist <= 25:
-        n_dist_bins = 2
-    else:
-        n_dist_bins = 3 if max_dist <= 50 else 4
-    dist_bin_ind = np.digitize(
-        samples_df["distance"].values, bins=np.linspace(0, max_dist, n_dist_bins + 1)
-    )
-    assert dist_bin_ind.min() == 1 and dist_bin_ind.max() == n_dist_bins
-
-    # Vs30 binning
-    vs30_bins = np.asarray([0, 360, 510, 2000])
-    site_int_vs30_bin_ind = np.digitize(
-        samples_df["site_int_vs30"].values, bins=vs30_bins
-    )
-    site_obs_vs30_bin_ind = np.digitize(
-        samples_df["site_obs_vs30"].values, bins=vs30_bins
-    )
-    assert (
-        site_int_vs30_bin_ind.min() == 1
-        and site_int_vs30_bin_ind.max() == vs30_bins.size - 1
-    )
-    assert (
-        site_obs_vs30_bin_ind.min() == 1
-        and site_obs_vs30_bin_ind.max() == vs30_bins.size - 1
-    )
-
-    # Sampling (is there no better way of doing this??)
-    meta_dataset_df = []
-    for dist_ix in np.unique(dist_bin_ind):
-        for site_int_vs30_ix in np.unique(site_int_vs30_bin_ind):
-            for site_obs_vs30_ix in np.unique(site_int_vs30_bin_ind):
-                cur_mask = (
-                    (dist_bin_ind == dist_ix)
-                    & (site_int_vs30_bin_ind == site_int_vs30_ix)
-                    & (site_obs_vs30_bin_ind == site_obs_vs30_ix)
-                )
-                cur_samples_df = samples_df.loc[cur_mask]
-                if cur_samples_df.shape[0] > 0:
-                    meta_dataset_df.append(
-                        cur_samples_df.loc[
-                            np.random.choice(
-                                cur_samples_df.index, n_samples_per_bin, replace=False
-                            )
-                        ]
-                    )
-                else:
-                    print(
-                        f"No samples for bin {dist_ix}, {site_int_vs30_ix}, {site_obs_vs30_ix}"
-                    )
-
-    meta_dataset_df = pd.concat(meta_dataset_df, axis=0, ignore_index=True)
-
-    # Convert to event - site-combs format
-    meta_site_combs, meta_event_sites = {}, {}
-    for cur_event in np.unique(meta_dataset_df.event):
-        cur_mask = meta_dataset_df.event == cur_event
-        cur_event_sites = meta_event_sites[cur_event] = np.unique(
-            np.concatenate(
-                [
-                    meta_dataset_df.loc[cur_mask].site_int.values.astype(str),
-                    meta_dataset_df.loc[cur_mask].site_obs.values.astype(str),
-                ]
-            )
-        )
-
-        # Get the site-combination indices
-        sort_ind = np.argsort(cur_event_sites)
-        meta_site_combs[cur_event] = np.stack(
-            (
-                sort_ind[
-                    np.searchsorted(
-                        cur_event_sites,
-                        meta_dataset_df.loc[cur_mask, "site_int"].values.astype(str),
-                        sorter=sort_ind,
-                    )
-                ],
-                sort_ind[
-                    np.searchsorted(
-                        cur_event_sites,
-                        meta_dataset_df.loc[cur_mask, "site_obs"].values.astype(str),
-                        sorter=sort_ind,
-                    )
-                ],
-            ),
-            axis=1,
-        )
-
-    return meta_event_sites, meta_site_combs, meta_dataset_df

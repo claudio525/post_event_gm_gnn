@@ -95,6 +95,19 @@ def preprocess_site_features(
         return station_df, pd.DataFrame(stats_comp)
     return station_df
 
+def compute_weight_features(
+        station_df: pd.DataFrame,
+        dist_matrix: pd.DataFrame,
+        max_dist: float,
+):
+    ### Site-to-site features
+    site_to_site_features = {}
+
+    # Scale the (used) site-to-site distances
+    # such that they are between -1 and 1
+    # as per the maximum allowed site-to-site
+    # distance when computing the site combinations
+    site_to_site_features["dist"] = ((dist_matrix.copy() / max_dist) * 2) - 1
 
 def compute_scalar_features(
     events: np.ndarray,

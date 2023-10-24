@@ -195,7 +195,7 @@ def run_general_tab(results_dir: Path):
     metric_keys = list(metrics.keys())
 
     # avail_metrics = [key.rsplit("_", maxsplit=1)[0] for key in metric_keys[::2]]
-    avail_metrics = ["loss_hist", "misfit_loss_hist", "wval_misfit_loss_hist", "wval_loss"]
+    avail_metrics = ["loss_hist", "misfit_loss_hist"]
     sel_metric_keys = st.multiselect(
         "Metrics", avail_metrics, default=[avail_metrics[0]]
     )
@@ -364,9 +364,8 @@ def run_individual_samples_tab(results_dir: Path):
             .values.astype(float)
         )
 
-        st.markdown(f"##### Misfit Loss: {results_df.loc[m, ['misfit_loss']].iloc[0].values[0]}")
+        st.markdown(f"##### Misfit Loss: {results_df.loc[m, ['misfit']].iloc[0].values[0]}")
         st.markdown(f"##### Loss: {results_df.loc[m, ['loss']].iloc[0].values[0]}")
-        st.markdown(f"##### Sample Weight: {results_df.loc[m, ['weight']].iloc[0].values[0]}")
 
         # Residuals
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -539,16 +538,13 @@ def run_rs_agg_tab(results_dir: Path):
     col_1, col_2 = st.columns(2)
 
     with col_1:
-        loss_key = st.selectbox("Loss type", ["loss", "misfit_loss"], index=0)
+        loss_key = st.selectbox("Loss type", ["loss", "misfit"], index=0)
 
     with col_2:
         color_key_options = ["weight", "mag"]
         avail_options = [cur_option for cur_option in color_key_options if cur_option in train_results_df.columns] + ["no_color"]
         color_key = st.selectbox("Color Key", avail_options, index=len(avail_options) - 1)
 
-
-    # mag_coloring = st.checkbox("Color by Magnitude", value=False)
-    # mag_coloring = True
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
