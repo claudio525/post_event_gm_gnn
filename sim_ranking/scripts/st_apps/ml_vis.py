@@ -186,20 +186,20 @@ def run_general_tab(results_dir: Path):
             ### Training
             Number of Epochs: {meta["training"]['n_epochs']}\n
             Batch Size: {meta["training"]['batch_size']}\n
-            Weight Decay (L2 Regularisation): {meta["training"].get("weight_decay")}
+            L2 Regularisation: {meta["training"].get("l2_reg")}\n
+            Weight Penalty Factor: {meta["training"].get("weight_penalty_factor")}
             """
         )
 
     # Loss plot
     metrics = load_training_metrics(results_dir)
-    metric_keys = list(metrics.keys())
+    metric_keys = sorted(list(metrics.keys()))
 
-    # avail_metrics = [key.rsplit("_", maxsplit=1)[0] for key in metric_keys[::2]]
-    avail_metrics = ["loss_hist", "misfit_loss_hist"]
+    avail_metrics = [key.rsplit("_", maxsplit=1)[0] for key in metric_keys[::2]]
+    # avail_metrics = ["loss_hist", "misfit_loss_hist"]
     sel_metric_keys = st.multiselect(
         "Metrics", avail_metrics, default=[avail_metrics[0]]
     )
-
 
     fig, ax = plt.subplots(figsize=(12, 6))
     mlt.plotting.plot_metrics(metrics, sel_metric_keys, ax=ax, best_epoch=meta["training"]["best_epoch"])
@@ -538,7 +538,7 @@ def run_rs_agg_tab(results_dir: Path):
     col_1, col_2 = st.columns(2)
 
     with col_1:
-        loss_key = st.selectbox("Loss type", ["loss", "misfit"], index=0)
+        loss_key = st.selectbox("Loss type", ["loss", "misfit", "weighted_misfit"], index=0)
 
     with col_2:
         color_key_options = ["weight", "mag"]

@@ -11,6 +11,7 @@ def compute_angular_distance(
     event_df: pd.DataFrame,
     events: Sequence[str],
     event_sites: Dict[str, np.ndarray],
+    pre_process: bool = True,
 ):
     """
     Computes the angle between the site-pairs
@@ -43,9 +44,17 @@ def compute_angular_distance(
                         np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
                     )
 
+        # Scale such that -1 => 0 and 1 => pi
+        if pre_process:
+            cur_site_to_site_angle = (
+                cur_site_to_site_angle / np.pi
+            ) * 2 - 1
+
         event_angular_distances[cur_event] = pd.DataFrame(
             data=cur_site_to_site_angle, index=cur_sites, columns=cur_sites
         )
+
+
 
     return event_angular_distances
 
@@ -95,19 +104,44 @@ def preprocess_site_features(
         return station_df, pd.DataFrame(stats_comp)
     return station_df
 
+
 def compute_weight_features(
-        station_df: pd.DataFrame,
-        dist_matrix: pd.DataFrame,
-        max_dist: float,
+    station_df: pd.DataFrame,
+    event_df: pd.DataFrame,
+    events: Sequence[str],
+    event_sites: Dict[str, np.ndarray],
+    dist_matrix: pd.DataFrame,
+    max_dist: float,
 ):
     ### Site-to-site features
     site_to_site_features = {}
+    event_site_to_site_features = {}
 
     # Scale the (used) site-to-site distances
     # such that they are between -1 and 1
     # as per the maximum allowed site-to-site
     # distance when computing the site combinations
-    site_to_site_features["dist"] = ((dist_matrix.copy() / max_dist) * 2) - 1
+    # site_to_site_features["dist"] = ((dist_matrix.copy() / max_dist) * 2) - 1
+    site_to_site_features["dist"] = dist_matrix.copy()
+
+    vs30_dist = np.abs(
+        station_df.vs30.values[:, np.newaxis] - station_df.vs30.values[np.newaxis, :]
+    )
+    # Scale such that -1 => 0 and 1 => 1000
+    site_to_site_features["vs30_dist"] = pd.DataFrame(
+        # data=((vs30_dist / 1000) * 2) - 1,
+        data=vs30_dist,
+        index=station_df.index,
+        columns=station_df.index,
+    )
+
+    # Compute the site-to-site angle wrt. the epicentre
+    event_site_to_site_features["angular_dist"] = compute_angular_distance(
+        station_df, event_df, events, event_sites, pre_process=False
+    )
+
+    return site_to_site_features, event_site_to_site_features
+
 
 def compute_scalar_features(
     events: np.ndarray,
@@ -140,7 +174,7 @@ def compute_scalar_features(
     event_site_to_site_features = {}
 
     # Compute the site-to-site angle wrt. the epicentre
-    event_site_to_site_features["angle"] = compute_angular_distance(
+    event_site_to_site_features["angular_dist"] = compute_angular_distance(
         station_df, event_df, events, event_sites
     )
 

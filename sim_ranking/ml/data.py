@@ -25,7 +25,20 @@ class ScalarFeatures:
             + len(self.site_to_site_feature_keys)
             + len(self.event_site_feature_keys) * 2
             + len(self.event_site_to_site_feature_keys)
-         )
+        )
+
+
+@dataclass
+class WeightScalarFeatures:
+    site_to_site_features_data: Dict[str, pd.DataFrame]
+    site_to_site_feature_keys: Sequence[str]
+    event_site_to_site_features_data: Dict[str, Dict[str, pd.DataFrame]]
+    event_site_to_site_feature_keys: Sequence[str]
+
+    def __post_init__(self):
+        self.n_scalar_features = len(self.site_to_site_feature_keys) + len(
+            self.event_site_to_site_feature_keys
+        )
 
 
 def compute_site_combinations(
@@ -308,8 +321,6 @@ class BaseDataset(Dataset):
         raise NotImplementedError()
 
 
-
-
 class ResponseSpectrumResidualDataset(BaseDataset):
     def __init__(
         self,
@@ -416,15 +427,14 @@ class ResponseSpectrumResidualDataset(BaseDataset):
             int_obs_int_sim_res,
         )
 
-
     def __getitem__(self, idx: int):
         # Break the index down
         event, event_ix, site_ix, rel_ix = self.get_indices(idx)
 
         return self._get_data(idx, event, site_ix, rel_ix)
 
-class WeightRSResidualDataset(ResponseSpectrumResidualDataset):
 
+class WeightRSResidualDataset(ResponseSpectrumResidualDataset):
     def __init__(
         self,
         event_sites: Dict[str, np.ndarray],
@@ -435,6 +445,7 @@ class WeightRSResidualDataset(ResponseSpectrumResidualDataset):
         periods: np.ndarray,
         pSA_keys: np.ndarray,
         scalar_features: ScalarFeatures,
+        weight_scalar_features: WeightScalarFeatures,
     ):
         # Base Class
         super().__init__(
@@ -447,3 +458,57 @@ class WeightRSResidualDataset(ResponseSpectrumResidualDataset):
             pSA_keys,
             scalar_features,
         )
+
+        self.weight_scalar_features = weight_scalar_features
+        self.weight_scalar_feature_tensor = {}
+        for cur_event in self.events:
+            cur_sites = self.event_sites[cur_event]
+            cur_tensor = np.full(
+                (
+                    cur_sites.size,
+                    cur_sites.size,
+                    self.weight_scalar_features.n_scalar_features,
+                ),
+                fill_value=np.nan,
+            )
+            # Site to site features
+            for i, feature_i in enumerate(
+                self.weight_scalar_features.site_to_site_feature_keys
+            ):
+                cur_tensor[
+                    :, :, i
+                ] = self.weight_scalar_features.site_to_site_features_data[
+                    feature_i
+                ].loc[
+                    cur_sites, cur_sites
+                ]
+            cur_f_ix = len(self.weight_scalar_features.site_to_site_feature_keys)
+            # Event site to site features
+            for i, feature_i in enumerate(
+                self.weight_scalar_features.event_site_to_site_feature_keys
+            ):
+                cur_tensor[
+                    :, :, cur_f_ix + i
+                ] = self.weight_scalar_features.event_site_to_site_features_data[
+                    feature_i
+                ][
+                    cur_event
+                ].loc[
+                    cur_sites, cur_sites
+                ]
+
+            self.weight_scalar_feature_tensor[cur_event] = cur_tensor
+
+    def __getitem__(self, idx: int):
+        # Break the index down
+        event, event_ix, site_ix, rel_ix = self.get_indices(idx)
+
+        # Get the site of interest and observation site
+        site_int_ix = self.site_combs[event][site_ix, 0]
+        site_obs_ix = self.site_combs[event][site_ix, 1]
+
+        weight_scalar_features = self.weight_scalar_feature_tensor[event][
+            site_int_ix, site_obs_ix, :
+        ]
+
+        return *self._get_data(idx, event, site_ix, rel_ix), weight_scalar_features
