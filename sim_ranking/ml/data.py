@@ -5,8 +5,7 @@ import numpy as np
 import pandas as pd
 
 from torch.utils.data import Dataset
-from . import similarity_score as ss
-from .. import db
+from ..db import DB
 
 
 @dataclass
@@ -26,6 +25,19 @@ class ScalarFeatures:
             + len(self.site_to_site_feature_keys)
             + len(self.event_site_feature_keys) * 2
             + len(self.event_site_to_site_feature_keys)
+        )
+
+
+@dataclass
+class WeightScalarFeatures:
+    site_to_site_features_data: Dict[str, pd.DataFrame]
+    site_to_site_feature_keys: Sequence[str]
+    event_site_to_site_features_data: Dict[str, Dict[str, pd.DataFrame]]
+    event_site_to_site_feature_keys: Sequence[str]
+
+    def __post_init__(self):
+        self.n_scalar_features = len(self.site_to_site_feature_keys) + len(
+            self.event_site_to_site_feature_keys
         )
 
 
@@ -82,7 +94,7 @@ def compute_site_combinations(
 def _get_event_sim_obs_pSA_data(
     event_sites: Dict[str, np.ndarray],
     site_combs: Dict[str, np.ndarray],
-    db: db.DB,
+    db: DB,
     pSA_keys: np.ndarray,
     n_rels: int,
 ):
@@ -154,7 +166,7 @@ class BaseDataset(Dataset):
         self,
         event_sites: Dict[str, np.ndarray],
         site_combs: Dict[str, np.ndarray],
-        db: db.DB,
+        db: DB,
         n_rels: int,
         station_df: pd.DataFrame,
         periods: np.ndarray,
@@ -314,7 +326,7 @@ class ResponseSpectrumResidualDataset(BaseDataset):
         self,
         event_sites: Dict[str, np.ndarray],
         site_combs: Dict[str, np.ndarray],
-        db: db.DB,
+        db: DB,
         n_rels: int,
         station_df: pd.DataFrame,
         periods: np.ndarray,
@@ -381,16 +393,10 @@ class ResponseSpectrumResidualDataset(BaseDataset):
             self.obs_sim_residuals[cur_event] = cur_obs_sim_residuals
             self.sim_sim_residuals[cur_event] = cur_sim_sim_residuals
 
-    def __getitem__(self, idx: int):
-        # Break the index down
-        event, event_ix, site_ix, rel_ix = self.get_indices(idx)
-
+    def _get_data(self, idx: int, event: str, site_ix: int, rel_ix: int):
         # Get the site of interest and observation site
         site_int_ix = self.site_combs[event][site_ix, 0]
         site_obs_ix = self.site_combs[event][site_ix, 1]
-
-        site_int = self.event_sites[event][site_int_ix]
-        site_obs = self.event_sites[event][site_obs_ix]
 
         # Features
         obs_obs_obs_sim_res = self.obs_sim_residuals[event][
@@ -403,11 +409,9 @@ class ResponseSpectrumResidualDataset(BaseDataset):
             site_obs_ix, site_int_ix, :, rel_ix
         ]
 
-        site_features = self.scalar_features_tensors[event][site_int_ix, site_obs_ix, :]
-
-        # site_int_all_ix = self.all_sites_ix_lookup[site_int]
-        # site_obs_all_ix = self.all_sites_ix_lookup[site_obs]
-        # site_features = self.feature_tensor[site_int_all_ix, site_obs_all_ix, :]
+        scalar_features = self.scalar_features_tensors[event][
+            site_int_ix, site_obs_ix, :
+        ]
 
         # Labels
         int_obs_int_sim_res = self.obs_sim_residuals[event][
@@ -419,26 +423,30 @@ class ResponseSpectrumResidualDataset(BaseDataset):
             obs_obs_obs_sim_res,
             obs_obs_int_sim_res,
             obs_sim_int_sim_rel,
-            site_features,
+            scalar_features,
             int_obs_int_sim_res,
         )
 
+    def __getitem__(self, idx: int):
+        # Break the index down
+        event, event_ix, site_ix, rel_ix = self.get_indices(idx)
 
-class ResponseSpectrumDataset(BaseDataset):
+        return self._get_data(idx, event, site_ix, rel_ix)
+
+
+class WeightRSResidualDataset(ResponseSpectrumResidualDataset):
     def __init__(
         self,
         event_sites: Dict[str, np.ndarray],
         site_combs: Dict[str, np.ndarray],
-        db: db.DB,
+        db: DB,
         n_rels: int,
         station_df: pd.DataFrame,
         periods: np.ndarray,
         pSA_keys: np.ndarray,
-        dist_matrix: pd.DataFrame,
-        site_features: Sequence[str],
-        max_site_to_site_dist: float = 100,
+        scalar_features: ScalarFeatures,
+        weight_scalar_features: WeightScalarFeatures,
     ):
-
         # Base Class
         super().__init__(
             event_sites,
@@ -448,51 +456,48 @@ class ResponseSpectrumDataset(BaseDataset):
             station_df,
             periods,
             pSA_keys,
-            dist_matrix,
-            site_features,
-            max_site_to_site_dist,
+            scalar_features,
         )
 
-        # Organize the sim response spectra such that it is
-        # in the format [n_rels, n_periods, n_sites]
-        # per event
-        self.sim_im_data = {}
-        # And observed response spectra in the format
-        # [n_periods, n_sites]
-        self.obs_im_data = {}
+        self.weight_scalar_features = weight_scalar_features
+        self.weight_scalar_feature_tensor = {}
         for cur_event in self.events:
             cur_sites = self.event_sites[cur_event]
-            cur_sim_df = self.sim_im_dfs[cur_event]
-
-            if self.rels[cur_event] is None:
-                self.sim_im_data[cur_event] = (
-                    cur_sim_df.set_index("site_id")
-                    .loc[cur_sites, pSA_keys]
-                    .values.T[np.newaxis, ...]
-                )
-            else:
-                assert cur_sim_df.shape[0] == cur_sites.size * self.n_rels
-                self.sim_im_data[cur_event] = np.stack(
-                    [
-                        cur_sim_df.loc[cur_sim_df.rel_id == cur_rel]
-                        .set_index("site_id")
-                        .loc[cur_sites, pSA_keys]
-                        .T.values
-                        for cur_rel in self.rels[cur_event]
-                    ],
-                    axis=0,
-                )
-
-            self.obs_im_data[cur_event] = (
-                self.obs_im_dfs[cur_event].loc[cur_sites, pSA_keys].values.T
+            cur_tensor = np.full(
+                (
+                    cur_sites.size,
+                    cur_sites.size,
+                    self.weight_scalar_features.n_scalar_features,
+                ),
+                fill_value=np.nan,
             )
+            # Site to site features
+            for i, feature_i in enumerate(
+                self.weight_scalar_features.site_to_site_feature_keys
+            ):
+                cur_tensor[
+                    :, :, i
+                ] = self.weight_scalar_features.site_to_site_features_data[
+                    feature_i
+                ].loc[
+                    cur_sites, cur_sites
+                ]
+            cur_f_ix = len(self.weight_scalar_features.site_to_site_feature_keys)
+            # Event site to site features
+            for i, feature_i in enumerate(
+                self.weight_scalar_features.event_site_to_site_feature_keys
+            ):
+                cur_tensor[
+                    :, :, cur_f_ix + i
+                ] = self.weight_scalar_features.event_site_to_site_features_data[
+                    feature_i
+                ][
+                    cur_event
+                ].loc[
+                    cur_sites, cur_sites
+                ]
 
-        # Some more sanity checking
-        for cur_event in self.events:
-            assert self.sim_im_data[cur_event].shape[0] in [1, self.n_rels]
-            assert (
-                self.sim_im_data[cur_event].shape[2] == self.event_sites[cur_event].size
-            )
+            self.weight_scalar_feature_tensor[cur_event] = cur_tensor
 
     def __getitem__(self, idx: int):
         # Break the index down
@@ -502,26 +507,8 @@ class ResponseSpectrumDataset(BaseDataset):
         site_int_ix = self.site_combs[event][site_ix, 0]
         site_obs_ix = self.site_combs[event][site_ix, 1]
 
-        site_int = self.event_sites[event][site_int_ix]
-        site_obs = self.event_sites[event][site_obs_ix]
+        weight_scalar_features = self.weight_scalar_feature_tensor[event][
+            site_int_ix, site_obs_ix, :
+        ]
 
-        # Features
-        site_int_sim = self.sim_im_data[event][rel_ix, :, site_int_ix]
-        site_obs_sim = self.sim_im_data[event][rel_ix, :, site_obs_ix]
-        site_obs_obs = self.obs_im_data[event][:, site_obs_ix]
-
-        site_int_all_ix = self.all_sites_ix_lookup[site_int]
-        site_obs_all_ix = self.all_sites_ix_lookup[site_obs]
-        site_features = self.feature_tensor[site_int_all_ix, site_obs_all_ix, :]
-
-        # Labels
-        site_int_obs = self.obs_im_data[event][:, site_int_ix]
-
-        return (
-            np.log(site_int_sim),
-            np.log(site_obs_sim),
-            np.log(site_obs_obs),
-            site_features,
-            np.log(site_int_obs),
-            self.dist_matrix.iat[site_int_all_ix, site_obs_all_ix],
-        )
+        return *self._get_data(idx, event, site_ix, rel_ix), weight_scalar_features

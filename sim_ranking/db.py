@@ -264,7 +264,7 @@ class DB:
 
         # Create the observed table
         cur.execute(
-            "CREATE TABLE obs_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, "
+            "CREATE TABLE obs_im_data (record_id TEXT PRIMARY KEY, event_ixd TEXT, "
             "site_id TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
         )
         for cur_period in constants.PERIODS:

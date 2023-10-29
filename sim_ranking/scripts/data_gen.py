@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import typer
 
 import sim_ranking as sr
@@ -73,6 +75,47 @@ def compute_sim_site_correlations(
 
     for cur_result in correlation_results:
         cur_result.write(output_dir / f"{cur_result.event}.pickle")
+
+@app.command("compute-obs-site-correlations")
+def compute_obs_site_correlations(output_dir: Path, db_ffp: Path, site_count_th: int = 20):
+    db = sr.db.DB(db_ffp)
+    obs_df = db.get_obs_df()
+
+    results = {}
+    n_site_pairs = None
+    for pSA_key in sr.constants.PSA_KEYS:
+        # Get the data into the correct format
+        cur_df = obs_df.loc[:, ["event_id", "site_id", pSA_key]]
+        cur_df = cur_df.pivot(index="event_id", columns="site_id", values=pSA_key)
+
+        # Compute the correlations
+        cur_corrs = cur_df.corr(min_periods=site_count_th)
+
+        # Drop any sites for which we don't have any correlations
+        # cur_corrs = cur_corrs.dropna(axis=0, how="all")
+        # cur_corrs = cur_corrs.dropna(axis=1, how="all")
+        # assert cur_corrs.shape[0] == cur_corrs.shape[1]
+
+        # Sanity checking
+        cur_n_site_pairs = (cur_corrs.size - np.count_nonzero(cur_corrs.isna()) - cur_corrs.shape[
+                0]) // 2
+        n_site_pairs = cur_n_site_pairs if n_site_pairs is None else n_site_pairs
+        assert n_site_pairs == cur_n_site_pairs
+
+        # Store the result
+        results[pSA_key] = cur_corrs
+
+    # Compute the mean correlations
+    corr_values = np.stack([cur_corrs.values for cur_corrs in results.values()], axis=2)
+    results["mean"] = pd.DataFrame(
+        np.mean(corr_values, axis=2),
+        index=cur_corrs.index,
+        columns=cur_corrs.columns,
+    )
+
+    # Save the results
+    pd.to_pickle(results, output_dir / "obs_site_correlations.pickle")
+    # print(f"wtf")
 
 
 if __name__ == "__main__":

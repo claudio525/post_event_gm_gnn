@@ -5,6 +5,7 @@ from torch import nn
 import pandas as pd
 import numpy as np
 
+
 class ResponseSpectrumSimModel(nn.Module):
     def __init__(
         self,
@@ -65,3 +66,67 @@ class ResponseSpectrumSimModel(nn.Module):
 
         return self.fc_layers(rs_conv_out)
 
+
+class SimpleWeightModel(nn.Module):
+    def __init__(self, n_periods: int):
+        super().__init__()
+        self.linear = nn.Linear(1, n_periods)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        return self.sigmoid(self.linear(x))
+
+
+class ExpWeightModel(nn.Module):
+    """
+    The functional form of this model is based on the
+    2023 Bodemann et al. spatial correlation model
+    """
+
+    def __init__(self, n_periods: int):
+        super().__init__()
+
+        self.dist_scale = nn.Parameter(torch.ones(n_periods) * 20)
+        self.dist_exp = nn.Parameter(torch.ones(n_periods) * 1)
+
+        self.angular_scale = nn.Parameter(torch.ones(n_periods) * 1.0)
+
+        self.vs30_scale = nn.Parameter(torch.ones(n_periods) * 200.0)
+
+        self.weight = nn.Parameter(torch.ones(n_periods) * 0.5)
+
+    def forward(self, x: torch.Tensor):
+        """Expects inputs to have shape [batch_size, 3] where
+        the columns are distance, vs30, and angular distance"""
+        dist = x[:, 0]
+        vs30_dist = x[:, 1]
+        angular_dist = x[:, 2]
+
+        dist_term = torch.exp(-(dist[:, None] / self.dist_scale) ** self.dist_exp)
+
+        angular_term = (1 + angular_dist[:, None] / self.angular_scale) * (
+            1 - angular_dist[:, None] / torch.pi
+        ) ** (np.pi / self.angular_scale)
+
+        vs30_term = torch.exp(-vs30_dist[:, None] / self.vs30_scale)
+
+        result = dist_term * (self.weight * angular_term + (1 - self.weight) * vs30_term)
+        return result
+
+
+class MLPWeightModel(nn.Module):
+    def __init__(self, n_periods: int, units: Sequence[int], n_scalar_inputs: int):
+        super().__init__()
+        self.units = units
+        self.layers = nn.Sequential()
+        for i in range(len(units)):
+            if i == 0:
+                self.layers.append(nn.Linear(n_scalar_inputs, units[i]))
+            else:
+                self.layers.append(nn.Linear(units[i - 1], units[i]))
+            self.layers.append(nn.ELU())
+        self.layers.append(nn.Linear(units[-1], n_periods))
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        return self.sigmoid(self.layers(x))
