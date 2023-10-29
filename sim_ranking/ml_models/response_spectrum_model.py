@@ -144,8 +144,8 @@ def _get_weight_prediction(
     # Scale such that the max weight is 1 per period
     weights = weights / weights.max(dim=0)[0]
 
-    # return weights
-    return torch.ones(weights.shape, dtype=torch.float32).to(weights.device)
+    return weights
+    # return torch.ones(weights.shape, dtype=torch.float32).to(weights.device)
 
 
 def _get_res_prediction(
@@ -267,17 +267,17 @@ def train(
     optimizer = torch.optim.Adam(
         [
             dict(params=res_model.parameters(), lr=lr, weight_decay=l2_reg),
-            # dict(params=weight_model.parameters(), lr=0.01),
+            dict(params=weight_model.parameters(), lr=0.01),
         ]
     )
 
     for epoch in range(n_epochs):
-        # if epoch == 25:
-        #     optimizer.param_groups[1]["lr"] = 0.001
-        # if epoch == 75:
-        #     optimizer.param_groups[1]["lr"] = 0.0001
-        # if epoch == 75:
-        #     optimizer.param_groups[1]["lr"] = 0.0
+        if epoch == 25:
+            optimizer.param_groups[1]["lr"] = 0.001
+        if epoch == 75:
+            optimizer.param_groups[1]["lr"] = 0.0001
+        if epoch == 75:
+            optimizer.param_groups[1]["lr"] = 0.0
 
         ### Training
         res_model.train()

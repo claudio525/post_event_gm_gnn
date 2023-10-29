@@ -117,23 +117,9 @@ def compute_weight_features(
     site_to_site_features = {}
     event_site_to_site_features = {}
 
-    # Scale the (used) site-to-site distances
-    # such that they are between -1 and 1
-    # as per the maximum allowed site-to-site
-    # distance when computing the site combinations
-    # site_to_site_features["dist"] = ((dist_matrix.copy() / max_dist) * 2) - 1
-    site_to_site_features["dist"] = dist_matrix.copy()
 
-    vs30_dist = np.abs(
-        station_df.vs30.values[:, np.newaxis] - station_df.vs30.values[np.newaxis, :]
-    )
-    # Scale such that -1 => 0 and 1 => 1000
-    site_to_site_features["vs30_dist"] = pd.DataFrame(
-        # data=((vs30_dist / 1000) * 2) - 1,
-        data=vs30_dist,
-        index=station_df.index,
-        columns=station_df.index,
-    )
+    site_to_site_features["dist"] = dist_matrix.copy()
+    site_to_site_features["vs30_dist"] = compute_vs30_dist(station_df)
 
     # Compute the site-to-site angle wrt. the epicentre
     event_site_to_site_features["angular_dist"] = compute_angular_distance(
@@ -141,6 +127,19 @@ def compute_weight_features(
     )
 
     return site_to_site_features, event_site_to_site_features
+
+
+def compute_vs30_dist(
+        station_df: pd.DataFrame
+):
+    vs30_dist = np.abs(
+        station_df.vs30.values[:, np.newaxis] - station_df.vs30.values[np.newaxis, :]
+    )
+    return pd.DataFrame(
+        data=vs30_dist,
+        index=station_df.index,
+        columns=station_df.index,
+    )
 
 
 def compute_scalar_features(
