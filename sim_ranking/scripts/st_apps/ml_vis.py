@@ -141,6 +141,7 @@ def get_dist_matrix(results_dir: Path):
         site_df.index.values.astype(str), site_df
     )
 
+
 @st.cache_data
 def get_vs30_dist(results_dir: Path):
     site_df = get_site_df(results_dir)
@@ -193,20 +194,19 @@ def run_general_tab(results_dir: Path):
         st.markdown(
             f"""
             ### Data
-            DB File: {meta["data"]['db']}\n
             Max Distance: {meta["data"].get('max_distance')}\n
             
-            Number of Realisations: {meta['n_rels_used']}\n
-            Number of Training Events: {len(meta['train_events'])}\n
-            Number of Validation Events: {len(meta['val_events'])}\n
-            Number of Training Samples: {meta['n_train_samples']}\n
-            Number of Validation Samples: {meta['n_val_samples']}\n
+            Number of Realisations: {meta["data"]['n_rels_used']}\n
+            Number of Training Events: {len(meta["data"]['train_events'])}\n
+            Number of Validation Events: {len(meta["data"]['val_events'])}\n
+            Number of Training Samples: {meta["data"]['n_train_samples']}\n
+            Number of Validation Samples: {meta["data"]['n_val_samples']}\n
             
             #### Features
-            Site Features: {', '.join(meta['site_features'])}\n
-            Site-to-site Features: {', '.join(meta['site_to_site_features'])}\n
-            Event-site Features: {', '.join(meta['event_site_features'])}\n
-            Event-site-to-site Features: {', '.join(meta['event_site_to_site_features'])}\n
+            Site Features: {', '.join(meta["data"]['site_features'])}\n
+            Site-to-site Features: {', '.join(meta["data"]['site_to_site_features'])}\n
+            Event-site Features: {', '.join(meta["data"]['event_site_features'])}\n
+            Event-site-to-site Features: {', '.join(meta["data"]['event_site_to_site_features'])}\n
             
             Comment: {meta['comment']}\n
             """
@@ -215,16 +215,16 @@ def run_general_tab(results_dir: Path):
         st.markdown(
             f"""
             ### Model
-            Number of Channels: {meta["model"]['n_channels']}\n
-            Kernel Sizes: {meta["model"]['kernel_sizes']}\n
-            Fully Connected Units: {meta["model"]['fc_units']}\n
-            
+            Number of Channels: {meta["hyperparams"]['n_channels']}\n
+            Kernel Sizes: {meta["hyperparams"]['kernel_sizes']}\n
+            Fully Connected Units: {meta["hyperparams"]['fc_units']}\n
             
             ### Training
-            Number of Epochs: {meta["training"]['n_epochs']}\n
-            Batch Size: {meta["training"]['batch_size']}\n
-            L2 Regularisation: {meta["training"].get("l2_reg")}\n
-            Weight Penalty Factor: {meta["training"].get("weight_penalty_factor")}
+            Number of Epochs: {meta["hyperparams"]['n_epochs']}\n
+            Batch Size: {meta["hyperparams"]['batch_size']}\n
+            L2 Regularisation: {meta["hyperparams"].get("l2_reg")}\n
+            Weight Penalty Factor: {meta["hyperparams"].get("weight_penalty_factor")}
+            Learning rate: {meta["hyperparams"]['lr']}\n
             """
         )
 
@@ -240,7 +240,7 @@ def run_general_tab(results_dir: Path):
 
     fig, ax = plt.subplots(figsize=(12, 6))
     mlt.plotting.plot_metrics(
-        metrics, sel_metric_keys, ax=ax, best_epoch=meta["training"]["best_epoch"]
+        metrics, sel_metric_keys, ax=ax, best_epoch=meta["best_epoch"]
     )
     # mlt.plotting.plot_metrics(load_training_metrics(results_dir), ax=ax)
     st.pyplot(fig, use_container_width=False)
@@ -513,7 +513,7 @@ def run_individual_samples_tab(results_dir: Path):
         ## Info table
 
         cur_scalar_features_df = site_df.loc[
-            [site_int, site_obs], metadata["site_features"]
+            [site_int, site_obs], metadata["data"]["site_features"]
         ]
         cur_scalar_features_df["site_to_site_distance"] = dist_df.loc[
             site_int, site_obs
@@ -530,18 +530,44 @@ def run_individual_samples_tab(results_dir: Path):
 
         st.dataframe(cur_scalar_features_df)
 
+    table_cols = [
+        "event_id",
+        "site_int",
+        "site_obs",
+        "loss",
+        "misfit",
+        "weighted_misfit",
+        "weight",
+        "s2s_distance"
+    ]
+    col1, col2 = st.columns(2)
+    with col1:
+        sort_by = st.selectbox("Sort By", table_cols, index=4)
+    with col2:
+        ascending = st.checkbox("Ascending", value=False)
+
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
-
-        _sample_viewer(train_results, metadata["train_events"], "train")
+        st.table(
+            train_results[table_cols].sort_values(sort_by, ascending=ascending).head(10)
+        )
+        _sample_viewer(train_results, metadata["data"]["train_events"], "train")
     with val_tab:
-        _sample_viewer(val_results, metadata["val_events"], "val")
+        st.table(
+            val_results[table_cols].sort_values(sort_by, ascending=ascending).head(10)
+        )
+        _sample_viewer(val_results, metadata["data"]["val_events"], "val")
 
 
 def run_scatter_tab(results_dir: Path):
     def create_loss_dist_plot(
-        results_df: pd.DataFrame, im_key: str, x_key: str, y_key: str, show_avg: bool, color_key: str = None,
+        results_df: pd.DataFrame,
+        im_key: str,
+        x_key: str,
+        y_key: str,
+        show_avg: bool,
+        color_key: str = None,
     ):
         fig, ax = plt.subplots(figsize=(12, 6))
         # fig = plt.figure(figsize=(12, 6))
@@ -583,13 +609,13 @@ def run_scatter_tab(results_dir: Path):
                 c=results_df[color_key].values,
                 cmap="viridis_r",
                 vmin=0.0,
-                vmax=results_df[color_key].values.max() if color_key == "s2s_distance" else 800,
+                vmax=results_df[color_key].values.max()
+                if color_key == "s2s_distance"
+                else 800,
             )
             plt.colorbar(t, pad=0, label=color_key)
         else:
-            ax.scatter(
-                results_df[x_key], results_df[y_key], s=2.0, alpha=0.5
-            )
+            ax.scatter(results_df[x_key], results_df[y_key], s=2.0, alpha=0.5)
 
         if show_avg:
             bins = np.linspace(-1e-9, results_df[x_key].max(), 20)
@@ -601,9 +627,20 @@ def run_scatter_tab(results_dir: Path):
             mean_values = results_df[[y_key, "bin"]].groupby("bin").mean()
             std_values = results_df[[y_key, "bin"]].groupby("bin").std()
             ax.plot(mid_points, mean_values[y_key], c="k", linestyle="-", linewidth=1.0)
-            ax.plot(mid_points, mean_values[y_key] + std_values[y_key], c="k", linestyle="--", linewidth=1.0)
-            ax.plot(mid_points, mean_values[y_key] - std_values[y_key], c="k", linestyle="--", linewidth=1.0)
-
+            ax.plot(
+                mid_points,
+                mean_values[y_key] + std_values[y_key],
+                c="k",
+                linestyle="--",
+                linewidth=1.0,
+            )
+            ax.plot(
+                mid_points,
+                mean_values[y_key] - std_values[y_key],
+                c="k",
+                linestyle="--",
+                linewidth=1.0,
+            )
 
         ax_hist.hist(results_df[x_key], bins=50)
 
@@ -644,7 +681,13 @@ def run_scatter_tab(results_dir: Path):
         im_key = st.selectbox("IM", im_options, index=0)
 
     with col_4:
-        color_key_options = ["weight", "mag", "vs30_distance", "s2s_distance", "angular_distance"]
+        color_key_options = [
+            "weight",
+            "mag",
+            "vs30_distance",
+            "s2s_distance",
+            "angular_distance",
+        ]
         avail_options = [
             cur_option
             for cur_option in color_key_options
@@ -659,15 +702,20 @@ def run_scatter_tab(results_dir: Path):
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
-        create_loss_dist_plot(train_results_df, im_key, x_key, y_key, show_avg, color_key=color_key)
+        create_loss_dist_plot(
+            train_results_df, im_key, x_key, y_key, show_avg, color_key=color_key
+        )
     with val_tab:
-        create_loss_dist_plot(val_results_df, im_key, x_key, y_key, show_avg, color_key=color_key)
+        create_loss_dist_plot(
+            val_results_df, im_key, x_key, y_key, show_avg, color_key=color_key
+        )
 
 
 def run_rs_agg_tab(results_dir: Path):
+    def gen_plot(results_df: pd.DataFrame, y_key: str, show_individual: bool = False, event: str = None):
+        if event is not None:
+            results_df = results_df[results_df.event_id == event]
 
-
-    def gen_plot(results_df: pd.DataFrame, y_key: str):
         cur_result = {}
         for cur_period, cur_key in zip(sr.constants.PERIODS, sr.constants.PSA_KEYS):
             cur_result[cur_period] = [
@@ -679,22 +727,46 @@ def run_rs_agg_tab(results_dir: Path):
 
         fig, ax = plt.subplots(figsize=(12, 6))
 
-        ax.semilogx(cur_df.index.values, cur_df["mean"].values, c="b", linestyle="-")
+        if show_individual:
+            ax.plot(
+                cur_df.index.values[::2],
+                results_df[
+                    [f"{cur_key}_{y_key}" for cur_key in sr.constants.PSA_KEYS]
+                ].T.values[::2],
+                c="b",
+                alpha=0.25,
+            )
+
+        ax.semilogx(cur_df.index.values, cur_df["mean"].values, c="r", linestyle="-")
         ax.fill_between(
             cur_df.index.values,
             cur_df["mean"].values - cur_df["std"].values,
             cur_df["mean"].values + cur_df["std"].values,
-            color="b",
+            color="r",
             alpha=0.1,
         )
-        ax.plot(cur_df.index.values, cur_df["mean"].values - cur_df["std"].values, c="b", linestyle="--")
-        ax.plot(cur_df.index.values, cur_df["mean"].values + cur_df["std"].values, c="b", linestyle="--")
+        ax.plot(
+            cur_df.index.values,
+            cur_df["mean"].values - cur_df["std"].values,
+            c="r",
+            linestyle="--",
+        )
+        ax.plot(
+            cur_df.index.values,
+            cur_df["mean"].values + cur_df["std"].values,
+            c="r",
+            linestyle="--",
+        )
 
         ax.set_xlabel("Period")
         ax.set_ylabel(f"{y_key}")
 
         ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
-        ax.set_ylim(0, min(2.0, results_df[y_key].max()))
+        if y_key in ["pred", "true"]:
+            ax.set_ylim(-2, 2)
+        else:
+            ax.set_ylim(0, min(2.0, results_df[y_key].max()))
+
         ax.set_xlim(0.01, 10.0)
         fig.tight_layout()
 
@@ -702,14 +774,19 @@ def run_rs_agg_tab(results_dir: Path):
 
     train_results_df, val_results_df = _load_results(results_dir)
 
-    y_key = st.selectbox("y_key", ["misfit", "weighted_misfit"])
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        y_key = st.selectbox("y_key", ["misfit", "weighted_misfit", "pred", "true"])
+    with col2:
+        show_individual = st.checkbox("Show Individual", value=False)
+    with col3:
+        event = st.selectbox("Event", [None] + train_results_df.event_id.unique().tolist())
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
     with train_tab:
-        gen_plot(train_results_df, y_key)
+        gen_plot(train_results_df, y_key, show_individual=show_individual, event=event)
     with val_tab:
-        gen_plot(val_results_df, y_key)
-
+        gen_plot(val_results_df, y_key, show_individual=show_individual, event=event)
 
 
 def main(results_dir: Path):

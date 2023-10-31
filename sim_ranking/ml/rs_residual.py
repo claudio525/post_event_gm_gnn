@@ -47,6 +47,19 @@ class HyperParamsConfig:
                         params["kernel_sizes"],
                         params["fc_units"])
 
+    def to_dict(self):
+        return {
+            "n_epochs": self.n_epochs,
+            "batch_size": self.batch_size,
+            "weight_penalty_factor": self.weight_penalty_factor,
+            "l2_reg": self.l2_reg,
+            "lr": self.lr,
+            "n_channels": self.n_channels,
+            "kernel_sizes": self.kernel_sizes,
+            "fc_units": self.fc_units,
+        }
+
+
 @dataclass
 class RunParamsConfig:
     n_rels_used: int
@@ -456,6 +469,7 @@ def post_processing(
     metrics: Dict,
     data_metadata: Dict,
     comment: str,
+    best_epoch: int,
 ):
     """
     Runs the post-processing, specifically:
@@ -485,6 +499,8 @@ def post_processing(
     metadata = {
         "data": data_metadata,
         "comment": comment,
+        "hyperparams": hp_config.to_dict(),
+        "best_epoch": best_epoch,
     }
     mlt.utils.write_to_yaml(metadata, results_dir / "meta.yaml")
 
@@ -578,7 +594,7 @@ def create_models(
     return res_model, weight_model
 
 
-def prep(
+def setup(
     val_events: np.ndarray,
     run_config: RunParamsConfig,
     hp_config: HyperParamsConfig,
@@ -765,6 +781,7 @@ def prep(
     )
 
     data_summary = {
+        "db_ffp": db_ffp_orig,
         "site_feature_stats": site_feature_stats.to_dict(),
         "n_rels_used": run_config.n_rels_used,
         # "n_val_sites": N_VAL_SITES,

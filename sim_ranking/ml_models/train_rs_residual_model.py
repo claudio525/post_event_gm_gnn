@@ -27,7 +27,7 @@ print(f"Using device: {device}")
 
 def main(
     hyperparams_ffp: Path,
-    n_rels_used: int = 5,
+    n_rels: int = 5,
     comment: str = "",
     max_dist: float = 100.0,
     save_best_val_model: bool = True,
@@ -39,7 +39,7 @@ def main(
     # Fixing the random seed
     np.random.seed(42)
 
-    run_config = rs.RunParamsConfig(n_rels_used, max_dist, debug, device)
+    run_config = rs.RunParamsConfig(n_rels, max_dist, debug, device)
     hp_config = rs.HyperParamsConfig.from_yaml(hyperparams_ffp)
 
     # Select one of the events for validation
@@ -63,7 +63,7 @@ def main(
         scalar_features,
         weight_scalar_features,
         data_metadata,
-    ) = rs.prep(val_events, run_config, hp_config)
+    ) = rs.setup(val_events, run_config, hp_config)
 
     n_periods = len(sr.constants.PERIODS)
 
@@ -117,6 +117,7 @@ def main(
         metrics,
         data_metadata,
         comment,
+        best_epoch,
     )
 
 

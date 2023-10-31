@@ -6,8 +6,10 @@ l2_reg: 0.001
 weight_penalty_factor: 0.02
 
 # Model Params
-n_channels: [1, 64, 128, 256, 512]
-kernel_sizes: [3, 3, 3, 3]
+#n_channels: [1, 64, 128, 256, 512]
+#kernel_sizes: [3, 3, 3, 3]
+n_channels: []
+kernel_sizes: []
 fc_units: [512, 256, 128, 64]
 
 
