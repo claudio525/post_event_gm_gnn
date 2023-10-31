@@ -312,7 +312,10 @@ class BaseDataset(Dataset):
         event = self.events[event_ix]
         n_rels = self.n_rels_used[event]
 
-        site_ix = (idx - self._cum_n_samples[max(event_ix - 1, 0)]) // n_rels
+        if event_ix == 0:
+            site_ix = idx // n_rels
+        else:
+            site_ix = (idx - self._cum_n_samples[event_ix - 1]) // n_rels
         rel_ix = idx % n_rels
 
         return event, event_ix, site_ix, rel_ix
