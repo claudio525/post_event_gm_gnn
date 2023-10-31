@@ -17,6 +17,7 @@ import spatial_hazard as sh
 import ml_tools as mlt
 
 from . import data
+from . import rs_residual_data as rs_data
 from . import models
 from . import features
 from ..db import DB
@@ -71,7 +72,7 @@ class RunParamsConfig:
     results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
 
 def get_dataset_predictions(
-    dataset: data.BaseDataset,
+    dataset: rs_data.BaseDataset,
     res_model: nn.Module,
     weight_model: nn.Module,
     hp_config: HyperParamsConfig,
@@ -460,8 +461,8 @@ def train(
 def post_processing(
     res_model: nn.Module,
     weight_model: nn.Module,
-    train_dataset: data.BaseDataset,
-    val_dataset: data.BaseDataset,
+    train_dataset: rs_data.BaseDataset,
+    val_dataset: rs_data.BaseDataset,
     hp_config: HyperParamsConfig,
     run_config: RunParamsConfig,
     scalar_features: data.ScalarFeatures,
@@ -735,7 +736,7 @@ def setup(
     # Create the training and validation dataset
     print(f"Creating datasets and dataloaders")
     start_time = time.time()
-    train_dataset = data.WeightRSResidualDataset(
+    train_dataset = rs_data.WeightRSResidualDataset(
         train_event_sites,
         train_site_combs,
         db,
@@ -748,7 +749,7 @@ def setup(
     )
     print(f"Took {time.time() - start_time} to create train dataset")
     start_time = time.time()
-    val_dataset = data.WeightRSResidualDataset(
+    val_dataset = rs_data.WeightRSResidualDataset(
         val_event_sites,
         val_site_combs,
         db,
@@ -805,3 +806,4 @@ def setup(
         weight_scalar_features,
         data_summary,
     )
+
