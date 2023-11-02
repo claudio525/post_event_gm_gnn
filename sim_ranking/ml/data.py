@@ -91,64 +91,77 @@ def compute_site_combinations(
     return site_combs, used_sites
 
 
-def _get_event_sim_obs_pSA_data(
+def create_scalar_feature_tensor(
+    events: np.ndarray,
     event_sites: Dict[str, np.ndarray],
-    site_combs: Dict[str, np.ndarray],
-    db: DB,
-    pSA_keys: np.ndarray,
-    n_rels: int,
+    scalar_features: ScalarFeatures,
 ):
     """
-    Gets the simulation and observation pSA data
-    for each event, in addition to the number of
-    samples per event and the realisations used
+    Create feature matrix for all site combinations
+    of shape [n_sites, n_sites, n_features]
+    per event, where i/axis 0 = site of interest
+    and j/axis 1 = observation site
+    Order of the features is:
+    1) Site of interest - site features
+    2) Observation site - site features
+    3) Site of interest - event site features
+    4) Observation site - event site features
+    5) Site to site features
+    6) Event site to site features
     """
-    sim_im_dfs, obs_im_dfs = {}, {}
-    n_samples_event, rels = [], {}
-    for cur_event, cur_sites in event_sites.items():
-        cur_sim_data = db.get_sim_data(cur_event, cur_sites)
-        # Only use a subset of the available realisations to
-        # prevent over-fitting to these events
-        if np.any(cur_sim_data.data_source == "specific"):
-            rels[cur_event] = np.random.choice(
-                cur_sim_data.rel_id.unique(), n_rels, replace=False
-            )
-            cur_mask = (cur_sim_data.data_source.values == "specific") & np.isin(
-                cur_sim_data.rel_id.values, rels[cur_event]
-            )
-            cur_sim_data = cur_sim_data.loc[cur_mask]
+    assert np.all(np.asarray(list(event_sites.keys())) == events)
 
-            n_samples_event.append(site_combs[cur_event].shape[0] * n_rels)
-        else:
-            rels[cur_event] = None
-            n_samples_event.append(site_combs[cur_event].shape[0])
-
-        # Get observation data
-        cur_obs_data = db.get_obs_data(cur_event, cur_sites)
-
-        # Sanity checks
-        assert np.all(cur_obs_data.columns == pSA_keys)
-        assert (
-            cur_sim_data.shape[0] == cur_obs_data.shape[0]
-            or cur_sim_data.shape[0] == cur_obs_data.shape[0] * n_rels
+    scalar_features_tensors = {}
+    for cur_event in events:
+        cur_sites = event_sites[cur_event]
+        cur_tensor = np.full(
+            (
+                cur_sites.size,
+                cur_sites.size,
+                scalar_features.n_scalar_features,
+            ),
+            fill_value=np.nan,
         )
 
-        sim_im_dfs[cur_event] = cur_sim_data
-        obs_im_dfs[cur_event] = cur_obs_data
+        # Set the site features
+        n_site_features = len(scalar_features.site_feature_keys)
+        for i, feature_i in enumerate(scalar_features.site_feature_keys):
+            for j, site_j in enumerate(cur_sites):
+                # Site of interest/observation site
+                cur_tensor[j, :, i] = cur_tensor[
+                    :, j, i + n_site_features
+                ] = scalar_features.site_features_data.loc[site_j, feature_i]
+        # Set the event site features
+        cur_f_ix = n_site_features * 2
+        n_event_site_features = len(scalar_features.event_site_feature_keys)
+        for i, feature_i in enumerate(scalar_features.event_site_feature_keys):
+            for j, site_j in enumerate(cur_sites):
+                # Site of interest/observation site
+                cur_tensor[j, :, cur_f_ix + i] = cur_tensor[
+                    :, j, cur_f_ix + i + n_event_site_features
+                ] = scalar_features.event_site_features_data[cur_event].loc[
+                    site_j, feature_i
+                ]
+        # Set the site to site features
+        cur_f_ix += n_event_site_features * 2
+        for i, feature_i in enumerate(scalar_features.site_to_site_feature_keys):
+            cur_tensor[:, :, cur_f_ix + i] = scalar_features.site_to_site_features_data[
+                feature_i
+            ].loc[cur_sites, cur_sites]
+        # Set the event site to site features
+        cur_f_ix += len(scalar_features.site_to_site_feature_keys)
+        for i, feature_i in enumerate(scalar_features.event_site_to_site_feature_keys):
+            cur_tensor[
+                :, :, cur_f_ix + i
+            ] = scalar_features.event_site_to_site_features_data[feature_i][
+                cur_event
+            ].loc[
+                cur_sites, cur_sites
+            ]
 
-    return sim_im_dfs, obs_im_dfs, n_samples_event, rels
+        scalar_features_tensors[cur_event] = cur_tensor
 
-
-def _get_event_n_sampels(n_samples_event: Sequence[int], rels: Dict[str, np.ndarray]):
-    """Computes the number of samples per event"""
-    n_samples_event = np.asarray(n_samples_event)
-    cum_n_samples = np.cumsum(n_samples_event)
-    n_rels_used = {
-        cur_event: 1 if cur_rels is None else cur_rels.size
-        for cur_event, cur_rels in rels.items()
-    }
-
-    return n_samples_event, cum_n_samples, n_rels_used
+    return scalar_features_tensors
 
 
 def _station_df_sanity_check(station_df: pd.DataFrame, site_features: Sequence[str]):
@@ -159,6 +172,3 @@ def _station_df_sanity_check(station_df: pd.DataFrame, site_features: Sequence[s
     assert all(
         [np.isclose(station_df[cur_feature].std(), 1) for cur_feature in site_features]
     )
-
-
-

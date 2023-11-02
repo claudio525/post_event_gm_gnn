@@ -6,6 +6,60 @@ import pandas as pd
 import numpy as np
 
 
+class PairWiseModel(nn.Module):
+    def __init__(
+        self,
+        kernel_sizes: List[int],
+        n_channels: List[int],
+        padding: List[int],
+        fc_units: List[int],
+        n_scalar_inputs: int,
+        input_length: int,
+    ):
+        super().__init__()
+
+        self.n_conv_layers = len(kernel_sizes)
+        self.n_fc_layers = len(fc_units)
+
+        self.conv_layers = nn.Sequential()
+
+        ## Add the conv layers
+        for i in range(self.n_conv_layers):
+            self.conv_layers.append(
+                nn.Conv1d(
+                    n_channels[i],
+                    n_channels[i + 1],
+                    kernel_sizes[i],
+                    padding=padding[i],
+                )
+            )
+            self.conv_layers.append(nn.ELU())
+            self.conv_layers.append(nn.MaxPool1d(2))
+        self.conv_layers.append(nn.Flatten())
+
+        ### Add the fully connected layers
+        # Get the conv out size
+        conv_out_size = self.conv_layers(torch.zeros(1, 5, input_length)).shape[-1]
+        fc_input_size = conv_out_size + n_scalar_inputs
+        self.fc_layers = nn.Sequential()
+        for i in range(len(fc_units)):
+            if i == 0:
+                self.fc_layers.append(nn.Linear(fc_input_size, fc_units[i]))
+            else:
+                self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
+
+            self.fc_layers.append(nn.ELU())
+
+        self.fc_layers.append(nn.Linear(self.fc_layers[-2].out_features, 1))
+        self.fc_layers.append(nn.Sigmoid())
+
+    def forward(self, pSA_values: torch.Tensor, scalar_values: torch.Tensor):
+        x = self.conv_layers(pSA_values)
+        x = torch.cat((x, scalar_values), 1)
+
+        return self.fc_layers(x)
+
+
 class ResponseSpectrumSimModel(nn.Module):
     def __init__(
         self,
@@ -102,7 +156,7 @@ class ExpWeightModel(nn.Module):
         vs30_dist = x[:, 1]
         angular_dist = x[:, 2]
 
-        dist_term = torch.exp(-(dist[:, None] / self.dist_scale) ** self.dist_exp)
+        dist_term = torch.exp(-((dist[:, None] / self.dist_scale) ** self.dist_exp))
 
         angular_term = (1 + angular_dist[:, None] / self.angular_scale) * (
             1 - angular_dist[:, None] / torch.pi
@@ -110,7 +164,9 @@ class ExpWeightModel(nn.Module):
 
         vs30_term = torch.exp(-vs30_dist[:, None] / self.vs30_scale)
 
-        result = dist_term * (self.weight * angular_term + (1 - self.weight) * vs30_term)
+        result = dist_term * (
+            self.weight * angular_term + (1 - self.weight) * vs30_term
+        )
         return result
 
 

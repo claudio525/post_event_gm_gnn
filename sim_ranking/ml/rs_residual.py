@@ -31,9 +31,6 @@ class HyperParamsConfig:
     l2_reg: float
     lr: float
 
-    n_channels: List[int]
-    kernel_sizes: List[int]
-    fc_units: List[int]
 
     @classmethod
     def from_yaml(cls, ffp: Path):

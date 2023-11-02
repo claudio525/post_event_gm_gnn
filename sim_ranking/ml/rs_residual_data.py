@@ -48,7 +48,7 @@ class BaseDataset(Dataset):
             self.obs_im_dfs,
             self.n_samples_event,
             self.rels,
-        ) = data._get_event_sim_obs_pSA_data(
+        ) = _get_event_sim_obs_pSA_data(
             self.event_sites, self.site_combs, db, self.pSA_keys, self.n_rels
         )
 
@@ -57,74 +57,11 @@ class BaseDataset(Dataset):
             self.n_samples_event,
             self._cum_n_samples,
             self.n_rels_used,
-        ) = data._get_event_n_sampels(self.n_samples_event, self.rels)
+        ) = _get_event_n_sampels(self.n_samples_event, self.rels)
 
-        # Create feature matrix for all site combinations
-        # of shape [n_sites, n_sites, n_features]
-        # per event, where i/axis 0 = site of interest
-        # and j/axis 1 = observation site
-        # Order of the features is:
-        # 1) Site of interest - site features
-        # 2) Observation site - site features
-        # 3) Site of interest - event site features
-        # 4) Observation site - event site features
-        # 5) Site to site features
-        # 6) Event site to site features
-        self.scalar_features_tensors = {}
-        for cur_event in self.events:
-            cur_sites = self.event_sites[cur_event]
-            cur_tensor = np.full(
-                (
-                    cur_sites.size,
-                    cur_sites.size,
-                    self.scalar_features.n_scalar_features,
-                ),
-                fill_value=np.nan,
-            )
-
-            # Set the site features
-            n_site_features = len(self.scalar_features.site_feature_keys)
-            for i, feature_i in enumerate(self.scalar_features.site_feature_keys):
-                for j, site_j in enumerate(cur_sites):
-                    # Site of interest/observation site
-                    cur_tensor[j, :, i] = cur_tensor[
-                        :, j, i + n_site_features
-                    ] = self.scalar_features.site_features_data.loc[site_j, feature_i]
-            # Set the event site features
-            cur_f_ix = n_site_features * 2
-            n_event_site_features = len(self.scalar_features.event_site_feature_keys)
-            for i, feature_i in enumerate(self.scalar_features.event_site_feature_keys):
-                for j, site_j in enumerate(cur_sites):
-                    # Site of interest/observation site
-                    cur_tensor[j, :, cur_f_ix + i] = cur_tensor[
-                        :, j, cur_f_ix + i + n_event_site_features
-                    ] = self.scalar_features.event_site_features_data[cur_event].loc[
-                        site_j, feature_i
-                    ]
-            # Set the site to site features
-            cur_f_ix += n_event_site_features * 2
-            for i, feature_i in enumerate(
-                self.scalar_features.site_to_site_feature_keys
-            ):
-                cur_tensor[
-                    :, :, cur_f_ix + i
-                ] = self.scalar_features.site_to_site_features_data[feature_i].loc[
-                    cur_sites, cur_sites
-                ]
-            # Set the event site to site features
-            cur_f_ix += len(self.scalar_features.site_to_site_feature_keys)
-            for i, feature_i in enumerate(
-                self.scalar_features.event_site_to_site_feature_keys
-            ):
-                cur_tensor[
-                    :, :, cur_f_ix + i
-                ] = self.scalar_features.event_site_to_site_features_data[feature_i][
-                    cur_event
-                ].loc[
-                    cur_sites, cur_sites
-                ]
-
-            self.scalar_features_tensors[cur_event] = cur_tensor
+        self.scalar_features_tensor = data.create_scalar_feature_tensor(
+            self.events, self.event_sites, self.scalar_features
+        )
 
     @property
     def n_samples(self):
@@ -132,11 +69,11 @@ class BaseDataset(Dataset):
 
     def get_metadata(self, idx: int):
         """Get the metadata for a specific sample"""
-        event, event_ix, site_ix, rel_ix = self.get_indices(idx)
+        event, event_ix, site_comb_ix, rel_ix = self.get_indices(idx)
 
         # Get the site of interest and observation site
-        site_int_ix = self.site_combs[event][site_ix, 0]
-        site_obs_ix = self.site_combs[event][site_ix, 1]
+        site_int_ix = self.site_combs[event][site_comb_ix, 0]
+        site_obs_ix = self.site_combs[event][site_comb_ix, 1]
 
         site_int = self.event_sites[event][site_int_ix]
         site_obs = self.event_sites[event][site_obs_ix]
@@ -160,12 +97,14 @@ class BaseDataset(Dataset):
         n_rels = self.n_rels_used[event]
 
         if event_ix == 0:
-            site_ix = idx // n_rels
+            site_comb_ix = idx // n_rels
         else:
-            site_ix = (idx - self._cum_n_samples[event_ix - 1]) // n_rels
+            site_comb_ix = (idx - self._cum_n_samples[event_ix - 1]) // n_rels
+
+        assert False, "This is incorrrect as n_rels varies per event??"
         rel_ix = idx % n_rels
 
-        return event, event_ix, site_ix, rel_ix
+        return event, event_ix, site_comb_ix, rel_ix
 
     def __getitem__(self, idx: int):
         raise NotImplementedError()
@@ -259,7 +198,7 @@ class ResponseSpectrumResidualDataset(BaseDataset):
             site_obs_ix, site_int_ix, :, rel_ix
         ]
 
-        scalar_features = self.scalar_features_tensors[event][
+        scalar_features = self.scalar_features_tensor[event][
             site_int_ix, site_obs_ix, :
         ]
 
@@ -362,3 +301,63 @@ class WeightRSResidualDataset(ResponseSpectrumResidualDataset):
         ]
 
         return *self._get_data(idx, event, site_ix, rel_ix), weight_scalar_features
+
+
+def _get_event_n_sampels(n_samples_event: Sequence[int], rels: Dict[str, np.ndarray]):
+    """Computes the number of samples per event"""
+    n_samples_event = np.asarray(n_samples_event)
+    cum_n_samples = np.cumsum(n_samples_event)
+    n_rels_used = {
+        cur_event: 1 if cur_rels is None else cur_rels.size
+        for cur_event, cur_rels in rels.items()
+    }
+
+    return n_samples_event, cum_n_samples, n_rels_used
+
+
+def _get_event_sim_obs_pSA_data(
+    event_sites: Dict[str, np.ndarray],
+    site_combs: Dict[str, np.ndarray],
+    db: DB,
+    pSA_keys: np.ndarray,
+    n_rels: int,
+):
+    """
+    Gets the simulation and observation pSA data
+    for each event, in addition to the number of
+    samples per event and the realisations used
+    """
+    sim_im_dfs, obs_im_dfs = {}, {}
+    n_samples_event, rels = [], {}
+    for cur_event, cur_sites in event_sites.items():
+        cur_sim_data = db.get_sim_data(cur_event, cur_sites)
+        # Only use a subset of the available realisations to
+        # prevent over-fitting to these events
+        if np.any(cur_sim_data.data_source == "specific"):
+            rels[cur_event] = np.random.choice(
+                cur_sim_data.rel_id.unique(), n_rels, replace=False
+            )
+            cur_mask = (cur_sim_data.data_source.values == "specific") & np.isin(
+                cur_sim_data.rel_id.values, rels[cur_event]
+            )
+            cur_sim_data = cur_sim_data.loc[cur_mask]
+
+            n_samples_event.append(site_combs[cur_event].shape[0] * n_rels)
+        else:
+            rels[cur_event] = None
+            n_samples_event.append(site_combs[cur_event].shape[0])
+
+        # Get observation data
+        cur_obs_data = db.get_obs_data(cur_event, cur_sites)
+
+        # Sanity checks
+        assert np.all(cur_obs_data.columns == pSA_keys)
+        assert (
+            cur_sim_data.shape[0] == cur_obs_data.shape[0]
+            or cur_sim_data.shape[0] == cur_obs_data.shape[0] * n_rels
+        )
+
+        sim_im_dfs[cur_event] = cur_sim_data
+        obs_im_dfs[cur_event] = cur_obs_data
+
+    return sim_im_dfs, obs_im_dfs, n_samples_event, rels
