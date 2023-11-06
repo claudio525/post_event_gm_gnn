@@ -227,7 +227,7 @@ class PairDataset(Dataset):
         site_comb_ix = within_event_ix // n_rel_combs
 
         site_int_ix = self.site_combs[event][site_comb_ix, 0]
-        site_obs_ix = self.site_combs[event][site_int_ix, 1]
+        site_obs_ix = self.site_combs[event][site_comb_ix, 1]
 
         return (
             self.scalar_features_tensor[event][site_int_ix, site_obs_ix, :],
@@ -264,10 +264,11 @@ def train(
     hp_config: HyperParamsConfig,
     run_config: RunParamsConfig,
 ):
-    # GO back to epoch based approach, but just use subset of data per epoch
     metrics = {
         "loss_hist_train": torch.zeros(hp_config.n_epochs),
+        "acc_hist_train": torch.zeros(hp_config.n_epochs),
         "loss_hist_val": torch.zeros(hp_config.n_epochs),
+        "acc_hist_val": torch.zeros(hp_config.n_epochs),
     }
 
     best_epoch_loss_key = "loss_hist_val"
@@ -296,7 +297,8 @@ def train(
         persistent_workers=True if n_workers > 0 else False,
     )
 
-    loss = nn.BCELoss()
+    # loss = nn.BCELoss()
+    loss = nn.BCEWithLogitsLoss()
     for epoch_ix in range(hp_config.n_epochs):
 
         ranking_model.train()
@@ -334,9 +336,13 @@ def train(
 
             metrics["loss_hist_train"][epoch_ix] += cur_loss_value.item()
 
-            iter_loop.set_postfix({"loss": cur_loss_value.item()})
+            n_correct = ((torch.nn.functional.sigmoid(pred) >= 0.5).float() == true).sum().item()
+            metrics["acc_hist_train"][epoch_ix] += n_correct
+
+            iter_loop.set_postfix({"loss": cur_loss_value.item(), "acc": n_correct / pred.size(0)})
 
         metrics["loss_hist_train"][epoch_ix] /= len(train_dataloader)
+        metrics["acc_hist_train"][epoch_ix] /= len(train_dataloader.dataset)
         iter_loop.refresh()
 
         # Validation
@@ -369,11 +375,15 @@ def train(
 
                 metrics["loss_hist_val"][epoch_ix] += cur_loss_value.item()
 
+                n_correct = ((torch.nn.functional.sigmoid(pred) >= 0.5).float() == true).sum().item()
+                metrics["acc_hist_val"][epoch_ix] += n_correct
+
             metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
+            metrics["acc_hist_val"][epoch_ix] /= len(val_dataloader.dataset)
 
         print(f"Epoch {epoch_ix + 1}/{hp_config.n_epochs}")
-        print(f"\tTrain Loss: {metrics['loss_hist_train'][epoch_ix]:.4f}")
-        print(f"\tVal Loss: {metrics['loss_hist_val'][epoch_ix]:.4f}")
+        print(f"\tTraining - Loss: {metrics['loss_hist_train'][epoch_ix]:.4f}, Accuracy: {metrics['acc_hist_train'][epoch_ix]:.4f}")
+        print(f"\tValidation - Loss: {metrics['loss_hist_val'][epoch_ix]:.4f}, Accuracy: {metrics['acc_hist_val'][epoch_ix]:.4f}")
 
 def get_prediction(
     ranking_model: nn.Module,
@@ -420,7 +430,8 @@ def main(hyperparams_ffp: Path, max_dist: float = 75, debug: bool = False, epoch
     hp_config = HyperParamsConfig.from_yaml(hyperparams_ffp)
 
     ### Data loading
-    db_ffp_orig = "$wdata/sim_ranking/db/gm_db.sqlite"
+    # db_ffp_orig = "$wdata/sim_ranking/db/gm_db.sqlite"
+    db_ffp_orig = "$wdata/sim_ranking/db/gm_db_neil.sqlite"
     db_ffp = Path(os.path.expandvars(db_ffp_orig))
 
     db = sr.db.DB(db_ffp)
@@ -428,7 +439,8 @@ def main(hyperparams_ffp: Path, max_dist: float = 75, debug: bool = False, epoch
     event_df = db.get_event_df()
     record_df = db.get_record_df()
 
-    events = db.get_avail_events(data_source="specific")
+    # events = db.get_avail_events(data_source="specific")
+    events = db.get_avail_events(data_source="neil")
     print(f"Number of events: {len(events)}")
 
     # Get all relevant sites across all events
@@ -447,7 +459,10 @@ def main(hyperparams_ffp: Path, max_dist: float = 75, debug: bool = False, epoch
     train_sites = all_sites
     val_sites = all_sites
 
-    val_events = np.asarray(["3468575"])
+    # val_events = np.asarray(["3468575"])
+    # val_events = np.asarray(["3468575", "2016p118944", "3525264", "3528839"])
+    # np.random.seed(42)
+    val_events = np.random.choice(events, 10, replace=False)
     train_events = np.setdiff1d(events, val_events)
 
     # Get the training and validation dataset site combinations
@@ -546,6 +561,9 @@ def main(hyperparams_ffp: Path, max_dist: float = 75, debug: bool = False, epoch
         pSA_std,
         run_config.max_n_rels
     )
+
+    print(f"Number of training samples: {len(train_dataset)}")
+    print(f"Number of validation samples: {len(val_dataset)}")
 
     # # Create the dataloaders
     # N_DATALOADER_WORKERS = 0 if run_config.debug else 8

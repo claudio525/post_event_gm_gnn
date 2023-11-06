@@ -51,7 +51,7 @@ class PairWiseModel(nn.Module):
             self.fc_layers.append(nn.ELU())
 
         self.fc_layers.append(nn.Linear(self.fc_layers[-2].out_features, 1))
-        self.fc_layers.append(nn.Sigmoid())
+        # self.fc_layers.append(nn.Sigmoid())
 
     def forward(self, pSA_values: torch.Tensor, scalar_values: torch.Tensor):
         x = self.conv_layers(pSA_values)

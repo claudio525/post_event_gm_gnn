@@ -115,7 +115,36 @@ def compute_obs_site_correlations(output_dir: Path, db_ffp: Path, site_count_th:
 
     # Save the results
     pd.to_pickle(results, output_dir / "obs_site_correlations.pickle")
-    # print(f"wtf")
+
+
+def __run_interp(pSA_values: np.ndarray, periods: np.ndarray):
+    return np.interp(sr.constants.PERIODS, periods, pSA_values)
+
+@app.command("process-im-csv-files")
+def process_im_csv_files(raw_im_dir: Path, output_dir: Path):
+    ffps = list(raw_im_dir.glob("*.csv"))
+
+    for cur_ffp in ffps:
+        df = pd.read_csv(cur_ffp, index_col=0)
+
+        # Only interested in rotd50
+        df = df.loc[df.component == "rotd50", :]
+
+        # Get the periods
+        pSA_keys = [cur_col for cur_col in df.columns if cur_col.startswith("pSA_")]
+        periods = np.array([float(cur_col.split("_")[1]) for cur_col in pSA_keys])
+
+        assert np.all(periods == sorted(periods))
+        other_cols = [cur_col for cur_col in df.columns if cur_col not in pSA_keys]
+
+        # Run interpolation
+        df_interp = pd.DataFrame(
+            data=np.apply_along_axis(__run_interp, 1, df.loc[:, pSA_keys].values, periods),
+            index=df.index, columns=sr.constants.PSA_KEYS)
+
+        df = pd.concat([df_interp, df.loc[:, other_cols]], axis=1)
+
+        df.to_csv(output_dir / cur_ffp.name)
 
 
 if __name__ == "__main__":

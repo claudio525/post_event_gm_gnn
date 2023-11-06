@@ -1,16 +1,16 @@
 # Training Params
-n_epochs: 1000
-batch_size: 2048
+n_epochs: 25
+batch_size: 1024
 lr: 0.001
-l2_reg: 0.01
+l2_reg: 0.001
 weight_penalty_factor: 0.02
 
 # Model Params
-#n_channels: [5, 64, 128, 256, 512]
-#kernel_sizes: [3, 3, 3, 3]
+#n_channels: [5, 16, 32]
+#kernel_sizes: [3, 3]
 n_channels: []
 kernel_sizes: []
-fc_units: [32]
+fc_units: [16, 16, 16]
 
 
 
