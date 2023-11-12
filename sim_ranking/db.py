@@ -14,6 +14,8 @@ class DB:
         self.con = sqlite3.connect(db_ffp)
         self.cur = self.con.cursor()
 
+        self.ffp = db_ffp
+
     def add_data(
         self,
         sim_im_dir: Path,

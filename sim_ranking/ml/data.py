@@ -45,7 +45,8 @@ def compute_site_combinations(
     sites: Dict[str, np.ndarray],
     events: Sequence[str],
     dist_matrix: pd.DataFrame,
-    sites_to_use: np.ndarray = None,
+    site_obs: np.ndarray,
+    site_int: np.ndarray,
     max_dist: float = 100,
 ):
     """
@@ -53,15 +54,18 @@ def compute_site_combinations(
 
     Returns allowed sites and site-combination
     indices (for allowed sites) for each event
+
+    Parameters
+    ----------
+    site_int: np.ndarray
+        The site of interests that are allowed to be used
+        Any site not in this array is not used as site of interest,
+        can be used as observation site though
     """
     site_combs, used_sites = {}, {}
     for cur_event in events:
         cur_sites = sites[cur_event]
-        cur_sites = (
-            cur_sites
-            if sites_to_use is None
-            else cur_sites[np.isin(cur_sites, sites_to_use)]
-        )
+        cur_sites = cur_sites[np.isin(cur_sites, site_int) | np.isin(cur_sites, site_obs)]
 
         # Need at least two sites for the event
         if len(cur_sites) < 2:
@@ -85,7 +89,12 @@ def compute_site_combinations(
         # Indices into the sites to use for the current event
         cur_site_combs = np.stack((cur_row_ind, cur_col_ind), axis=1)
 
-        site_combs[cur_event] = cur_site_combs
+        # Filter based on allowed observation sites and sites of interest
+        cur_mask = np.isin(cur_sites[cur_site_combs[:, 1]], site_obs) & np.isin(
+            cur_sites[cur_site_combs[:, 0]], site_int
+        )
+
+        site_combs[cur_event] = cur_site_combs[cur_mask]
         used_sites[cur_event] = cur_sites
 
     return site_combs, used_sites

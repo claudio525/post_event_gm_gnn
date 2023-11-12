@@ -1,3 +1,4 @@
+"""Result investigation tool for residual prediction models"""
 import os
 from pathlib import Path
 

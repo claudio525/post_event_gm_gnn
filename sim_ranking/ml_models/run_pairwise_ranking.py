@@ -55,22 +55,24 @@ def train_model(
     event_sites = db.get_event_sites()
 
     # TODO: Fix this!!
-    train_sites = all_sites
-    val_sites = all_sites
+    np.random.seed(30)
+    # train_sites = all_sites
+    val_int_sites = np.random.choice(all_sites, 100, replace=False)
+    train_sites = np.setdiff1d(all_sites, val_int_sites)
+    # val_sites = all_sites
 
     # val_events = np.asarray(["3468575"])
     # val_events = np.asarray(["3468575", "2016p118944", "3525264", "3528839"])
-    np.random.seed(30)
-    val_events = np.random.choice(events, 10, replace=False)
+    val_events = np.random.choice(events, 100, replace=False)
     train_events = np.setdiff1d(events, val_events)
 
     # Data prep
-    train_dataset, val_dataset, scalar_features = pr.data_prep(
+    train_dataset, val_dataset, scalar_features, data_metadata = pr.data_prep(
         event_sites,
         train_events,
         val_events,
         train_sites,
-        val_sites,
+        val_int_sites,
         events,
         run_config,
         db,
@@ -80,7 +82,33 @@ def train_model(
     ranking_model = pr.create_model(hp_config, scalar_features)
 
     # Train
-    pr.train(ranking_model, train_dataset, val_dataset, device, hp_config, run_config)
+    metrics, best_model_state, best_model_epoch = pr.train(
+        ranking_model, train_dataset, val_dataset, device, hp_config, run_config
+    )
+    ranking_model.load_state_dict(best_model_state)
+
+    print(
+        f"Best model epoch: {best_model_epoch + 1}, "
+        f"Validation:\n"
+        f"\tLoss: {metrics['loss_hist_val'][best_model_epoch]:.4f}\n"
+        f"\tAccuracy: {metrics['acc_hist_val'][best_model_epoch]:.4f}\n"
+        f"\tBCELoss: {metrics['bce_loss_hist_val'][best_model_epoch]:.4f}\n"
+    )
+
+    data_metadata["db"] = db_ffp_orig
+
+    # Post-processing
+    pr.post_processing(
+        ranking_model,
+        train_dataset,
+        val_dataset,
+        hp_config,
+        run_config,
+        metrics,
+        best_model_epoch,
+        scalar_features,
+        data_metadata,
+    )
 
 
 @app.command("run-kfold")
