@@ -16,8 +16,6 @@ from . import features
 
 
 def prep_data(results_dir: Path):
-    results_dir = Path("/Users/claudy/dev/work/data/sim_ranking/results/ml/1110_1040")
-
     metadata = mlt.utils.load_yaml(results_dir / "meta.yaml")
 
     db_ff = Path(os.path.expandvars(metadata["data"]["db"]))

@@ -373,6 +373,8 @@ def _sample_viewer(
         sim_df.loc[(sim_df.event_id == event) & (sim_df.site_id == site_obs)]
     )
 
+
+
     # Site of interest figure
     fig, ax = plt.subplots(figsize=(12, 6))
     for ix, (cur_id, cur_row) in enumerate(site_int_sims.iterrows()):

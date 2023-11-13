@@ -21,6 +21,7 @@ import spatial_hazard as sh
 from . import data as ml_data
 from . import features
 from . import models
+from . import pairwise_pred
 from ..db import DB
 from .. import constants
 
@@ -501,7 +502,6 @@ def get_prediction(
 def get_dataset_predictions(
     dataset: PairDataset, ranking_model: nn.Module, device: str
 ):
-
     pred_dataloader = DataLoader(
         dataset, shuffle=False, batch_size=4096, num_workers=0, pin_memory=True
     )
@@ -572,6 +572,18 @@ def post_processing(
         train_dataset, ranking_model, run_config.device
     )
     val_results = get_dataset_predictions(val_dataset, ranking_model, run_config.device)
+
+    groups = val_results.groupby(["event_id", "site_int", "site_obs"])
+    for (cur_event, cur_site_int, cur_site_obs), cur_group in groups:
+        cur_group = cur_group.sort_values(["rel_1", "rel_2"])
+        cur_rel_combs = cur_group[["rel_1", "rel_2"]].values
+        cur_pred = cur_group["pred"].values
+
+        pairwise_pred.get_site_ranking(cur_pred)
+
+
+        print(f"wtf")
+
 
     # Save results
     train_results.to_csv(cur_out_dir / "train_results.csv")

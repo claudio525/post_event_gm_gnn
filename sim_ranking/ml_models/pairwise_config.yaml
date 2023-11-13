@@ -1,5 +1,5 @@
 # Training Params
-n_epochs: 5
+n_epochs: 2
 batch_size: 512
 lr: 0.001
 #l2_reg: 0.005 # Seems to work well
