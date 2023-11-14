@@ -27,10 +27,9 @@ from ..db import DB
 from .. import constants
 
 
-def compute_res_area(rs_obs: np.ndarray, rs_sim: np.ndarray):
+def compute_res_score(rs_obs: np.ndarray, rs_sim: np.ndarray):
     """
     Computes the similarity score for response spectrum
-    based on area under the (absolute) residual curve
 
     Parameters
     ----------
@@ -48,10 +47,10 @@ def compute_res_area(rs_obs: np.ndarray, rs_sim: np.ndarray):
         Format [n_realisations]
     """
     # Compute the residual
-    res = np.log(rs_obs[..., None]) - np.log(rs_sim)
-    res_area = np.trapz(np.abs(res), axis=1)
+    res = rs_obs[..., None] - rs_sim
+    res_score = np.sum(np.abs(res), axis=1)
 
-    return res_area
+    return res_score
 
 
 @dataclass
@@ -164,6 +163,8 @@ class PairDataset(Dataset):
         for cur_event, cur_sites in event_sites.items():
             # Observed
             cur_obs_df = db.get_obs_data(cur_event, cur_sites)
+            cur_obs_df.loc[:, constants.PSA_KEYS] = np.log(cur_obs_df.loc[:, constants.PSA_KEYS])
+
             # self.obs_pSA[cur_event] = cur_obs_df.loc[cur_sites, self.pSA_keys].values
             self.obs_pSA[cur_event] = (
                 cur_obs_df.loc[cur_sites, self.pSA_keys].values
@@ -172,6 +173,7 @@ class PairDataset(Dataset):
 
             # Get the simulation data
             cur_sim_df = db.get_sim_data(cur_event, cur_sites)
+            cur_sim_df.loc[:, constants.PSA_KEYS] = np.log(cur_sim_df.loc[:, constants.PSA_KEYS])
             cur_sim_data = np.full(
                 (cur_sites.size, self.periods.size, self.n_rels_event[cur_event]),
                 fill_value=np.nan,
@@ -187,7 +189,7 @@ class PairDataset(Dataset):
                 cur_sim_data[:, :, ix] = cur_rel_data
 
             # Need to compute residual area before normalizing
-            cur_res_area = compute_res_area(
+            cur_res_area = compute_res_score(
                 cur_obs_df.loc[cur_sites, self.pSA_keys].values, cur_sim_data
             )
             self.res_area[cur_event] = cur_res_area
@@ -832,8 +834,8 @@ def data_prep(
     # Compute mean and standard deviation for each period
     # for normalisation (only training events)
     obs_data = db.get_obs_df()
-    pSA_mean = np.mean(obs_data.loc[:, constants.PSA_KEYS], axis=0)
-    pSA_std = np.std(obs_data.loc[:, constants.PSA_KEYS], axis=0)
+    pSA_mean = np.mean(np.log(obs_data.loc[:, constants.PSA_KEYS]), axis=0)
+    pSA_std = np.std(np.log(obs_data.loc[:, constants.PSA_KEYS]), axis=0)
 
     # Create the datasets
     train_dataset = PairDataset(

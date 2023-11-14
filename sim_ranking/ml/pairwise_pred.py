@@ -95,6 +95,10 @@ def get_site_prediction(
     sim_df: pd.DataFrame,
     obs_df: pd.DataFrame,
 ):
+    # Use lnIM
+    sim_df.loc[:, constants.PSA_KEYS] = np.log(sim_df.loc[:, constants.PSA_KEYS])
+    obs_df.loc[:, constants.PSA_KEYS] = np.log(obs_df.loc[:, constants.PSA_KEYS])
+
     ### Prep scalar features
     scalar_feature_tensor = []
     # Site features
