@@ -108,6 +108,14 @@ def get_record_df(results_dir: Path):
 
 
 @st.cache_data
+def _load_residuals(results_dir: Path):
+    train_residuals = pd.read_csv(results_dir / "train_residuals.csv", index_col=0)
+    val_residuals = pd.read_csv(results_dir / "val_residuals.csv", index_col=0)
+
+    return train_residuals, val_residuals
+
+
+@st.cache_data
 def _load_results(results_dir: Path):
     train_results_df = pd.read_csv(
         results_dir / "train_results.csv",
@@ -132,15 +140,6 @@ def _load_results(results_dir: Path):
         dist_matrix.index.get_indexer_for(val_results_df.site_int.values),
         dist_matrix.columns.get_indexer_for(val_results_df.site_obs.values),
     ]
-
-    # train_results_df["s2s_distance"] = [
-    #     dist_matrix.loc[cur_row.site_int, cur_row.site_obs]
-    #     for cur_ix, cur_row in train_results_df.iterrows()
-    # ]
-    # val_results_df["s2s_distance"] = [
-    #     dist_matrix.loc[cur_row.site_int, cur_row.site_obs]
-    #     for cur_ix, cur_row in val_results_df.iterrows()
-    # ]
 
     angular_distances = get_event_angular_distances(results_dir)
     for cur_event in train_results_df.event_id.unique():
@@ -482,6 +481,52 @@ def _sample_viewer(
     st.dataframe(combs_won.to_frame("Combinations Won").T)
 
 
+def run_agg_single(cur_results_dir):
+    def _run_tab(residuals_df: pd.DataFrame):
+
+        mean = residuals_df.loc[:, sr.constants.PSA_KEYS].mean(axis=0)
+        std = residuals_df.loc[:, sr.constants.PSA_KEYS].std(axis=0)
+
+
+        st.markdown(
+            """
+            ### Residuals
+            Residuals between the best realisation (based on model predictions) and the observations at the site of interest.
+            """)
+
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        for _, cur_row in residuals_df.iloc[::5, :].iterrows():
+            ax.semilogx(sr.constants.PERIODS, cur_row.loc[sr.constants.PSA_KEYS].values, c="gray", alpha=0.5, linewidth=1.0, )
+
+        ax.semilogx(sr.constants.PERIODS, mean, c="b", label="Mean", marker="o", linestyle="-", markersize=2.5)
+        ax.semilogx(sr.constants.PERIODS, mean + std, c="b", linestyle="--", label="Std")
+        ax.semilogx(sr.constants.PERIODS, mean - std, c="b", linestyle="--")
+
+        ax.set_xlabel("Period")
+        ax.set_ylabel("pSA")
+        ax.set_xlim(0.01, 10.0)
+        ax.set_ylim(-2.0, 2.0)
+        ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+        ax.legend()
+        fig.tight_layout()
+
+        st.pyplot(fig, use_container_width=False)
+
+
+    train_residuals, val_residuals = _load_residuals(cur_results_dir)
+
+    train_tab, val_tab = st.tabs(["Training", "Validation"])
+
+    with train_tab:
+        _run_tab(train_residuals)
+    with val_tab:
+        _run_tab(val_residuals)
+
+    pass
+
+
 def main(results_dir: Path):
     st.set_page_config(layout="wide")
 
@@ -497,13 +542,19 @@ def main(results_dir: Path):
     )
     cur_results_dir = results_dir / result_id
 
-    general_tab, ind_tab = st.tabs(["General", "Individual Examples"])
+    general_tab, ind_tab, agg_single_tab = st.tabs(["General", "Individual Examples", "Aggregate - Single"])
 
     with general_tab:
-        run_general_tab(cur_results_dir)
+        pass
+        # run_general_tab(cur_results_dir)
 
     with ind_tab:
-        run_ind_samples(cur_results_dir)
+        pass
+        # run_ind_samples(cur_results_dir)
+
+    with agg_single_tab:
+        run_agg_single(cur_results_dir)
+
 
 
 if __name__ == "__main__":

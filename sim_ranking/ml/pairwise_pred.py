@@ -214,8 +214,17 @@ def get_site_prediction(
         )
         pred = torch.nn.functional.sigmoid(pred).numpy(force=True)
 
-    # Normalize such that P(i > j) + P(j > i) = 1
     rel_combs = np.asarray(rel_combs)
+
+    # Normalize predictions
+    pred = normalize_preds(rel_combs, pred)
+
+    return pred, rel_combs
+
+
+def normalize_preds(rel_combs: np.ndarray, pred: np.ndarray):
+    # Normalize such that P(i > j) + P(j > i) = 1
+    rels = np.unique(rel_combs)
     for i in range(rels.size - 1):
         for j in range(i + 1, rels.size):
             # Conversion of matrix index to index into rel_combs
@@ -223,13 +232,12 @@ def get_site_prediction(
             ix_2 = (j * (rels.size - 1)) + i
 
             # Sanity check
-            rel_1 = rel_combs[ix_1]
-            rel_2 = rel_combs[ix_2]
+            rel_1, rel_2 = rel_combs[ix_1], rel_combs[ix_2]
             assert rel_1[0] == rel_2[1] and rel_1[1] == rel_2[0]
 
             # Normalize
             pred[ix_1] = pred[ix_1] / (pred[ix_1] + pred[ix_2])
             pred[ix_2] = 1 - pred[ix_1]
-            assert np.isclose(pred[ix_1] + pred[ix_2], 1)[0]
+            assert np.isclose(pred[ix_1] + pred[ix_2], 1)
 
-    return pred, rel_combs
+    return pred

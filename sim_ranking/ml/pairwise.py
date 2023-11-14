@@ -11,6 +11,7 @@ import torch.functional as F
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import pandas as pd
+import numba as nb
 from torchinfo import summary
 from tqdm import tqdm
 from torchview import draw_graph
@@ -138,8 +139,11 @@ class PairDataset(Dataset):
             )
             cur_n_rels = self.n_rels_event[cur_event] = self.event_rels[cur_event].size
 
+            # cur_n_samples = self.site_combs[cur_event].shape[0] * int(
+            #     (cur_n_rels ** 2 - cur_n_rels) / 2
+            # )
             cur_n_samples = self.site_combs[cur_event].shape[0] * int(
-                (cur_n_rels ** 2 - cur_n_rels) / 2
+                cur_n_rels ** 2 - cur_n_rels
             )
             self.n_samples_event.append(cur_n_samples)
         self.cum_n_samples_event = np.cumsum(self.n_samples_event)
@@ -223,25 +227,32 @@ class PairDataset(Dataset):
         event = self.events[event_ix]
 
         n_rels = self.n_rels_event[event]
-        n_rel_combs = int((n_rels * (n_rels - 1)) / 2)
+        # n_rel_combs = int((n_rels * (n_rels - 1)) / 2)
+        n_rel_combs = n_rels ** 2 - n_rels
 
         within_site_ix = int(within_event_ix % n_rel_combs)
 
-        # Get the realisation indices
-        # Based on https://stackoverflow.com/questions/27086195/linear-index-upper-triangular-matrix
-        rel_1_ix = int(
-            n_rels
-            - 2
-            - np.floor(
-                np.sqrt(-8 * within_site_ix + 4 * n_rels * (n_rels - 1) - 7) / 2 - 0.5
-            )
-        )
-        rel_2_ix = int(
-            within_site_ix
-            + rel_1_ix
-            + 1
-            - n_rels * (n_rels - 1) / 2
-            + (n_rels - rel_1_ix) * ((n_rels - rel_1_ix) - 1) / 2
+        # # Get the realisation indices
+        # # Based on https://stackoverflow.com/questions/27086195/linear-index-upper-triangular-matrix
+        # rel_1_ix = int(
+        #     n_rels
+        #     - 2
+        #     - np.floor(
+        #         np.sqrt(-8 * within_site_ix + 4 * n_rels * (n_rels - 1) - 7) / 2 - 0.5
+        #     )
+        # )
+        # rel_2_ix = int(
+        #     within_site_ix
+        #     + rel_1_ix
+        #     + 1
+        #     - n_rels * (n_rels - 1) / 2
+        #     + (n_rels - rel_1_ix) * ((n_rels - rel_1_ix) - 1) / 2
+        # )
+
+        row_length = n_rels - 1
+        rel_1_ix = within_site_ix // row_length
+        rel_2_ix = within_site_ix % row_length + (
+            within_site_ix % row_length >= rel_1_ix
         )
 
         site_comb_ix = within_event_ix // n_rel_combs
@@ -322,8 +333,8 @@ def train(
         "acc_hist_val": torch.zeros(hp_config.n_epochs),
     }
 
-    best_epoch_key = "acc_hist_val"
-    best_val_acc = -np.inf
+    best_epoch_key = "loss_hist_val"
+    best_val_loss = np.inf
     best_model_state = None
 
     optimizer = torch.optim.Adam(
@@ -450,9 +461,9 @@ def train(
             metrics["acc_hist_val"][epoch_ix] /= len(val_dataloader.dataset)
 
             # Keep track of the best model
-            if metrics[best_epoch_key][epoch_ix] > best_val_acc:
+            if metrics[best_epoch_key][epoch_ix] < best_val_loss:
                 best_model_state = ranking_model.state_dict()
-                best_val_acc = metrics[best_epoch_key][epoch_ix]
+                best_val_loss = metrics[best_epoch_key][epoch_ix]
                 best_model_epoch = epoch_ix
 
         print(f"Epoch {epoch_ix + 1}/{hp_config.n_epochs}")
@@ -468,7 +479,6 @@ def train(
         )
 
     return metrics, best_model_state, best_model_epoch
-
 
 
 def get_prediction(
@@ -549,8 +559,105 @@ def get_dataset_predictions(
 
             results.append(meta_df)
 
-        results = pd.concat(results, axis=0)
+        results = pd.concat(results, axis=0, ignore_index=True)
         return results
+
+
+def _get_ranking(results_df: pd.DataFrame):
+    rankings_df = []
+    groups = results_df.groupby(["event_id", "site_int", "site_obs"])
+    for (cur_event, cur_site_int, cur_site_obs), cur_group in groups:
+        cur_group = cur_group.sort_values(["rel_1", "rel_2"])
+        cur_rel_combs = cur_group[["rel_1", "rel_2"]].values
+        cur_pred = cur_group["pred"].values
+
+        # pairwise_pred.get_site_ranking(cur_pred)
+        cur_pred = pairwise_pred.normalize_preds(cur_rel_combs, cur_pred)
+        cur_ranking, cur_comps_won = pairwise_pred.get_site_ranking(
+            cur_pred, cur_rel_combs
+        )
+
+        results_df.loc[cur_group.index, "pred"] = cur_pred
+        cur_rank_df = pd.DataFrame(
+            data=[cur_ranking, np.arange(1, cur_ranking.size + 1), cur_comps_won],
+            index=["rel_id", "rank", "comps_won"],
+        ).T
+        cur_rank_df["event_id"] = cur_event
+        cur_rank_df["site_int"] = cur_site_int
+        cur_rank_df["site_obs"] = cur_site_obs
+
+        rankings_df.append(cur_rank_df)
+
+    rankings_df = pd.concat(rankings_df, axis=0, ignore_index=True)
+
+    return results_df, rankings_df
+
+
+@nb.njit
+def _compute_residuals(
+        group_keys: np.ndarray,
+        rank_event_id: np.ndarray,
+        rank_site_int_id: np.ndarray,
+        rank_site_obs_id: np.ndarray,
+        rank_rel_ids: np.ndarray,
+        ranks: np.ndarray,
+        sim_event_ids: np.ndarray,
+        sim_site_ids: np.ndarray,
+        sim_rel_ids: np.ndarray,
+        sim_pSA: np.ndarray,
+        obs_event_ids: np.ndarray,
+        obs_site_ids: np.ndarray,
+        obs_pSA: np.ndarray,
+):
+    res_result = np.zeros((group_keys.shape[0], obs_pSA.shape[1]))
+    for ix in range(group_keys.shape[0]):
+        cur_event, cur_site_int, cur_site_obs = group_keys[ix, :]
+        m = (rank_event_id == cur_event) & (rank_site_int_id == cur_site_int) & (
+                    rank_site_obs_id == cur_site_obs) & (ranks == 1)
+        best_rel = rank_rel_ids[m][0]
+
+        cur_sim_ix = np.flatnonzero(
+            (sim_event_ids == cur_event) & (sim_site_ids == cur_site_int) & (
+                        sim_rel_ids == best_rel))[0]
+        cur_obs_ix = \
+        np.flatnonzero((obs_event_ids == cur_event) & (obs_site_ids == cur_site_int))[
+            0]
+        res_result[ix, :] = np.log(obs_pSA[cur_obs_ix, :]) - np.log(
+            sim_pSA[cur_sim_ix, :])
+
+    return res_result
+
+def compute_residuals(ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame):
+
+    groups = ranking_df.groupby(["event_id", "site_int", "site_obs"])
+    group_keys = np.asarray(list(groups.groups.keys()))
+
+    # Convert strings to integers as
+    # numba doesn't handle strings
+    string_to_int = np.vectorize(lambda x: hash(x))
+
+    res_results = _compute_residuals(
+        string_to_int(group_keys.astype(str)),
+        string_to_int(ranking_df.event_id.values.astype(str)),
+        string_to_int(ranking_df.site_int.values.astype(str)),
+        string_to_int(ranking_df.site_obs.values.astype(str)),
+        string_to_int(ranking_df.rel_id.values.astype(str)),
+        ranking_df["rank"].values.astype(int),
+        string_to_int(sim_df.event_id.values.astype(str)),
+        string_to_int(sim_df.site_id.values.astype(str)),
+        string_to_int(sim_df.rel_id.values.astype(str)),
+        sim_df.loc[:, constants.PSA_KEYS].values,
+        string_to_int(obs_df.event_id.values.astype(str)),
+        string_to_int(obs_df.site_id.values.astype(str)),
+        obs_df.loc[:, constants.PSA_KEYS].values,
+    )
+
+    res_df = pd.DataFrame(data=res_results, columns=constants.PSA_KEYS)
+    res_df["event_id"] = group_keys[:, 0]
+    res_df["site_int"] = group_keys[:, 1]
+    res_df["site_obs"] = group_keys[:, 2]
+
+    return res_df
 
 
 def post_processing(
@@ -568,26 +675,33 @@ def post_processing(
 
     # Get predictions
     print(f"Getting dataset predictions")
+    start_time = time.time()
     train_results = get_dataset_predictions(
         train_dataset, ranking_model, run_config.device
     )
     val_results = get_dataset_predictions(val_dataset, ranking_model, run_config.device)
+    print(f"Took {time.time() - start_time} to get predictions")
 
-    groups = val_results.groupby(["event_id", "site_int", "site_obs"])
-    for (cur_event, cur_site_int, cur_site_obs), cur_group in groups:
-        cur_group = cur_group.sort_values(["rel_1", "rel_2"])
-        cur_rel_combs = cur_group[["rel_1", "rel_2"]].values
-        cur_pred = cur_group["pred"].values
+    print(f"Getting rankings")
+    start_time = time.time()
+    train_results, train_ranking = _get_ranking(train_results)
+    val_results, val_ranking = _get_ranking(val_results)
+    print(f"Took {time.time() - start_time}")
 
-        pairwise_pred.get_site_ranking(cur_pred)
-
-
-        print(f"wtf")
-
+    print(f"Computing residuals")
+    db = DB(os.path.expandvars(data_metadata["db"]))
+    train_residuals = compute_residuals(train_ranking, db.get_sim_df(), db.get_obs_df())
+    val_residuals = compute_residuals(val_ranking, db.get_sim_df(), db.get_obs_df())
 
     # Save results
+    train_ranking.to_csv(cur_out_dir / "train_rankings.csv")
+    val_ranking.to_csv(cur_out_dir / "val_rankings.csv")
+
     train_results.to_csv(cur_out_dir / "train_results.csv")
     val_results.to_csv(cur_out_dir / "val_results.csv")
+
+    train_residuals.to_csv(cur_out_dir / "train_residuals.csv")
+    val_residuals.to_csv(cur_out_dir / "val_residuals.csv")
 
     # Save loss history
     pd.to_pickle(metrics, cur_out_dir / "metrics.pickle")
@@ -615,8 +729,6 @@ def post_processing(
         save_graph=True,
         directory=str(cur_out_dir),
     )
-
-
 
 
 def data_prep(
@@ -758,7 +870,7 @@ def data_prep(
         "max_dist": run_config.max_dist,
         "max_n_rels": run_config.max_n_rels,
         "features": {
-            "site_features":  scalar_features.site_feature_keys,
+            "site_features": scalar_features.site_feature_keys,
             "site_to_site_features": scalar_features.site_to_site_feature_keys,
             "event_site_features": scalar_features.event_site_feature_keys,
             "event_site_to_site_features": scalar_features.event_site_to_site_feature_keys,
