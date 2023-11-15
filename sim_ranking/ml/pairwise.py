@@ -163,7 +163,9 @@ class PairDataset(Dataset):
         for cur_event, cur_sites in event_sites.items():
             # Observed
             cur_obs_df = db.get_obs_data(cur_event, cur_sites)
-            cur_obs_df.loc[:, constants.PSA_KEYS] = np.log(cur_obs_df.loc[:, constants.PSA_KEYS])
+            cur_obs_df.loc[:, constants.PSA_KEYS] = np.log(
+                cur_obs_df.loc[:, constants.PSA_KEYS]
+            )
 
             # self.obs_pSA[cur_event] = cur_obs_df.loc[cur_sites, self.pSA_keys].values
             self.obs_pSA[cur_event] = (
@@ -173,7 +175,9 @@ class PairDataset(Dataset):
 
             # Get the simulation data
             cur_sim_df = db.get_sim_data(cur_event, cur_sites)
-            cur_sim_df.loc[:, constants.PSA_KEYS] = np.log(cur_sim_df.loc[:, constants.PSA_KEYS])
+            cur_sim_df.loc[:, constants.PSA_KEYS] = np.log(
+                cur_sim_df.loc[:, constants.PSA_KEYS]
+            )
             cur_sim_data = np.full(
                 (cur_sites.size, self.periods.size, self.n_rels_event[cur_event]),
                 fill_value=np.nan,
@@ -597,39 +601,49 @@ def _get_ranking(results_df: pd.DataFrame):
 
 @nb.njit
 def _compute_residuals(
-        group_keys: np.ndarray,
-        rank_event_id: np.ndarray,
-        rank_site_int_id: np.ndarray,
-        rank_site_obs_id: np.ndarray,
-        rank_rel_ids: np.ndarray,
-        ranks: np.ndarray,
-        sim_event_ids: np.ndarray,
-        sim_site_ids: np.ndarray,
-        sim_rel_ids: np.ndarray,
-        sim_pSA: np.ndarray,
-        obs_event_ids: np.ndarray,
-        obs_site_ids: np.ndarray,
-        obs_pSA: np.ndarray,
+    group_keys: np.ndarray,
+    rank_event_id: np.ndarray,
+    rank_site_int_id: np.ndarray,
+    rank_site_obs_id: np.ndarray,
+    rank_rel_ids: np.ndarray,
+    ranks: np.ndarray,
+    sim_event_ids: np.ndarray,
+    sim_site_ids: np.ndarray,
+    sim_rel_ids: np.ndarray,
+    sim_pSA: np.ndarray,
+    obs_event_ids: np.ndarray,
+    obs_site_ids: np.ndarray,
+    obs_pSA: np.ndarray,
 ):
     res_result = np.zeros((group_keys.shape[0], obs_pSA.shape[1]))
     for ix in range(group_keys.shape[0]):
         cur_event, cur_site_int, cur_site_obs = group_keys[ix, :]
-        m = (rank_event_id == cur_event) & (rank_site_int_id == cur_site_int) & (
-                    rank_site_obs_id == cur_site_obs) & (ranks == 1)
+        m = (
+            (rank_event_id == cur_event)
+            & (rank_site_int_id == cur_site_int)
+            & (rank_site_obs_id == cur_site_obs)
+            & (ranks == 1)
+        )
         best_rel = rank_rel_ids[m][0]
 
         cur_sim_ix = np.flatnonzero(
-            (sim_event_ids == cur_event) & (sim_site_ids == cur_site_int) & (
-                        sim_rel_ids == best_rel))[0]
-        cur_obs_ix = \
-        np.flatnonzero((obs_event_ids == cur_event) & (obs_site_ids == cur_site_int))[
-            0]
+            (sim_event_ids == cur_event)
+            & (sim_site_ids == cur_site_int)
+            & (sim_rel_ids == best_rel)
+        )[0]
+        cur_obs_ix = np.flatnonzero(
+            (obs_event_ids == cur_event) & (obs_site_ids == cur_site_int)
+        )[0]
         res_result[ix, :] = np.log(obs_pSA[cur_obs_ix, :]) - np.log(
-            sim_pSA[cur_sim_ix, :])
+            sim_pSA[cur_sim_ix, :]
+        )
 
     return res_result
 
-def compute_residuals(ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame):
+
+def compute_sample_residuals(
+    ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame
+):
 
     groups = ranking_df.groupby(["event_id", "site_int", "site_obs"])
     group_keys = np.asarray(list(groups.groups.keys()))
@@ -662,6 +676,48 @@ def compute_residuals(ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd
     return res_df
 
 
+def compute_scenario_residuals(ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame):
+    # Determine the best realisation for each scenario
+    rel_votes = {cur_event: {} for cur_event in ranking_df.event_id.unique()}
+    best_rel_df = []
+    groups = ranking_df.groupby(["event_id", "site_int"])
+    for (cur_event, cur_site_int), cur_group in groups:
+        cur_best_rels = cur_group.loc[(cur_group["rank"] == 1)].copy()
+        assert cur_best_rels.shape[0] == cur_group.site_obs.unique().size
+
+        cur_best_rels["weight"] = np.ones(cur_best_rels.shape[0])
+        cur_rel_votes = (
+            cur_best_rels[["rel_id", "weight"]]
+            .groupby("rel_id")
+            .sum()
+            .sort_values("weight", ascending=False)
+        )
+        cur_best_rel = cur_rel_votes.index[0]
+
+        rel_votes[cur_event][cur_site_int] = cur_rel_votes
+        best_rel_df.append([cur_event, cur_site_int, cur_best_rel])
+
+    best_rel_df = pd.DataFrame(
+        data=best_rel_df, columns=["event_id", "site_int", "rel_id"]
+    )
+    best_rel_df.index = mlt.array_utils.numpy_str_join(
+        "_",
+        best_rel_df.event_id.values.astype(str),
+        best_rel_df.site_int.values.astype(str),
+        best_rel_df.rel_id.values.astype(str),
+    )
+
+    # Compute residuals
+    sim_idx = best_rel_df.index.values.astype(str)
+    obs_idx = np.stack(np.char.rsplit(sim_idx, "_", 1), axis=0)[:, 0]
+
+    res_df = pd.DataFrame(data=np.log(obs_df.loc[obs_idx, constants.PSA_KEYS].values) - np.log(sim_df.loc[sim_idx, constants.PSA_KEYS].values),
+                          index=sim_idx, columns=constants.PSA_KEYS)
+    res_df = pd.concat([best_rel_df, res_df], axis=1)
+
+    return res_df, rel_votes
+
+
 def post_processing(
     ranking_model: nn.Module,
     train_dataset: PairDataset,
@@ -674,6 +730,10 @@ def post_processing(
     data_metadata: Dict,
 ):
     (cur_out_dir := run_config.results_dir / mlt.utils.create_run_id(False)).mkdir()
+
+    db = DB(os.path.expandvars(data_metadata["db"]))
+    sim_df = db.get_sim_df()
+    obs_df = db.get_obs_df(custom_record_id=True)
 
     # Get predictions
     print(f"Getting dataset predictions")
@@ -690,10 +750,25 @@ def post_processing(
     val_results, val_ranking = _get_ranking(val_results)
     print(f"Took {time.time() - start_time}")
 
-    print(f"Computing residuals")
-    db = DB(os.path.expandvars(data_metadata["db"]))
-    train_residuals = compute_residuals(train_ranking, db.get_sim_df(), db.get_obs_df())
-    val_residuals = compute_residuals(val_ranking, db.get_sim_df(), db.get_obs_df())
+    print(f"Computing sample residuals")
+    start_time = time.time()
+    train_sample_residuals = compute_sample_residuals(
+        train_ranking, sim_df, obs_df
+    )
+    val_sample_residuals = compute_sample_residuals(
+        val_ranking, sim_df, obs_df
+    )
+    print(f"Took {time.time() - start_time} to compute sample residuals")
+
+    print(f"Computing scenario residuals")
+    start_time = time.time()
+    train_scenario_res_df, train_scenario_rel_votes = compute_scenario_residuals(
+        train_ranking, sim_df, obs_df
+    )
+    val_scenario_res_df, val_scenario_rel_votes = compute_scenario_residuals(
+        val_ranking, sim_df, obs_df
+    )
+    print(f"Took {time.time() - start_time} to compute scenario best rels")
 
     # Save results
     train_ranking.to_csv(cur_out_dir / "train_rankings.csv")
@@ -702,8 +777,11 @@ def post_processing(
     train_results.to_csv(cur_out_dir / "train_results.csv")
     val_results.to_csv(cur_out_dir / "val_results.csv")
 
-    train_residuals.to_csv(cur_out_dir / "train_residuals.csv")
-    val_residuals.to_csv(cur_out_dir / "val_residuals.csv")
+    train_sample_residuals.to_csv(cur_out_dir / "train_sample_residuals.csv")
+    val_sample_residuals.to_csv(cur_out_dir / "val_sample_residuals.csv")
+
+    train_scenario_res_df.to_csv(cur_out_dir / "train_scenario_residuals.csv")
+    val_scenario_res_df.to_csv(cur_out_dir / "val_scenario_residuals.csv")
 
     # Save loss history
     pd.to_pickle(metrics, cur_out_dir / "metrics.pickle")

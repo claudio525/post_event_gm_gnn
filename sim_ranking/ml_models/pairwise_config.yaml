@@ -1,9 +1,11 @@
 # Training Params
-n_epochs: 10
-batch_size: 512
+n_epochs: 100
+#batch_size: 512 # Seems to work well
+batch_size: 1024
 lr: 0.001
 #l2_reg: 0.005 # Seems to work well
-l2_reg: 0.001
+#l2_reg: 0.001 # Also seems to work well
+l2_reg: 0.0025
 weight_penalty_factor: 0.02
 
 # Model Params

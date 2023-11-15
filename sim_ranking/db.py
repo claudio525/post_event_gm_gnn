@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import sqlite3
 
+import ml_tools as mlt
+
 from . import data
 from . import constants
 
@@ -153,9 +155,14 @@ class DB:
         """Gets the simulation data"""
         return pd.read_sql("SELECT * FROM sim_im_data", self.con, index_col="record_id")
 
-    def get_obs_df(self):
+    def get_obs_df(self, custom_record_id: bool = False):
         """Gets the observation IM data"""
-        return pd.read_sql("SELECT * FROM obs_im_data", self.con, index_col="record_id")
+        result_df = pd.read_sql("SELECT * FROM obs_im_data", self.con, index_col="record_id")
+        if custom_record_id:
+            result_df.index = mlt.array_utils.numpy_str_join("_", result_df.event_id.values.astype(str), result_df.site_id.values.astype(str))
+
+        return result_df
+
 
     def get_full_obs_df(self):
         """Gets the observation IM data, event and site information"""
