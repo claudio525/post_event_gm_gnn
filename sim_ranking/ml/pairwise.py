@@ -600,7 +600,7 @@ def _get_ranking(results_df: pd.DataFrame):
 
 
 @nb.njit
-def _compute_residuals(
+def _compute_model_residuals(
     group_keys: np.ndarray,
     rank_event_id: np.ndarray,
     rank_site_int_id: np.ndarray,
@@ -615,6 +615,13 @@ def _compute_residuals(
     obs_site_ids: np.ndarray,
     obs_pSA: np.ndarray,
 ):
+    """
+    Computes the residual between the highest ranked realisation and
+    the observed GM at the site of interest
+
+    Note: All string arrays have to be converted to integers arrays
+        using hash, as numba does not handle string arrays at this point
+    """
     res_result = np.zeros((group_keys.shape[0], obs_pSA.shape[1]))
     for ix in range(group_keys.shape[0]):
         cur_event, cur_site_int, cur_site_obs = group_keys[ix, :]
@@ -644,7 +651,10 @@ def _compute_residuals(
 def compute_sample_residuals(
     ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame
 ):
-
+    """
+    Computes the residual between the highest ranked realisation and
+    the observed GM at the site of interest
+    """
     groups = ranking_df.groupby(["event_id", "site_int", "site_obs"])
     group_keys = np.asarray(list(groups.groups.keys()))
 
@@ -652,7 +662,7 @@ def compute_sample_residuals(
     # numba doesn't handle strings
     string_to_int = np.vectorize(lambda x: hash(x))
 
-    res_results = _compute_residuals(
+    res_results = _compute_model_residuals(
         string_to_int(group_keys.astype(str)),
         string_to_int(ranking_df.event_id.values.astype(str)),
         string_to_int(ranking_df.site_int.values.astype(str)),
@@ -676,7 +686,13 @@ def compute_sample_residuals(
     return res_df
 
 
-def compute_scenario_residuals(ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame):
+def compute_scenario_residuals(
+    ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame
+):
+    """
+    Determines the best realisation for each scenario
+    and then computes the residuals with the observed GM
+    """
     # Determine the best realisation for each scenario
     rel_votes = {cur_event: {} for cur_event in ranking_df.event_id.unique()}
     best_rel_df = []
@@ -711,8 +727,12 @@ def compute_scenario_residuals(ranking_df: pd.DataFrame, sim_df: pd.DataFrame, o
     sim_idx = best_rel_df.index.values.astype(str)
     obs_idx = np.stack(np.char.rsplit(sim_idx, "_", 1), axis=0)[:, 0]
 
-    res_df = pd.DataFrame(data=np.log(obs_df.loc[obs_idx, constants.PSA_KEYS].values) - np.log(sim_df.loc[sim_idx, constants.PSA_KEYS].values),
-                          index=sim_idx, columns=constants.PSA_KEYS)
+    res_df = pd.DataFrame(
+        data=np.log(obs_df.loc[obs_idx, constants.PSA_KEYS].values)
+        - np.log(sim_df.loc[sim_idx, constants.PSA_KEYS].values),
+        index=sim_idx,
+        columns=constants.PSA_KEYS,
+    )
     res_df = pd.concat([best_rel_df, res_df], axis=1)
 
     return res_df, rel_votes
@@ -752,12 +772,8 @@ def post_processing(
 
     print(f"Computing sample residuals")
     start_time = time.time()
-    train_sample_residuals = compute_sample_residuals(
-        train_ranking, sim_df, obs_df
-    )
-    val_sample_residuals = compute_sample_residuals(
-        val_ranking, sim_df, obs_df
-    )
+    train_sample_residuals = compute_sample_residuals(train_ranking, sim_df, obs_df)
+    val_sample_residuals = compute_sample_residuals(val_ranking, sim_df, obs_df)
     print(f"Took {time.time() - start_time} to compute sample residuals")
 
     print(f"Computing scenario residuals")
@@ -1000,3 +1016,103 @@ def create_model(hp_config: HyperParamsConfig, scalar_features: ml_data.ScalarFe
     )
 
     return ranking_model
+
+
+@nb.njit
+def _compute_single_best_sim_res(
+    event: int,
+    site_id: int,
+    sim_event_ids: np.ndarray,
+    sim_site_ids: np.ndarray,
+    rel_ids: np.ndarray,
+    sim_pSA: np.ndarray,
+    obs_event_ids: np.ndarray,
+    obs_site_ids: np.ndarray,
+    obs_pSA: np.ndarray,
+):
+    """Helper function"""
+    cur_sim_mask = (sim_event_ids == event) & (sim_site_ids == site_id)
+    cur_sim_pSA = sim_pSA[cur_sim_mask, :]
+
+    cur_obs_mask = (obs_event_ids == event) & (obs_site_ids == site_id)
+    if np.count_nonzero(cur_obs_mask) == 0:
+        return np.full(sim_pSA.shape[1], np.nan), 0
+
+    cur_obs_pSA = obs_pSA[cur_obs_mask, :]
+
+    cur_res = np.log(cur_obs_pSA) - np.log(cur_sim_pSA)
+    cur_best_res_ix = np.argmin(np.sum(np.abs(cur_res), axis=1))
+
+    return cur_res[cur_best_res_ix, :], rel_ids[cur_sim_mask][cur_best_res_ix]
+
+
+@nb.njit(parallel=True)
+def _compute_best_sim_res(
+    group_keys: np.ndarray,
+    sim_event_ids: np.ndarray,
+    sim_site_ids: np.ndarray,
+    rel_ids: np.ndarray,
+    sim_pSA: np.ndarray,
+    obs_event_ids: np.ndarray,
+    obs_site_ids: np.ndarray,
+    obs_pSA: np.ndarray,
+):
+    """Computes the residual for each site using the best simulation residual"""
+    best_res = np.full((group_keys.shape[0], sim_pSA.shape[1]), np.nan)
+    best_rel = np.zeros(group_keys.shape[0], dtype=np.int64)
+    for ix in nb.prange(group_keys.shape[0]):
+        best_res[ix, :], best_rel[ix] = _compute_single_best_sim_res(
+            group_keys[ix, 0],
+            group_keys[ix, 1],
+            sim_event_ids,
+            sim_site_ids,
+            rel_ids,
+            sim_pSA,
+            obs_event_ids,
+            obs_site_ids,
+            obs_pSA,
+        )
+
+    return best_res, best_rel
+
+
+def compute_best_sim_res(sim_df: pd.DataFrame, obs_df: pd.DataFrame):
+    """
+    Computes the residual for each event &
+    site using the best simulation realisation
+    """
+    string_to_int = np.vectorize(lambda x: hash(x))
+
+    group_keys = np.asarray(list(sim_df.groupby(["event_id", "site_id"]).groups.keys()))
+
+    best_res, best_rel = _compute_best_sim_res(
+        string_to_int(group_keys),
+        string_to_int(sim_df.event_id.values.astype(str)),
+        string_to_int(sim_df.site_id.values.astype(str)),
+        string_to_int(sim_df.rel_id.values.astype(str)),
+        sim_df[constants.PSA_KEYS].values,
+        string_to_int(obs_df.event_id.values.astype(str)),
+        string_to_int(obs_df.site_id.values.astype(str)),
+        obs_df[constants.PSA_KEYS].values,
+    )
+
+    # Drop rows with no observation values
+    drop_mask = np.all(np.isnan(best_res), axis=1)
+    best_res = best_res[~drop_mask, :]
+    best_rel = best_rel[~drop_mask]
+
+    unique_rels = np.unique(sim_df.rel_id.values.astype(str))
+    rel_lookup = pd.Series(index=string_to_int(unique_rels), data=unique_rels)
+
+    best_res_df = pd.DataFrame(
+        data=best_res,
+        index=mlt.array_utils.numpy_str_join(
+            "_", group_keys[~drop_mask, 0], group_keys[~drop_mask, 1]
+        ),
+        columns=constants.PSA_KEYS,
+    )
+    best_res_df["event_id"] = group_keys[~drop_mask, 0]
+    best_res_df["site_id"] = group_keys[~drop_mask, 1]
+    best_res_df["rel_id"] = rel_lookup.loc[best_rel].values
+
+    return best_res_df

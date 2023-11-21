@@ -78,17 +78,6 @@ def train_model(
         db,
     )
 
-    # t = {}
-    # for idx, *_ in iter(val_dataset):
-    #     print(val_dataset.get_metadata(idx))
-    #     # cur_event, *_ = val_dataset.get_metadata(idx)
-    #     # if cur_event not in t:
-    #     #     t[cur_event] = 0
-    #     # t[cur_event] += 1
-    #     print(f"wtf")
-    #
-    # print("wtf")
-
     # Create the model
     ranking_model = pr.create_model(hp_config, scalar_features)
 

@@ -1,5 +1,6 @@
 import os
 import pickle
+import multiprocessing as mp
 from pathlib import Path
 from typing import Sequence, NamedTuple, Dict, List, Union
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ import ml_tools as mlt
 
 from . import constants
 from . import utils
+from .db import DB
 
 
 def run_emp_gmms(
@@ -271,8 +273,61 @@ class SiteCorrelations:
         )
 
 
-def compute_sim_site_corrs(sim_params_dir: Path, smooth: bool = False):
-    """Computes the site correlations based on the simulation data"""
+def compute_sim_site_corrs(sim_params_dir: Path):
+    """Generates site-correlations using all available simulations"""
+    events = [
+        cur_ffp.stem
+        for cur_ffp in sim_params_dir.iterdir()
+        if cur_ffp.is_dir() and not cur_ffp.stem.startswith("_")
+    ]
+
+    im_dfs = None
+    for ix, cur_event in enumerate(events):
+        print(f"Processing event {cur_event}, {ix + 1}/{len(events)}")
+        cur_sim_gm_params = SimGMParams.load(sim_params_dir / cur_event)
+        cur_within_residuals = cur_sim_gm_params.within_residuals
+
+        if ix == 0:
+            im_dfs = {cur_im: [] for cur_im in cur_sim_gm_params.ims}
+
+        for cur_im in cur_sim_gm_params.ims:
+            cur_df = cur_within_residuals[[cur_im, "site", "rel"]].copy()
+            cur_df["sim_id"] = np.char.add(
+                f"{cur_event}_", cur_df.rel.values.astype(str)
+            )
+            cur_df = cur_df.drop(columns=["rel"])
+
+            im_dfs[cur_im].append(cur_df)
+
+    corr_dfs = {}
+    for cur_im, cur_dfs in im_dfs.items():
+        cur_df = pd.concat(cur_dfs, axis=0)
+        cur_df = cur_df.pivot(index="sim_id", columns="site", values=cur_im)
+        cur_corr_df = cur_df.corr(method="pearson")
+
+        cur_corr_df = pd.melt(
+            cur_corr_df.reset_index(),
+            id_vars=["site"],
+            var_name="site_2",
+            value_name="corr",
+        )
+        cur_corr_df = cur_corr_df.rename(columns={"site": "site_1"}).dropna()
+        cur_corr_df.index = mlt.array_utils.numpy_str_join(
+            "_",
+            cur_corr_df.site_1.values.astype(str),
+            cur_corr_df.site_2.values.astype(str),
+        )
+
+        corr_dfs[cur_im] = cur_corr_df
+
+    return corr_dfs
+
+
+def compute_sim_event_site_corrs(sim_params_dir: Path, smooth: bool = False):
+    """
+    Computes the site correlations for each simulated event
+    (i.e. across all the realisation)
+    """
     events = [
         cur_ffp.stem
         for cur_ffp in sim_params_dir.iterdir()
@@ -280,7 +335,8 @@ def compute_sim_site_corrs(sim_params_dir: Path, smooth: bool = False):
     ]
 
     results = []
-    for cur_event in events:
+    for ix, cur_event in enumerate(events):
+        print(f"Processing event {cur_event}, {ix + 1}/{len(events)}")
         cur_sim_gm_params = SimGMParams.load(sim_params_dir / cur_event)
         cur_ims = np.asarray(cur_sim_gm_params.ims)
         cur_sites = np.asarray(cur_sim_gm_params.sites)
@@ -370,20 +426,20 @@ class SimGMParams(NamedTuple):
 
     def write(self, data_dir: Path):
         mlt.utils.write_to_yaml(
-            dict(event=self.event, ims=self.ims, sites=self.sites),
+            dict(event=str(self.event), ims=self.ims, sites=self.sites),
             data_dir / "meta.yaml",
         )
 
         self.gm_params.to_csv(data_dir / "gm_params.csv")
 
         if self.residuals is not None:
-            self.residuals.to_csv(data_dir / "residuals.csv")
+            self.residuals.to_parquet(data_dir / "residuals.parquet")
 
         if self.event_residuals is not None:
             self.event_residuals.to_csv(data_dir / "event_residuals.csv")
 
         if self.within_residuals is not None:
-            self.within_residuals.to_csv(data_dir / "rem_residuals.csv")
+            self.within_residuals.to_parquet(data_dir / "rem_residuals.parquet")
 
         if self.bias_std is not None:
             self.bias_std.to_csv(data_dir / "bias_std.csv")
@@ -396,14 +452,14 @@ class SimGMParams(NamedTuple):
             meta["ims"],
             meta["sites"],
             pd.read_csv(data_dir / "gm_params.csv", index_col=0),
-            pd.read_csv(cur_path, index_col=0)
-            if (cur_path := data_dir / "residuals.csv").exists()
+            pd.read_parquet(cur_path)
+            if (cur_path := data_dir / "residuals.parquet").exists()
             else None,
             pd.read_csv(cur_path, index_col=0)
             if (cur_path := data_dir / "event_residuals.csv").exists()
             else None,
-            pd.read_csv(cur_path, index_col=0)
-            if (cur_path := data_dir / "rem_residuals.csv").exists()
+            pd.read_parquet(cur_path)
+            if (cur_path := data_dir / "rem_residuals.parquet").exists()
             else None,
             pd.read_csv(cur_path, index_col=0)
             if (cur_path := data_dir / "bias_std.csv").exists()
@@ -499,116 +555,126 @@ def compute_sim_gm_params_total(simulation_imdb_ffp: Path):
     return results
 
 
-def compute_sim_gm_params_mera(simulation_imdb_ffp: Path):
+def _process_sim_gm_params_mera_event(event: str, db_ffp: Path, ims: List[str]):
+    from mera.mera_pymer4 import run_mera
+
+    print(f"Processing event {event}")
+
+    db = DB(db_ffp)
+    avail_sites = db.get_avail_sites()
+
+    gm_params = {}
+    residual_df = []
+    sites = []
+
+    ### Compute the residuals
+    cur_sim_data = db.get_sim_data(event, avail_sites)
+    cur_sim_data[ims] = np.log(cur_sim_data[ims])
+
+    site_mean_values = cur_sim_data[["site_id"] + ims].groupby("site_id").mean()
+    site_mean_values.columns = np.char.add(
+        site_mean_values.columns.values.astype(str), "_mean"
+    )
+    for cur_site in cur_sim_data.site_id.unique().astype(str):
+        sites.append(str(cur_site))
+
+        # Compute the residual
+        cur_mask = cur_sim_data.site_id.values == cur_site
+        cur_residual = (
+            cur_sim_data.loc[cur_mask, ims].values
+            - site_mean_values.loc[cur_site].values
+        )
+        cur_residual = pd.DataFrame(
+            index=cur_sim_data.loc[cur_mask].index,
+            columns=ims,
+            data=cur_residual,
+        )
+        cur_sigma_total = cur_residual.std(axis=0)
+        cur_residual["rel"] = cur_sim_data.rel_id
+        cur_residual["site"] = cur_site
+
+        gm_params[cur_site] = (site_mean_values.loc[cur_site], cur_sigma_total)
+        residual_df.append(cur_residual)
+
+    # Combine
+    residual_df = pd.concat(residual_df)
+
+    # Run the mixed-effects regression
+    # This treats each realisation as an event
+    event_res_df, within_res, bias_std_df = run_mera(
+        residual_df, ims, "rel", "site", compute_site_term=False, verbose=False
+    )
+
+    # Add site and rel column to within event residuals
+    assert np.all(within_res.index == residual_df.index)
+    within_res["site"] = residual_df["site"]
+    within_res["rel"] = residual_df["rel"]
+
+    # Get the GM params
+    for cur_site, (cur_mean, cur_sigma_total) in gm_params.items():
+        # Use tau from ME-regression
+        tau = bias_std_df.tau.copy()
+        assert np.all(tau.index == cur_sigma_total.index)
+
+        # Want site-specific phi, so compute it as
+        # sqrt(sigma_total^2 - tau^2), where sigma_total is
+        # computed from the realisations
+        ## TODO: How to handle negative values??
+        phi = np.sqrt(np.abs(cur_sigma_total ** 2 - tau ** 2))
+
+        # Update the indices
+        tau.index = np.char.add(tau.index.values.astype(str), "_std_Inter")
+        phi.index = np.char.add(phi.index.values.astype(str), "_std_Intra")
+
+        sigma = cur_sigma_total
+        sigma.index = np.char.add(sigma.index.values.astype(str), "_std_Total")
+
+        gm_params[cur_site] = {
+            **cur_mean.to_dict(),
+            **tau.to_dict(),
+            **phi.to_dict(),
+            **sigma.to_dict(),
+        }
+
+    gm_params = pd.DataFrame(gm_params).T
+    return SimGMParams(
+        event,
+        ims,
+        sites,
+        gm_params,
+        residual_df,
+        event_res_df,
+        within_res,
+        bias_std_df,
+    )
+
+
+def compute_sim_gm_params_mera(db_ffp: Path, data_source: str = None, n_procs: int = 1):
     """
     Computes the parametric IM distributions based
     on the simulation data using mixed effects regression
     """
-    from mera.mera_pymer4 import run_mera
+    db = DB(db_ffp)
+    events = db.get_avail_events(data_source=data_source)
+    ims = constants.PSA_KEYS
 
-    # Get the simulation data
-    sim_data = load_site_sim_data(simulation_imdb_ffp)
-
-    sites = list(sim_data.keys())
-    events = np.unique(sim_data[sites[0]].index.get_level_values(0))
-    ims = [str(cur_im) for cur_im in sim_data[sites[0]].columns.values.astype(str)]
-
-    results = []
-    for cur_event in events:
-        print(f"Processing event {cur_event}")
-        gm_params = {}
-        residual_df = []
-        sites = []
-        for cur_site, cur_sim_data in sim_data.items():
-            # No simulation data for the current site
-            if cur_event not in cur_sim_data.index:
-                continue
-            sites.append(cur_site)
-
-            # Get the simulation IM data
-            cur_sim_data = cur_sim_data.loc[cur_event]
-
-            # Compute the log mean
-            cur_mean = np.log(cur_sim_data[ims]).mean(axis=0)
-            cur_mean.index = np.char.add(cur_mean.index.values.astype(str), "_mean")
-
-            # Compute the residual
-            cur_residual = np.log(cur_sim_data[ims].values) - cur_mean.values
-            cur_residual = pd.DataFrame(
-                index=np.char.add(
-                    cur_sim_data.index.values.astype(str), f"_{cur_site}"
-                ),
-                columns=ims,
-                data=cur_residual,
+    if n_procs > 1:
+        with mp.Pool(n_procs) as p:
+            results = p.starmap(
+                _process_sim_gm_params_mera_event,
+                [(cur_event, db_ffp, ims) for cur_event in events],
             )
-            cur_sigma_total = cur_residual.std(axis=0)
-            cur_residual["rel"] = [
-                cur_i.split("_")[1] for cur_i in cur_residual.index.values.astype(str)
-            ]
-            cur_residual["site"] = cur_site
-
-            gm_params[cur_site] = (cur_mean, cur_sigma_total)
-            residual_df.append(cur_residual)
-
-        # Combine
-        residual_df = pd.concat(residual_df)
-
-        # Run the mixed-effects regression
-        # This treats each realisation as an event
-        event_res_df, within_res, bias_std_df = run_mera(
-            residual_df, ims, "rel", "site", compute_site_term=False
-        )
-
-        # Add site and rel column to within event residuals
-        assert np.all(within_res.index == residual_df.index)
-        within_res["site"] = residual_df["site"]
-        within_res["rel"] = residual_df["rel"]
-
-        # Get the GM params
-        for cur_site, (cur_mean, cur_sigma_total) in gm_params.items():
-            # Use tau from ME-regression
-            tau = bias_std_df.tau.copy()
-
-            assert np.all(tau.index == cur_sigma_total.index)
-
-            # Want site-specific phi, so compute it as
-            # sqrt(sigma_total^2 - tau^2), where sigma_total is
-            # computed from the realisations
-            ## TODO: How to handle negative values??
-            phi = np.sqrt(np.abs(cur_sigma_total ** 2 - tau ** 2))
-
-            # Update the indices
-            tau.index = np.char.add(tau.index.values.astype(str), "_std_Inter")
-            phi.index = np.char.add(phi.index.values.astype(str), "_std_Intra")
-
-            sigma = cur_sigma_total
-            sigma.index = np.char.add(sigma.index.values.astype(str), "_std_Total")
-
-            gm_params[cur_site] = {
-                **cur_mean.to_dict(),
-                **tau.to_dict(),
-                **phi.to_dict(),
-                **sigma.to_dict(),
-            }
-
-        gm_params = pd.DataFrame(gm_params).T
-        results.append(
-            SimGMParams(
-                cur_event,
-                ims,
-                sites,
-                gm_params,
-                residual_df,
-                event_res_df,
-                within_res,
-                bias_std_df,
-            )
-        )
+    else:
+        results = []
+        for cur_event in events:
+            results.append(_process_sim_gm_params_mera_event(cur_event, db_ffp, ims))
 
     return results
 
 
-def load_site_sim_data(sim_imdb_ffp: Path, sites: Sequence[str] = None, event: str = None):
+def load_site_sim_data(
+    sim_imdb_ffp: Path, sites: Sequence[str] = None, event: str = None
+):
     """Loads the simulation IM values for the specified sites"""
     sim_data = {}
     with gc.dbs.IMDB.get_imdb(str(sim_imdb_ffp)) as db:
@@ -627,14 +693,17 @@ def load_site_sim_data(sim_imdb_ffp: Path, sites: Sequence[str] = None, event: s
 
     return sim_data
 
+
 def load_avail_sim_events(sim_imdb_ffp: Path):
     """Loads the available simulations in the specified IMDB"""
     with gc.dbs.IMDB.get_imdb(str(sim_imdb_ffp)) as db:
         return db.rupture_names()
 
+
 def load_obs_data(obs_ffp: Path):
     """Loads the observation data from the NZ-GMDB IM flat file"""
     return pd.read_csv(obs_ffp, index_col=0, low_memory=False, dtype={"evid": str})
+
 
 def get_obs_rupture_data(obs_df: pd.DataFrame, rupture: str):
     """

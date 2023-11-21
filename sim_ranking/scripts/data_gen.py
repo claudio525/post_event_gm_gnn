@@ -39,12 +39,12 @@ def get_emp_gmm_params(
 
 
 @app.command("compute-sim-gm-params-mera")
-def get_sim_gm_params_mera(output_dir: Path, simulation_imdb_ffp: Path):
+def get_sim_gm_params_mera(output_dir: Path, simulation_imdb_ffp: Path, data_source: str = None, n_procs: int = 1):
     """
     Computes the GM parameters from the simulation data
     directly using MERA
     """
-    sim_gm_params = sr.data.compute_sim_gm_params_mera(simulation_imdb_ffp)
+    sim_gm_params = sr.data.compute_sim_gm_params_mera(simulation_imdb_ffp, data_source=data_source, n_procs=n_procs)
 
     for cur_params in sim_gm_params:
         (cur_out_dir := output_dir / cur_params.event).mkdir(exist_ok=True)
@@ -64,17 +64,34 @@ def get_sim_gm_params_total(output_dir: Path, simulation_imdb_ffp: Path):
         cur_params.write(cur_out_dir)
 
 
-@app.command("compute-sim-site-correlations")
-def compute_sim_site_correlations(
+@app.command("compute-sim-event-site-correlations")
+def compute_sim_event_site_correlations(
     output_dir: Path,
     sim_params_dir: Path,
     smooth: bool = False,
 ):
-    """Computes the site correlations from the simulation data directly"""
-    correlation_results = sr.data.compute_sim_site_corrs(sim_params_dir, smooth=smooth)
+    """
+    Computes the site correlations for each simulated event
+    I.e. Produces site-correlations per event using the simulation realisations
+    """
+    correlation_results = sr.data.compute_sim_event_site_corrs(sim_params_dir, smooth=smooth)
 
     for cur_result in correlation_results:
         cur_result.write(output_dir / f"{cur_result.event}.pickle")
+
+@app.command("compute-sim-site-correlations")
+def compute_sim_site_correlations(
+        output_dir: Path, sim_params_dir: Path
+):
+    """
+    Computes the site-correlations across all simulations
+    using the within-event residual
+    """
+    corr_dfs = sr.data.compute_sim_site_corrs(sim_params_dir)
+
+    for cur_key, cur_df in corr_dfs.items():
+        cur_df.to_csv(output_dir / f"{cur_key}.csv")
+
 
 @app.command("compute-obs-site-correlations")
 def compute_obs_site_correlations(output_dir: Path, db_ffp: Path, site_count_th: int = 20):

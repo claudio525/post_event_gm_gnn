@@ -1,6 +1,7 @@
 import os
 import time
 from pathlib import Path
+from typing import Sequence
 
 import pandas as pd
 import numpy as np
@@ -136,6 +137,16 @@ def _load_scenario_residuals(results_dir: Path):
     val_residuals = pd.read_csv(results_dir / "val_scenario_residuals.csv", index_col=0)
 
     return train_residuals, val_residuals
+
+
+@st.cache_data
+def _get_sim_residuals(results_dir: Path):
+    metadata = _get_metadata(results_dir)
+    db_ffp = os.path.expandvars(metadata["data"]["db"])
+
+    db = sr.db.DB(db_ffp)
+
+    return sr.ml.pairwise.compute_best_sim_res(db.get_sim_df(), db.get_obs_df())
 
 
 @st.cache_data
@@ -501,35 +512,83 @@ def _sample_viewer(
 
     st.pyplot(fig, use_container_width=False)
 
-    cur_scalar_features_df = site_df.loc[
-        [site_int, site_obs], metadata["data"]["features"]["site_features"]
-    ]
-    cur_scalar_features_df["site_to_site_distance"] = dist_df.loc[site_int, site_obs]
-    cur_scalar_features_df["r_rup"] = (
-        record_df.loc[(record_df.event_id == event)]
-        .set_index("site_id")
-        .loc[[site_int, site_obs], "r_rup"]
-        .values
+    # cur_scalar_features_df = site_df.loc[
+    #     [site_int, site_obs], metadata["data"]["features"]["site_features"]
+    # ]
+    # cur_scalar_features_df["site_to_site_distance"] = dist_df.loc[site_int, site_obs]
+    # cur_scalar_features_df["r_rup"] = (
+    #     record_df.loc[(record_df.event_id == event)]
+    #     .set_index("site_id")
+    #     .loc[[site_int, site_obs], "r_rup"]
+    #     .values
+    # )
+    # cur_scalar_features_df["angular_distance"] = event_angular_distances[event].loc[
+    #     site_int, site_obs
+    # ]
+
+    cur_scalar_features_df = get_scalar_features(
+        results_dir, site_int, [site_obs], event
     )
-    cur_scalar_features_df["angular_distance"] = event_angular_distances[event].loc[
-        site_int, site_obs
-    ]
 
     st.dataframe(cur_scalar_features_df)
     st.dataframe(combs_won.to_frame("Combinations Won").T)
 
 
-def _run_res_tab(residuals_df: pd.DataFrame):
+def get_scalar_features(
+    results_dir: Path, site_int: str, site_obs: Sequence[str], event: str
+):
+    metadata = _get_metadata(results_dir)
+    site_df = get_site_df(results_dir)
+    dist_df = get_dist_matrix(results_dir)
+    record_df = get_record_df(results_dir)
+    event_angular_distances = get_event_angular_distances(results_dir)
 
-    mean = residuals_df.loc[:, sr.constants.PSA_KEYS].mean(axis=0)
-    std = residuals_df.loc[:, sr.constants.PSA_KEYS].std(axis=0)
+    site_int_features = (
+        site_df.loc[site_int, metadata["data"]["features"]["site_features"]]
+        .copy()
+        .to_frame()
+        .T
+    )
+    site_int_features["r_rup"] = (
+        record_df.loc[(record_df.event_id == event)]
+        .set_index("site_id")
+        .loc[site_int, "r_rup"]
+    )
+    dfs = [site_int_features]
 
+    for cur_site_obs in site_obs:
+        cur_scalar_features_df = site_df.loc[
+            [cur_site_obs], metadata["data"]["features"]["site_features"]
+        ].copy()
+        cur_scalar_features_df["r_rup"] = (
+            record_df.loc[(record_df.event_id == event)]
+            .set_index("site_id")
+            .loc[cur_site_obs, "r_rup"]
+        )
+        cur_scalar_features_df["site_to_site_distance"] = dist_df.loc[
+            site_int, cur_site_obs
+        ]
+        cur_scalar_features_df["angular_distance"] = event_angular_distances[event].loc[
+            site_int, cur_site_obs
+        ]
+
+        dfs.append(cur_scalar_features_df)
+
+    return pd.concat(dfs, axis=0)
+
+
+def _run_res_tab(residuals_df: pd.DataFrame, best_sim_res_df: pd.DataFrame):
+    ### Model based residual
     st.markdown(
         """
-        ### Residuals
-        Residuals between the best realisation (based on model predictions) and the observations at the site of interest.
+        ### Model Residuals
+        Residuals between the best realisation (based on model predictions) and 
+        the observations at the site of interest.
         """
     )
+
+    model_mean = residuals_df.loc[:, sr.constants.PSA_KEYS].mean(axis=0)
+    model_std = residuals_df.loc[:, sr.constants.PSA_KEYS].std(axis=0)
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -544,7 +603,7 @@ def _run_res_tab(residuals_df: pd.DataFrame):
 
     ax.semilogx(
         sr.constants.PERIODS,
-        mean,
+        model_mean,
         c="b",
         label="Mean",
         marker="o",
@@ -552,9 +611,116 @@ def _run_res_tab(residuals_df: pd.DataFrame):
         markersize=2.5,
     )
     ax.semilogx(
-        sr.constants.PERIODS, mean + std, c="b", linestyle="--", label="Std"
+        sr.constants.PERIODS, model_mean + model_std, c="b", linestyle="--", label="Std"
     )
-    ax.semilogx(sr.constants.PERIODS, mean - std, c="b", linestyle="--")
+    ax.semilogx(sr.constants.PERIODS, model_mean - model_std, c="b", linestyle="--")
+
+    ax.set_xlabel("Period")
+    ax.set_ylabel("pSA")
+    ax.set_xlim(0.01, 10.0)
+    ax.set_ylim(-2.0, 2.0)
+    ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.legend()
+    fig.tight_layout()
+
+    st.pyplot(fig, use_container_width=False)
+
+    ### Best simulation residual
+    st.markdown(
+        """
+        ### Simulation Residuals
+        Residuals between the best realisation and 
+        the observations at the site of interest.
+        """
+    )
+
+    record_keys = np.asarray(
+        list(residuals_df.groupby(["event_id", "site_int"]).groups.keys())
+    )
+    record_ids = mlt.array_utils.numpy_str_join(
+        "_", record_keys[:, 0], record_keys[:, 1]
+    )
+
+    best_sim_res_df = best_sim_res_df.loc[record_ids]
+
+    sim_mean = best_sim_res_df.loc[:, sr.constants.PSA_KEYS].mean(axis=0)
+    sim_std = best_sim_res_df.loc[:, sr.constants.PSA_KEYS].std(axis=0)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for _, cur_row in best_sim_res_df.iterrows():
+        ax.semilogx(
+            sr.constants.PERIODS,
+            cur_row.loc[sr.constants.PSA_KEYS].values,
+            c="gray",
+            alpha=0.5,
+            linewidth=1.0,
+        )
+
+    ax.semilogx(
+        sr.constants.PERIODS,
+        sim_mean,
+        c="b",
+        label="Mean",
+        marker="o",
+        linestyle="-",
+        markersize=2.5,
+    )
+    ax.semilogx(
+        sr.constants.PERIODS, sim_mean + sim_std, c="b", linestyle="--", label="Std"
+    )
+    ax.semilogx(sr.constants.PERIODS, sim_mean - sim_std, c="b", linestyle="--")
+
+    ax.set_xlabel("Period")
+    ax.set_ylabel("pSA")
+    ax.set_xlim(0.01, 10.0)
+    ax.set_ylim(-2.0, 2.0)
+    ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.legend()
+    fig.tight_layout()
+
+    st.pyplot(fig, use_container_width=False)
+
+    ### Comparison
+    st.markdown("### Comparison")
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    ax.semilogx(
+        sr.constants.PERIODS,
+        sim_mean,
+        c="b",
+        label="Best Realisation - Mean",
+        marker="o",
+        linestyle="-",
+        markersize=2.5,
+    )
+    ax.semilogx(
+        sr.constants.PERIODS,
+        sim_mean + sim_std,
+        c="b",
+        linestyle="--",
+        label="Best Realisation - Std",
+    )
+    ax.semilogx(sr.constants.PERIODS, sim_mean - sim_std, c="b", linestyle="--")
+
+    ax.semilogx(
+        sr.constants.PERIODS,
+        model_mean,
+        c="r",
+        label="Best Model Realisation - Mean",
+        marker="o",
+        linestyle="-",
+        markersize=2.5,
+    )
+    ax.semilogx(
+        sr.constants.PERIODS,
+        model_mean + model_std,
+        c="r",
+        linestyle="--",
+        label="Best Model Realisation - Std",
+    )
+    ax.semilogx(sr.constants.PERIODS, model_mean - model_std, c="r", linestyle="--")
 
     ax.set_xlabel("Period")
     ax.set_ylabel("pSA")
@@ -570,13 +736,14 @@ def _run_res_tab(residuals_df: pd.DataFrame):
 def run_agg_single(cur_results_dir):
 
     train_residuals, val_residuals = _load_sample_residuals(cur_results_dir)
+    best_sim_residuals = _get_sim_residuals(cur_results_dir)
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
-        _run_res_tab(train_residuals)
+        _run_res_tab(train_residuals, best_sim_residuals)
     with val_tab:
-        _run_res_tab(val_residuals)
+        _run_res_tab(val_residuals, best_sim_residuals)
 
     pass
 
@@ -590,6 +757,8 @@ def _scenario_viewer(
     event_df = get_event_df(results_dir)
     obs_df = get_obs_df(results_dir)
     sim_df = get_sim_df(results_dir)
+
+    best_rel_df = _get_sim_residuals(results_dir)
 
     col1, col2 = st.columns([1, 6])
 
@@ -615,6 +784,9 @@ def _scenario_viewer(
             ),
             key=f"scenario_{tab_type}_high_rel",
         )
+
+        st.markdown(f"Magnitude: {event_df.loc[event].mag}")
+
     with col2:
         fig = _create_event_map(event, site_df, results_df, event_df, site_int)
         st.plotly_chart(fig, use_container_width=True)
@@ -634,7 +806,9 @@ def _scenario_viewer(
         .sum()
         .sort_values("weight", ascending=False)
     )
-    best_rel = weighted_rels.index[0]
+    best_model_rel = weighted_rels.index[0]
+
+    best_rel = best_rel_df.loc[(best_rel_df.event_id == event) & (best_rel_df.site_id == site_int)].rel_id.values[0]
 
     # Get the relevant data
     site_int_obs = (
@@ -650,26 +824,36 @@ def _scenario_viewer(
     fig, ax = _create_pSA_plot(
         site_int_obs.loc[sr.constants.PSA_KEYS].values,
         site_int_sims,
+        best_model_rel,
         best_rel,
         high_rel,
         "Site of Interest",
     )
     st.pyplot(fig, use_container_width=False)
 
-    col1, col2 = st.columns(2)
+    obs_sites = (
+        results_df.loc[
+            (results_df.event_id == event) & (results_df.site_int == site_int)
+        ]
+        .site_obs.unique()
+        .astype(str)
+    )
+    cur_scalar_features_df = get_scalar_features(
+        results_dir, site_int, obs_sites, event
+    )
+
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.dataframe(weighted_rels)
     with col2:
+        st.dataframe(cur_scalar_features_df)
+    with col3:
         st.dataframe(cur_rank_df.drop(columns=["rank", "comps_won"]))
 
     # Observation site plots
     site_obs = st.selectbox(
         "Observation Site",
-        results_df.loc[
-            (results_df.event_id == event) & (results_df.site_int == site_int)
-        ]
-        .site_obs.unique()
-        .astype(str),
+        obs_sites,
         key=f"scenario_{tab_type}_site_obs",
     )
 
@@ -685,6 +869,7 @@ def _scenario_viewer(
     fig, ax = _create_pSA_plot(
         site_int_obs.loc[sr.constants.PSA_KEYS].values,
         site_obs_sims,
+        best_model_rel,
         best_rel,
         high_rel,
         "Observation Site",
@@ -696,6 +881,7 @@ def _scenario_viewer(
 def _create_pSA_plot(
     site_int_obs_values: np.ndarray,
     sim_rels: pd.DataFrame,
+    best_model_rel: str = None,
     best_rel: str = None,
     high_rel: str = None,
     title: str = None,
@@ -705,10 +891,12 @@ def _create_pSA_plot(
     fig, ax = plt.subplots(figsize=(12, 6))
     for ix, (cur_id, cur_row) in enumerate(sim_rels.iterrows()):
         cur_label, c = None, "gray"
-        if cur_row.rel_id == best_rel:
-            cur_label, c = best_rel, "g"
+        if cur_row.rel_id == best_model_rel:
+            cur_label, c = f"Best Model Rel: {best_model_rel}", "g"
         if high_rel == cur_row.rel_id:
-            cur_label, c = best_rel, "orange"
+            cur_label, c = f"Highlighted Rel: {high_rel}", "orange"
+        if best_rel == cur_row.rel_id:
+            cur_label, c = f"Best Rel: {best_rel}", "m"
         if cur_label is None and label is None:
             cur_label = label = r"$IM^{sim}_s$"
 
@@ -766,13 +954,15 @@ def run_ind_scenario(results_dir):
 
 def run_agg_scenario(results_dir):
     train_residuals, val_residuals = _load_scenario_residuals(results_dir)
+    best_sim_residuals = _get_sim_residuals(results_dir)
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
-        _run_res_tab(train_residuals)
+        _run_res_tab(train_residuals, best_sim_residuals)
     with val_tab:
-        _run_res_tab(val_residuals)
+        _run_res_tab(val_residuals, best_sim_residuals)
+
 
 def main(results_dir: Path):
     st.set_page_config(layout="wide")
@@ -814,12 +1004,14 @@ def main(results_dir: Path):
         run_ind_samples(cur_results_dir)
 
     with ind_scenario_tab:
+        # pass
         run_ind_scenario(cur_results_dir)
 
     with agg_single_tab:
         run_agg_single(cur_results_dir)
 
     with agg_scenario_tab:
+        # pass
         run_agg_scenario(cur_results_dir)
 
 
