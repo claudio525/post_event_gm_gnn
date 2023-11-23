@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, Sequence, List
-from collections import deque
 
 import torch
 from torch import nn

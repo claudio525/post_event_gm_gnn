@@ -121,15 +121,6 @@ class ResponseSpectrumSimModel(nn.Module):
         return self.fc_layers(rs_conv_out)
 
 
-class SimpleWeightModel(nn.Module):
-    def __init__(self, n_periods: int):
-        super().__init__()
-        self.linear = nn.Linear(1, n_periods)
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        return self.sigmoid(self.linear(x))
-
 
 class ExpWeightModel(nn.Module):
     """
@@ -170,8 +161,8 @@ class ExpWeightModel(nn.Module):
         return result
 
 
-class MLPWeightModel(nn.Module):
-    def __init__(self, n_periods: int, units: Sequence[int], n_scalar_inputs: int):
+class MLPModel(nn.Module):
+    def __init__(self, n_outputs: int, units: Sequence[int], n_scalar_inputs: int):
         super().__init__()
         self.units = units
         self.layers = nn.Sequential()
@@ -181,8 +172,7 @@ class MLPWeightModel(nn.Module):
             else:
                 self.layers.append(nn.Linear(units[i - 1], units[i]))
             self.layers.append(nn.ELU())
-        self.layers.append(nn.Linear(units[-1], n_periods))
-        self.sigmoid = nn.Sigmoid()
+        self.layers.append(nn.Linear(units[-1], n_outputs))
 
     def forward(self, x):
-        return self.sigmoid(self.layers(x))
+        return self.layers(x)

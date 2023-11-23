@@ -5,12 +5,9 @@ import torch
 import numpy as np
 import pandas as pd
 import typer
-from scipy.cluster import hierarchy
-from scipy.spatial import distance
-from plotly import graph_objects as go
+
 
 import sim_ranking as sr
-import spatial_hazard as sh
 
 from sim_ranking.ml import pairwise as pr
 

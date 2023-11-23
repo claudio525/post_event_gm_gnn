@@ -6,6 +6,10 @@ from pyproj import Transformer
 from sklearn.preprocessing import minmax_scale
 
 
+def pre_process_dist(dist_array: np.ndarray, max_dist: float):
+    return ((dist_array / max_dist) * 2) - 1
+
+
 def compute_angular_distance(
     station_df: pd.DataFrame,
     event_df: pd.DataFrame,
@@ -178,3 +182,5 @@ def compute_scalar_features(
     )
 
     return site_to_site_features, event_site_features, event_site_to_site_features
+
+
