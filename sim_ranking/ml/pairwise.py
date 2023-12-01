@@ -104,6 +104,7 @@ class PairDataset(Dataset):
         pSA_mean: np.ndarray,
         pSA_std: np.ndarray,
         max_n_rels: int,
+        sim_corr_dir: Path = None,
     ):
         self.db = db
         self.event_sites = event_sites
@@ -155,10 +156,13 @@ class PairDataset(Dataset):
         # obs: (n_sites, n_periods)
         # sim: (n_sites, n_periods, n_rels)
         # And create the residual area scores
-        # format: (n_sites, n_rels)
+        #   format: (n_sites, n_rels)
+        # And get the spatial correlations
+        #   format: (n_sites, n_sites, n_ims)
         self.obs_pSA = {}
         self.sim_pSA = {}
         self.res_area = {}
+        self.corr = {}
         for cur_event, cur_sites in event_sites.items():
             # Observed
             cur_obs_df = db.get_obs_data(cur_event, cur_sites)
@@ -201,6 +205,20 @@ class PairDataset(Dataset):
             self.sim_pSA[cur_event] = (
                 cur_sim_data - self.pSA_mean[self.pSA_keys].values[None, :, None]
             ) / self.pSA_std[self.pSA_keys].values[None, :, None]
+
+            # Get the (absolute) spatial correlations
+            cur_corrs_values = np.ones(
+                (cur_sites.size, cur_sites.size, len(constants.PSA_KEYS))
+            )
+            if sim_corr_dir is not None:
+                cur_corrs = pd.read_pickle(sim_corr_dir / f"{cur_event}.pickle")
+                for ix, cur_im in enumerate(constants.PSA_KEYS):
+                    cur_corr_df = cur_corrs.get_im_corrs(cur_im)
+                    cur_corrs_values[:, :, ix] = np.abs(
+                        cur_corr_df.loc[cur_sites, cur_sites].values
+                    )
+
+            self.corr[cur_event] = cur_corrs_values
 
     def __len__(self):
         return int(np.sum(self.n_samples_event))
@@ -280,7 +298,7 @@ class PairDataset(Dataset):
             self.obs_pSA[event][site_obs_ix],
             self.res_area[event][site_int_ix, rel_1_ix],
             self.res_area[event][site_int_ix, rel_2_ix],
-            # self.obs_pSA[event][site_int_ix],
+            self.corr[event][site_int_ix, site_obs_ix, :],
         )
 
 
@@ -300,6 +318,7 @@ def compute_loss(
     pred: torch.Tensor,
     res_area_1: torch.Tensor,
     res_area_2: torch.Tensor,
+    site_correlations: torch.Tensor,
     device: str,
     reduce: bool = True,
 ):
@@ -310,15 +329,22 @@ def compute_loss(
     res_diff = torch.abs(res_area_1 - res_area_2).to(device, dtype=torch.float32)
 
     # Compute and normalize the sample weights
-    cur_weights = 1 - torch.exp(-0.075 * res_diff) + 0.05
-    cur_weights = cur_weights * (cur_weights.shape[0] / cur_weights.sum())
+    res_weights = 1 - torch.exp(-0.075 * res_diff) + 0.05
+    # res_weights = res_weights * (res_weights.shape[0] / res_weights.sum())
 
-    weighted_loss_value = cur_weights * loss_value.ravel()
+    # Compute site-correlation weights
+    site_weights = torch.mean(site_correlations.to(device, dtype=torch.float32), dim=1)
+    # site_weights = site_weights * (site_weights.shape[0] / site_weights.sum())
+
+    sample_weights = site_weights * res_weights
+    sample_weights = sample_weights * (sample_weights.shape[0] / sample_weights.sum())
+
+    weighted_loss_value = sample_weights * loss_value.ravel()
 
     if reduce:
-        return loss_value.mean(), weighted_loss_value.mean(), true, cur_weights
+        return loss_value.mean(), weighted_loss_value.mean(), true, sample_weights
 
-    return loss_value, weighted_loss_value, true, cur_weights
+    return loss_value, weighted_loss_value, true, sample_weights
 
 
 def train(
@@ -333,9 +359,11 @@ def train(
         "bce_loss_hist_train": torch.zeros(hp_config.n_epochs),
         "loss_hist_train": torch.zeros(hp_config.n_epochs),
         "acc_hist_train": torch.zeros(hp_config.n_epochs),
+        "weighted_acc_hist_train": torch.zeros(hp_config.n_epochs),
         "bce_loss_hist_val": torch.zeros(hp_config.n_epochs),
         "loss_hist_val": torch.zeros(hp_config.n_epochs),
         "acc_hist_val": torch.zeros(hp_config.n_epochs),
+        "weighted_acc_hist_val": torch.zeros(hp_config.n_epochs),
     }
 
     best_epoch_key = "loss_hist_val"
@@ -380,6 +408,7 @@ def train(
             obs_obs_pSA,
             res_area_rel_1,
             res_area_rel_2,
+            site_correlations,
         ) in enumerate(iter_loop):
 
             pred = get_prediction(
@@ -393,8 +422,8 @@ def train(
                 device,
             )
 
-            bce_loss_value, cur_weighted_bce_loss_value, true, _ = compute_loss(
-                loss, pred, res_area_rel_1, res_area_rel_2, device
+            bce_loss_value, cur_weighted_bce_loss_value, true, sample_weights = compute_loss(
+                loss, pred, res_area_rel_1, res_area_rel_2, site_correlations, device
             )
             cur_loss_value = cur_weighted_bce_loss_value
 
@@ -410,7 +439,9 @@ def train(
                 .sum()
                 .item()
             )
-            metrics["acc_hist_train"][epoch_ix] += n_correct
+            correct = ((torch.nn.functional.sigmoid(pred) >= 0.5).float() == true).ravel()
+            metrics["acc_hist_train"][epoch_ix] += correct.sum().item()
+            metrics["weighted_acc_hist_train"][epoch_ix] += sample_weights[correct].sum().item()
 
             iter_loop.set_postfix(
                 {"loss": cur_loss_value.item(), "acc": n_correct / pred.size(0)}
@@ -419,6 +450,7 @@ def train(
         metrics["loss_hist_train"][epoch_ix] /= len(train_dataloader)
         metrics["bce_loss_hist_train"][epoch_ix] /= len(train_dataloader)
         metrics["acc_hist_train"][epoch_ix] /= len(train_dataloader.dataset)
+        metrics["weighted_acc_hist_train"][epoch_ix] /= len(train_dataloader.dataset)
 
         # Validation
         with torch.no_grad():
@@ -433,6 +465,7 @@ def train(
                 obs_obs_pSA,
                 res_area_rel_1,
                 res_area_rel_2,
+                site_correlations,
             ) in enumerate(val_dataloader):
 
                 pred = get_prediction(
@@ -446,24 +479,27 @@ def train(
                     device,
                 )
 
-                bce_loss_value, cur_weighted_bce_loss_value, true, _ = compute_loss(
-                    loss, pred, res_area_rel_1, res_area_rel_2, device
+                bce_loss_value, cur_weighted_bce_loss_value, true, sample_weights = compute_loss(
+                    loss,
+                    pred,
+                    res_area_rel_1,
+                    res_area_rel_2,
+                    site_correlations,
+                    device,
                 )
                 cur_loss_value = cur_weighted_bce_loss_value
 
                 metrics["loss_hist_val"][epoch_ix] += cur_loss_value.item()
                 metrics["bce_loss_hist_val"][epoch_ix] += bce_loss_value.item()
 
-                n_correct = (
-                    ((torch.nn.functional.sigmoid(pred) >= 0.5).float() == true)
-                    .sum()
-                    .item()
-                )
-                metrics["acc_hist_val"][epoch_ix] += n_correct
+                correct = ((torch.nn.functional.sigmoid(pred) >= 0.5).float() == true).ravel()
+                metrics["acc_hist_val"][epoch_ix] += correct.sum().item()
+                metrics["weighted_acc_hist_val"][epoch_ix] += sample_weights[correct].sum().item()
 
             metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
             metrics["bce_loss_hist_val"][epoch_ix] /= len(val_dataloader)
             metrics["acc_hist_val"][epoch_ix] /= len(val_dataloader.dataset)
+            metrics["weighted_acc_hist_val"][epoch_ix] /= len(val_dataloader.dataset)
 
             # Keep track of the best model
             if metrics[best_epoch_key][epoch_ix] < best_val_loss:
@@ -474,11 +510,13 @@ def train(
         print(f"Epoch {epoch_ix + 1}/{hp_config.n_epochs}")
         print(
             f"\tTraining - Loss: {metrics['loss_hist_train'][epoch_ix]:.4f}, "
+            f"Weighted Accuracy: {metrics['weighted_acc_hist_train'][epoch_ix]:.4f}, "
             f"Accuracy: {metrics['acc_hist_train'][epoch_ix]:.4f}, "
             f"BCELoss: {metrics['bce_loss_hist_train'][epoch_ix]:.4f}"
         )
         print(
             f"\tValidation - Loss: {metrics['loss_hist_val'][epoch_ix]:.4f}, "
+            f"Weighted Accuracy: {metrics['weighted_acc_hist_val'][epoch_ix]:.4f}, "
             f"Accuracy: {metrics['acc_hist_val'][epoch_ix]:.4f}, "
             f"BCELoss: {metrics['bce_loss_hist_val'][epoch_ix]:.4f}"
         )
@@ -535,6 +573,7 @@ def get_dataset_predictions(
             obs_obs_pSA,
             res_area_rel_1,
             res_area_rel_2,
+            site_correlations,
         ) in enumerate(pred_dataloader):
             pred = get_prediction(
                 ranking_model,
@@ -547,7 +586,13 @@ def get_dataset_predictions(
                 device,
             )
             bce_loss_value, weighted_loss_value, true, weights = compute_loss(
-                loss, pred, res_area_rel_1, res_area_rel_2, device, reduce=False
+                loss,
+                pred,
+                res_area_rel_1,
+                res_area_rel_2,
+                site_correlations,
+                device,
+                reduce=False,
             )
 
             meta_df = pd.DataFrame(
@@ -835,6 +880,7 @@ def data_prep(
     events: np.ndarray,
     run_config: RunParamsConfig,
     db: DB,
+    sim_corr_dir: Path = None,
 ):
     ### Constants
     # Scalar features
@@ -941,6 +987,7 @@ def data_prep(
         pSA_mean,
         pSA_std,
         run_config.max_n_rels,
+        sim_corr_dir=sim_corr_dir,
     )
 
     val_dataset = PairDataset(
@@ -953,6 +1000,7 @@ def data_prep(
         pSA_mean,
         pSA_std,
         run_config.max_n_rels,
+        sim_corr_dir=sim_corr_dir,
     )
 
     metadata = {

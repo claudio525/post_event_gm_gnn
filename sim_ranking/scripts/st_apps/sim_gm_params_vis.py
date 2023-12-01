@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import pandas as pd
@@ -18,13 +17,16 @@ import sim_ranking as sr
 
 @st.cache_data
 def get_avail_ims(sim_site_corr_dir: Path, event: str):
-    sim_site_corrs = load_sim_site_correlations(sim_site_corr_dir, event)
-    return sim_site_corrs.ims
+    return sr.constants.PSA_KEYS
+    # sim_site_corrs = load_sim_site_correlations(sim_site_corr_dir, event)
+    # return sim_site_corrs.ims
 
 
 @st.cache_data
 def load_sim_site_correlations(sim_site_corr_dir: Path, event: str):
-    sim_site_corrs = sr.data.SiteCorrelations.load(sim_site_corr_dir / f"{event}.pickle")
+    sim_site_corrs = sr.data.SiteCorrelations.load(
+        sim_site_corr_dir / f"{event}.pickle"
+    )
 
     return sim_site_corrs
 
@@ -47,24 +49,22 @@ def load_site_df(ll_ffp: Path):
     )
 
 
-def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
+def get_site_df(db_ffp: Path):
+    db = sr.db.DB(db_ffp)
+    return db.get_site_df()
+
+
+def main(sim_site_corr_dir: Path, sim_gm_params_dir: Path, db_ffp: Path):
+
     st_utils.update_st_width(1600, 2, 0, 1, 1)
 
-    if sim_site_corr_dir is None:
-        sim_site_corr_dir = Path(os.path.expandvars("$wdata/sim_ranking/sim_correlations"))
-    if sim_gm_params_dir is None:
-        sim_gm_params_dir = Path(os.path.expandvars("$wdata/sim_ranking/sim_gm_params"))
-
-    ll_ffp = Path(
-        os.path.expandvars("$wdata/gm_hazard/sites/23p1/non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.ll")
-    )
-    site_df = load_site_df(ll_ffp)
+    site_df = get_site_df(db_ffp)
 
     avail_events = [
         cur_ffp.stem
-        for cur_ffp in sim_site_corr_dir.iterdir() if not cur_ffp.stem.startswith("_")
+        for cur_ffp in sim_site_corr_dir.iterdir()
+        if not cur_ffp.stem.startswith("_")
     ]
-
 
     # Event & IM selection
     col_1, col_2 = st.columns(2)
@@ -80,10 +80,19 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
     sim_gm_params = load_sim_gm_params(sim_gm_params_dir, event)
 
     sites = cur_sim_site_corrs.index.values.astype(str)
+    sites = np.intersect1d(sites, site_df.index.values.astype(str))
+
+    cur_sim_site_corrs = cur_sim_site_corrs.loc[sites, sites]
     dist_matrix = sh.im_dist.calculate_distance_matrix(sites, site_df)
 
+    assert np.all(dist_matrix.index == cur_sim_site_corrs.index) and np.all(
+        dist_matrix.columns == cur_sim_site_corrs.columns
+    )
+
     st.markdown(f"# {event}")
-    corr_tab, site_tab, residuals_tab = st.tabs(["Correlations General", "Site-Specific Correlations", "Residuals"])
+    corr_tab, site_tab, residuals_tab = st.tabs(
+        ["Correlations General", "Site-Specific Correlations", "Residuals"]
+    )
 
     ### Correlation
     with corr_tab:
@@ -114,50 +123,127 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
                 lb_phi = 0.6
             else:
                 lb_phi = 0.55
-            lb_updated = (loth_baker_vals * lb_phi**2 + lb_tau**2) / np.sqrt(lb_phi**2 + lb_tau**2)
+            lb_updated = (loth_baker_vals * lb_phi ** 2 + lb_tau ** 2) / np.sqrt(
+                lb_phi ** 2 + lb_tau ** 2
+            )
+
+            # Compute the moving average
+            sim_avg_values = []
+            sim_std_values = []
+            n_bins = 10
+            bins = np.logspace(np.log10(1), np.log10(200), n_bins)
+            bin_inds = np.digitize(dist_matrix.values[lower_tri_mask], bins)
+            for ix in np.unique(bin_inds):
+                if ix == 0 or ix == n_bins:
+                    continue
+
+                cur_mask = bin_inds == ix
+                sim_avg_values.append(
+                    np.mean(cur_sim_site_corrs.values[lower_tri_mask][cur_mask])
+                )
+                sim_std_values.append(
+                    np.std(cur_sim_site_corrs.values[lower_tri_mask][cur_mask])
+                )
+
+            sim_avg_values = np.asarray(sim_avg_values)
+            sim_std_values = np.asarray(sim_std_values)
+            bin_centres = np.asarray(
+                [np.mean(bins[i : i + 2]) for i in range(n_bins - 1)]
+            )
 
             fig = plt.figure(figsize=(10, 6))
             plt.scatter(
                 dist_matrix.values[lower_tri_mask],
                 cur_sim_site_corrs.values[lower_tri_mask],
                 s=1.0,
-                alpha=0.75
+                alpha=0.75,
             )
-            plt.plot(dist, loth_baker_vals, c="k", linewidth=1.0)
-            plt.plot(dist, lb_updated, c="k", linestyle="--", linewidth=1.0)
+            plt.semilogx(dist, loth_baker_vals, c="k", linewidth=1.0)
+            plt.semilogx(dist, lb_updated, c="k", linestyle="--", linewidth=1.0)
 
+            plt.semilogx(
+                bin_centres,
+                sim_avg_values,
+                c="r",
+                linewidth=1.0,
+                label="Simulation Average & Standard Deviation",
+            )
+            plt.semilogx(
+                bin_centres,
+                sim_avg_values + sim_std_values,
+                c="r",
+                linewidth=1.0,
+                linestyle="--",
+            )
+            plt.semilogx(
+                bin_centres,
+                sim_avg_values - sim_std_values,
+                c="r",
+                linewidth=1.0,
+                linestyle="--",
+            )
 
             plt.xlabel(f"Distance (km)")
             plt.ylabel(f"Site-Correlation")
             plt.ylim(-1.0, 1.0)
-            plt.xlim(0.0, 100)
+            plt.xlim(1.0, 200)
             plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
             plt.tight_layout()
 
             st.pyplot(fig)
 
-            with st.expander("**Difference**"):
-                st.markdown(
-                    r"$\Delta_{\hat{\rho}_{i, j, e}} = "
-                    r"\hat{\rho}_{i, j, e}^{(Simulation)} - "
-                    r"\hat{\rho}_{i, j}^{(Empirical)}$"
-                )
-
-                fig = plt.figure(figsize=(8, 6))
-
-                plt.scatter(
-                    dist_matrix.values[lower_tri_mask], corr_diff.values[lower_tri_mask], s=1.0
-                )
-                plt.xlabel(f"Site-to-Site Distance (km)")
-                plt.ylabel(r"Correlation difference, $\Delta_{\hat{\rho}_{i, j, e}}$")
-                plt.ylim(-1.0, 1.0)
-                plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-                plt.tight_layout()
-
-                plt.tight_layout()
-                st.pyplot(fig)
         else:
             st.markdown(f"No empirical model for {im} available")
+
+        st.markdown("### pSA correlation")
+        max_dist = st.slider("Max Distance (km)", 0, 300,10, 1)
+
+        mean_values = {}
+        std_values = {}
+        for cur_im in avail_ims:
+            cur_corr = sim_site_corrs.to_im_dict()[cur_im].loc[sites, sites]
+            cur_corr = cur_corr.values[
+                (dist_matrix <= max_dist).values & lower_tri_mask
+            ]
+
+            mean_values[cur_im] = np.mean(cur_corr)
+            std_values[cur_im] = np.std(cur_corr)
+
+        mean_df = pd.Series(mean_values)
+        std_df = pd.Series(std_values)
+
+        fig = plt.figure(figsize=(10, 6))
+
+        plt.semilogx(
+            sr.constants.PERIODS,
+            mean_df,
+            label=f"{max_dist} km",
+            c="b"
+        )
+        plt.semilogx(
+            sr.constants.PERIODS,
+            mean_df.loc[sr.constants.PSA_KEYS]
+            + std_df.loc[sr.constants.PSA_KEYS],
+            c="b",
+            linestyle="--",
+        )
+        plt.semilogx(
+            sr.constants.PERIODS,
+            mean_df.loc[sr.constants.PSA_KEYS]
+            - std_df.loc[sr.constants.PSA_KEYS],
+            c="b",
+            linestyle="--",
+        )
+
+        plt.xlabel("Period (s)")
+        plt.ylabel("Site-Correlation")
+        plt.ylim(-1.0, 1.0)
+        plt.xlim(0.01, 10)
+        plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        plt.legend()
+        plt.tight_layout()
+
+        st.pyplot(fig, use_container_width=False)
 
     ### Site specific correlations
     with site_tab:
@@ -206,13 +292,17 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
 
         ### Site-specific within-event residuals
         with st.expander("IM specific"):
-            st.markdown(f"""
+            st.markdown(
+                f"""
             ### Within-event residuals for two sites
             Figure shows the {im} within-event residuals for the two selected sites {site_1} and {site_2}.
-            """)
+            """
+            )
             fig = plt.figure(figsize=(8, 4.5))
 
-            plt.plot([-3.5, 3.5], [-3.5, 3.5], c="k", linewidth=0.75, alpha=1.0, zorder=0)
+            plt.plot(
+                [-3.5, 3.5], [-3.5, 3.5], c="k", linewidth=0.75, alpha=1.0, zorder=0
+            )
             plt.scatter(
                 site_1_residuals[im],
                 site_2_residuals[im],
@@ -234,14 +324,14 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
 
         ### Correlation coefficient as function of period
         with st.expander("pSA"):
-            st.markdown(f"""
+            st.markdown(
+                f"""
             ### Correlation coefficient as function of period for **{site_1}** and **{site_2}**
             Figure shows the correlation coefficient as a function of period for the two selected sites {site_1} and {site_2}.
-            """)
+            """
+            )
             pSA_keys = [
-                cur_im
-                for cur_im in sim_site_corrs.ims
-                if cur_im.startswith("pSA")
+                cur_im for cur_im in sim_site_corrs.ims if cur_im.startswith("pSA")
             ]
 
             periods = [float(cur_key.split("_")[-1]) for cur_key in pSA_keys]
@@ -249,7 +339,9 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
             periods = np.array(periods)[sort_ind]
             pSA_keys = np.array(pSA_keys)[sort_ind]
 
-            period_sim_corr_values = sim_site_corrs.get_site_im_corrs(site_1, pSA_keys).loc[site_2, :]
+            period_sim_corr_values = sim_site_corrs.get_site_im_corrs(
+                site_1, pSA_keys
+            ).loc[site_2, :]
 
             # period_sim_corr_values = [
             #     sim_site_corrs.corrs[cur_im].loc[site_1, site_2]
@@ -290,14 +382,18 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
 
             if sim_gm_params.event_residuals is not None:
                 # Between-event residuals
-                st.markdown("""
+                st.markdown(
+                    """
                 ## Between-Event Residuals
                 Shows the between-event residuals for each realisation (gray lines), the mean, and $\\tau$.
-                """)
+                """
+                )
                 fig = plt.figure(figsize=(8, 4.5))
 
                 for cur_rel, cur_row in sim_gm_params.event_residuals.iterrows():
-                    plt.semilogx(periods, cur_row.loc[pSA_keys], c="k", alpha=0.1, linewidth=0.5)
+                    plt.semilogx(
+                        periods, cur_row.loc[pSA_keys], c="k", alpha=0.1, linewidth=0.5
+                    )
 
                 plt.semilogx(
                     periods,
@@ -305,13 +401,25 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
                     c="b",
                     linewidth=1.0,
                 )
-                plt.semilogx(periods, sim_gm_params.event_residuals.loc[:, pSA_keys].mean() +
-                             sim_gm_params.bias_std.tau.loc[pSA_keys], c="b", linewidth=0.75, linestyle="--")
-                plt.semilogx(periods, sim_gm_params.event_residuals.loc[:, pSA_keys].mean() -
-                                sim_gm_params.bias_std.tau.loc[pSA_keys], c="b", linewidth=0.75, linestyle="--")
+                plt.semilogx(
+                    periods,
+                    sim_gm_params.event_residuals.loc[:, pSA_keys].mean()
+                    + sim_gm_params.bias_std.tau.loc[pSA_keys],
+                    c="b",
+                    linewidth=0.75,
+                    linestyle="--",
+                )
+                plt.semilogx(
+                    periods,
+                    sim_gm_params.event_residuals.loc[:, pSA_keys].mean()
+                    - sim_gm_params.bias_std.tau.loc[pSA_keys],
+                    c="b",
+                    linewidth=0.75,
+                    linestyle="--",
+                )
 
                 plt.xlabel(f"Period (s)")
-                plt.ylabel(r"$\delta B$")
+                plt.ylabel("Between-event residual")
                 plt.xlim([0.01, 10])
                 plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
                 plt.tight_layout()
@@ -322,16 +430,22 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
                 st.markdown("No between-event residuals available")
 
             # Within-event residuals
-            st.markdown("""
+            st.markdown(
+                """
             ## Within-Event Residuals
             Shows the within-event residuals for each realisation and site (gray lines), the mean, and $\\phi$.
             Note: Only showing every 3rd record.
-            """)
+            """
+            )
             fig = plt.figure(figsize=(8, 4.5))
 
-            for i, (cur_record, cur_row) in enumerate(sim_gm_params.within_residuals.iterrows()):
+            for i, (cur_record, cur_row) in enumerate(
+                sim_gm_params.within_residuals.iterrows()
+            ):
                 if i % 3 == 0:
-                    plt.semilogx(periods, cur_row.loc[pSA_keys], c="k", alpha=0.1, linewidth=0.5)
+                    plt.semilogx(
+                        periods, cur_row.loc[pSA_keys], c="k", alpha=0.1, linewidth=0.5
+                    )
 
             plt.semilogx(
                 periods,
@@ -342,29 +456,29 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
             if sim_gm_params.bias_std is not None:
                 plt.semilogx(
                     periods,
-                    sim_gm_params.within_residuals.loc[:, pSA_keys].mean() + sim_gm_params.bias_std.phi_w.loc[pSA_keys],
+                    sim_gm_params.within_residuals.loc[:, pSA_keys].mean()
+                    + sim_gm_params.bias_std.phi_w.loc[pSA_keys],
                     c="b",
                     linewidth=0.75,
                     linestyle="--",
                 )
                 plt.semilogx(
                     periods,
-                    sim_gm_params.within_residuals.loc[:, pSA_keys].mean() - sim_gm_params.bias_std.phi_w.loc[pSA_keys],
+                    sim_gm_params.within_residuals.loc[:, pSA_keys].mean()
+                    - sim_gm_params.bias_std.phi_w.loc[pSA_keys],
                     c="b",
                     linewidth=0.75,
                     linestyle="--",
                 )
 
-
             plt.xlabel(f"Period (s)")
-            plt.ylabel(f"$\delta W$")
+            plt.ylabel("Within-event residual")
             plt.xlim([0.01, 10])
             plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
             plt.tight_layout()
 
             st.pyplot(fig, use_container_width=False)
             plt.close(fig)
-
 
         with st.expander("IM specific"):
             if sim_gm_params.event_residuals is not None:
@@ -403,7 +517,5 @@ def main(sim_site_corr_dir: Path = None, sim_gm_params_dir: Path = None):
             plt.close(fig)
 
 
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     typer.run(main)

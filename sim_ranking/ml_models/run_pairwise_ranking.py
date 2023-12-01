@@ -26,6 +26,7 @@ def train_model(
     max_dist: float = 75,
     debug: bool = False,
     max_n_rels: int = 25,
+    sim_corr_dir: Path = None,
 ):
     """Trains a single model"""
     run_config = pr.RunParamsConfig(max_dist, max_n_rels, debug, device)
@@ -51,15 +52,11 @@ def train_model(
     # Get the sites per event
     event_sites = db.get_event_sites()
 
-    # TODO: Fix this!!
+    # Split into training and validation
     np.random.seed(30)
-    # train_sites = all_sites
     val_int_sites = np.random.choice(all_sites, 100, replace=False)
     train_sites = np.setdiff1d(all_sites, val_int_sites)
-    # val_sites = all_sites
 
-    # val_events = np.asarray(["3468575"])
-    # val_events = np.asarray(["3468575", "2016p118944", "3525264", "3528839"])
     val_events = np.random.choice(events, 100, replace=False)
     train_events = np.setdiff1d(events, val_events)
 
@@ -73,6 +70,7 @@ def train_model(
         events,
         run_config,
         db,
+        sim_corr_dir=sim_corr_dir,
     )
 
     # Create the model

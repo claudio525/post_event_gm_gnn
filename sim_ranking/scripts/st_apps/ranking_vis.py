@@ -17,6 +17,9 @@ import sim_ranking as sr
 import ml_tools as mlt
 
 
+# plt.rcParams['text.usetex'] = True
+
+
 @st.cache_data
 def _get_metadata(results_dir: Path):
     return sr.data.get_meta(results_dir)
@@ -356,6 +359,7 @@ def _sample_viewer(
     event_df = get_event_df(results_dir)
     obs_df = get_obs_df(results_dir)
     sim_df = get_sim_df(results_dir)
+
     record_df = get_record_df(results_dir)
     metadata = _get_metadata(results_dir)
     event_angular_distances = get_event_angular_distances(results_dir)
@@ -445,7 +449,7 @@ def _sample_viewer(
     ax.semilogx(
         sr.constants.PERIODS,
         site_obs_obs[sr.constants.PSA_KEYS].values,
-        label=r"$IM^{obs}_i$",
+        label=r"$IM^{obs}_{i}$",
         linestyle="-",
         c="b",
     )
@@ -465,7 +469,7 @@ def _sample_viewer(
     # ax.set_ylim(-2.0, 2.0)
     ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax.legend()
-    fig.tight_layout()
+    # fig.tight_layout()
 
     st.pyplot(fig, use_container_width=False)
 
@@ -934,7 +938,7 @@ def _create_pSA_plot(
     # ax.set_ylim(-2.0, 2.0)
     ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax.legend()
-    fig.tight_layout()
+    # fig.tight_layout()
 
     return fig, ax
 

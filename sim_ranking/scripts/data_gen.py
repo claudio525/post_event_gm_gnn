@@ -39,12 +39,12 @@ def get_emp_gmm_params(
 
 
 @app.command("compute-sim-gm-params-mera")
-def get_sim_gm_params_mera(output_dir: Path, simulation_imdb_ffp: Path, data_source: str = None, n_procs: int = 1):
+def get_sim_gm_params_mera(output_dir: Path, db_ffp: Path, data_source: str = None, n_procs: int = 1):
     """
     Computes the GM parameters from the simulation data
     directly using MERA
     """
-    sim_gm_params = sr.data.compute_sim_gm_params_mera(simulation_imdb_ffp, data_source=data_source, n_procs=n_procs)
+    sim_gm_params = sr.data.compute_sim_gm_params_mera(db_ffp, data_source=data_source, n_procs=n_procs)
 
     for cur_params in sim_gm_params:
         (cur_out_dir := output_dir / cur_params.event).mkdir(exist_ok=True)
