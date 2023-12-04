@@ -50,7 +50,7 @@ class DB:
             # Read simulation IM data
             cur_im_df = pd.read_csv(cur_ffp, index_col=0)
             cur_im_df = cur_im_df.loc[cur_im_df["component"] == "rotd50"]
-            cur_df = cur_im_df.loc[:, constants.PSA_KEYS]
+            cur_df = cur_im_df.loc[:, constants.IMs]
 
             # Add extra columns and update index
             cur_df["event_id"] = cur_event_id
@@ -74,7 +74,7 @@ class DB:
             # Re-order and add to db
             cur_df = cur_df.loc[
                 :,
-                ["event_id", "rel_id", "site_id", "data_source"] + constants.PSA_KEYS,
+                ["event_id", "rel_id", "site_id", "data_source"] + constants.IMs,
             ]
             cur_df.to_sql("sim_im_data", self.con, if_exists="append")
 
@@ -88,7 +88,7 @@ class DB:
 
                 # Split into observed IM and record data
                 cur_record_df = cur_obs_df.loc[:, ["evid", "sta", "r_rup", "r_x"]]
-                cur_obs_df = cur_obs_df[["evid", "sta"] + constants.PSA_KEYS]
+                cur_obs_df = cur_obs_df[["evid", "sta"] + constants.IMs]
 
                 # Write observed IM data
                 cur_obs_df = cur_obs_df.rename(
@@ -268,16 +268,16 @@ class DB:
             "CREATE TABLE sim_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, rel_id TEXT,"
             "site_id TEXT, data_source TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
         )
-        for cur_period in constants.PERIODS:
-            cur.execute(f"ALTER TABLE sim_im_data ADD COLUMN [pSA_{cur_period}] REAL")
+        for cur_im in constants.IMs:
+            cur.execute(f"ALTER TABLE sim_im_data ADD COLUMN [{cur_im}] REAL")
 
         # Create the observed table
         cur.execute(
             "CREATE TABLE obs_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, "
             "site_id TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
         )
-        for cur_period in constants.PERIODS:
-            cur.execute(f"ALTER TABLE obs_im_data ADD COLUMN [pSA_{cur_period}] REAL")
+        for cur_im in constants.IMs:
+            cur.execute(f"ALTER TABLE obs_im_data ADD COLUMN [{cur_im}] REAL")
 
         # Create the records table
         cur.execute(

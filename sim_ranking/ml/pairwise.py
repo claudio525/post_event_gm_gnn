@@ -60,8 +60,8 @@ class HyperParamsConfig:
     l2_reg: float
     lr: float
 
-    n_channels: List[int]
-    kernel_sizes: List[int]
+    # n_channels: List[int]
+    # kernel_sizes: List[int]
     fc_units: List[int]
 
     @classmethod
@@ -74,8 +74,8 @@ class HyperParamsConfig:
             params["weight_penalty_factor"],
             params["l2_reg"],
             params["lr"],
-            params["n_channels"],
-            params["kernel_sizes"],
+            # params["n_channels"],
+            # params["kernel_sizes"],
             params["fc_units"],
         )
 
@@ -86,8 +86,8 @@ class HyperParamsConfig:
             "weight_penalty_factor": self.weight_penalty_factor,
             "l2_reg": self.l2_reg,
             "lr": self.lr,
-            "n_channels": self.n_channels,
-            "kernel_sizes": self.kernel_sizes,
+            # "n_channels": self.n_channels,
+            # "kernel_sizes": self.kernel_sizes,
             "fc_units": self.fc_units,
         }
 
@@ -98,11 +98,10 @@ class PairDataset(Dataset):
         event_sites: Dict[str, np.ndarray],
         site_combs: Dict[str, np.ndarray],
         db: DB,
-        periods: np.ndarray,
-        pSA_keys: np.ndarray,
+        ims: Sequence[str],
         scalar_features: ml_data.ScalarFeatures,
-        pSA_mean: np.ndarray,
-        pSA_std: np.ndarray,
+        ims_mean: np.ndarray,
+        ims_std: np.ndarray,
         max_n_rels: int,
         sim_corr_dir: Path = None,
     ):
@@ -112,11 +111,10 @@ class PairDataset(Dataset):
 
         self.events = np.asarray(list(event_sites.keys()))
 
-        self.periods = np.asarray(periods)
-        self.pSA_keys = np.asarray(pSA_keys)
+        self.ims = np.asarray(ims)
 
-        self.pSA_mean = pSA_mean
-        self.pSA_std = pSA_std
+        self.ims_mean = ims_mean
+        self.ims_std = ims_std
 
         self.scalar_features = scalar_features
 
@@ -152,37 +150,36 @@ class PairDataset(Dataset):
             self.events, self.event_sites, self.scalar_features
         )
 
-        # Create the (normalised) pSA inputs in the format
-        # obs: (n_sites, n_periods)
-        # sim: (n_sites, n_periods, n_rels)
+        # Create the (normalised) IM inputs in the format
+        # obs: (n_sites, n_ims)
+        # sim: (n_sites, n_ims, n_rels)
         # And create the residual area scores
         #   format: (n_sites, n_rels)
         # And get the spatial correlations
         #   format: (n_sites, n_sites, n_ims)
-        self.obs_pSA = {}
-        self.sim_pSA = {}
+        self.obs_ims = {}
+        self.sim_ims = {}
         self.res_area = {}
         self.corr = {}
         for cur_event, cur_sites in event_sites.items():
             # Observed
             cur_obs_df = db.get_obs_data(cur_event, cur_sites)
-            cur_obs_df.loc[:, constants.PSA_KEYS] = np.log(
-                cur_obs_df.loc[:, constants.PSA_KEYS]
+            cur_obs_df.loc[:, self.ims] = np.log(
+                cur_obs_df.loc[:, self.ims]
             )
 
-            # self.obs_pSA[cur_event] = cur_obs_df.loc[cur_sites, self.pSA_keys].values
-            self.obs_pSA[cur_event] = (
-                cur_obs_df.loc[cur_sites, self.pSA_keys].values
-                - self.pSA_mean[self.pSA_keys].values
-            ) / self.pSA_std[self.pSA_keys].values
+            self.obs_ims[cur_event] = (
+                cur_obs_df.loc[cur_sites, self.ims].values
+                - self.ims_mean[self.ims].values
+            ) / self.ims_std[self.ims].values
 
             # Get the simulation data
             cur_sim_df = db.get_sim_data(cur_event, cur_sites)
-            cur_sim_df.loc[:, constants.PSA_KEYS] = np.log(
-                cur_sim_df.loc[:, constants.PSA_KEYS]
+            cur_sim_df.loc[:, self.ims] = np.log(
+                cur_sim_df.loc[:, self.ims]
             )
             cur_sim_data = np.full(
-                (cur_sites.size, self.periods.size, self.n_rels_event[cur_event]),
+                (cur_sites.size, self.ims.size, self.n_rels_event[cur_event]),
                 fill_value=np.nan,
             )
 
@@ -190,29 +187,28 @@ class PairDataset(Dataset):
                 cur_rel_data = (
                     cur_sim_df.loc[cur_sim_df.rel_id == cur_rel]
                     .set_index("site_id")
-                    .loc[cur_sites, self.pSA_keys]
+                    .loc[cur_sites, self.ims]
                     .values
                 )
                 cur_sim_data[:, :, ix] = cur_rel_data
 
             # Need to compute residual area before normalizing
             cur_res_area = compute_res_score(
-                cur_obs_df.loc[cur_sites, self.pSA_keys].values, cur_sim_data
+                cur_obs_df.loc[cur_sites, self.ims].values, cur_sim_data
             )
             self.res_area[cur_event] = cur_res_area
 
-            # self.sim_pSA[cur_event] = cur_sim_data
-            self.sim_pSA[cur_event] = (
-                cur_sim_data - self.pSA_mean[self.pSA_keys].values[None, :, None]
-            ) / self.pSA_std[self.pSA_keys].values[None, :, None]
+            self.sim_ims[cur_event] = (
+                cur_sim_data - self.ims_mean[self.ims].values[None, :, None]
+            ) / self.ims_std[self.ims].values[None, :, None]
 
             # Get the (absolute) spatial correlations
             cur_corrs_values = np.ones(
-                (cur_sites.size, cur_sites.size, len(constants.PSA_KEYS))
+                (cur_sites.size, cur_sites.size, len(self.ims))
             )
             if sim_corr_dir is not None:
                 cur_corrs = pd.read_pickle(sim_corr_dir / f"{cur_event}.pickle")
-                for ix, cur_im in enumerate(constants.PSA_KEYS):
+                for ix, cur_im in enumerate(constants.IMs):
                     cur_corr_df = cur_corrs.get_im_corrs(cur_im)
                     cur_corrs_values[:, :, ix] = np.abs(
                         cur_corr_df.loc[cur_sites, cur_sites].values
@@ -291,11 +287,11 @@ class PairDataset(Dataset):
         return (
             idx,
             self.scalar_features_tensor[event][site_int_ix, site_obs_ix, :],
-            self.sim_pSA[event][site_int_ix, :, rel_1_ix],
-            self.sim_pSA[event][site_int_ix, :, rel_2_ix],
-            self.sim_pSA[event][site_obs_ix, :, rel_1_ix],
-            self.sim_pSA[event][site_obs_ix, :, rel_2_ix],
-            self.obs_pSA[event][site_obs_ix],
+            self.sim_ims[event][site_int_ix, :, rel_1_ix],
+            self.sim_ims[event][site_int_ix, :, rel_2_ix],
+            self.sim_ims[event][site_obs_ix, :, rel_1_ix],
+            self.sim_ims[event][site_obs_ix, :, rel_2_ix],
+            self.obs_ims[event][site_obs_ix],
             self.res_area[event][site_int_ix, rel_1_ix],
             self.res_area[event][site_int_ix, rel_2_ix],
             self.corr[event][site_int_ix, site_obs_ix, :],
@@ -401,11 +397,11 @@ def train(
         for i, (
             _,
             scalar_features,
-            int_sim_pSA_rel_1,
-            int_sim_pSA_rel_2,
-            obs_sim_pSA_rel_1,
-            obs_sim_pSA_rel_2,
-            obs_obs_pSA,
+            int_sim_ims_rel_1,
+            int_sim_ims_rel_2,
+            obs_sim_ims_rel_1,
+            obs_sim_ims_rel_2,
+            obs_obs_ims,
             res_area_rel_1,
             res_area_rel_2,
             site_correlations,
@@ -414,11 +410,11 @@ def train(
             pred = get_prediction(
                 ranking_model,
                 scalar_features,
-                int_sim_pSA_rel_1,
-                int_sim_pSA_rel_2,
-                obs_sim_pSA_rel_1,
-                obs_sim_pSA_rel_2,
-                obs_obs_pSA,
+                int_sim_ims_rel_1,
+                int_sim_ims_rel_2,
+                obs_sim_ims_rel_1,
+                obs_sim_ims_rel_2,
+                obs_obs_ims,
                 device,
             )
 
@@ -458,11 +454,11 @@ def train(
             for i, (
                 _,
                 scalar_features,
-                int_sim_pSA_rel_1,
-                int_sim_pSA_rel_2,
-                obs_sim_pSA_rel_1,
-                obs_sim_pSA_rel_2,
-                obs_obs_pSA,
+                int_sim_ims_rel_1,
+                int_sim_ims_rel_2,
+                obs_sim_ims_rel_1,
+                obs_sim_ims_rel_2,
+                obs_obs_ims,
                 res_area_rel_1,
                 res_area_rel_2,
                 site_correlations,
@@ -471,11 +467,11 @@ def train(
                 pred = get_prediction(
                     ranking_model,
                     scalar_features,
-                    int_sim_pSA_rel_1,
-                    int_sim_pSA_rel_2,
-                    obs_sim_pSA_rel_1,
-                    obs_sim_pSA_rel_2,
-                    obs_obs_pSA,
+                    int_sim_ims_rel_1,
+                    int_sim_ims_rel_2,
+                    obs_sim_ims_rel_1,
+                    obs_sim_ims_rel_2,
+                    obs_obs_ims,
                     device,
                 )
 
@@ -527,27 +523,27 @@ def train(
 def get_prediction(
     ranking_model: nn.Module,
     scalar_features: torch.Tensor,
-    int_sim_pSA_rel_1: torch.Tensor,
-    int_sim_pSA_rel_2: torch.Tensor,
-    obs_sim_pSA_rel_1: torch.Tensor,
-    obs_sim_pSA_rel_2: torch.Tensor,
-    obs_obs_pSA: torch.Tensor,
+    int_sim_ims_rel_1: torch.Tensor,
+    int_sim_ims_rel_2: torch.Tensor,
+    obs_sim_ims_rel_1: torch.Tensor,
+    obs_sim_ims_rel_2: torch.Tensor,
+    obs_obs_ims: torch.Tensor,
     device: str,
 ):
-    pSA_data = torch.cat(
+    im_data = torch.cat(
         (
-            int_sim_pSA_rel_1[:, None, :],
-            int_sim_pSA_rel_2[:, None, :],
-            obs_sim_pSA_rel_1[:, None, :],
-            obs_sim_pSA_rel_2[:, None, :],
-            obs_obs_pSA[:, None, :],
+            int_sim_ims_rel_1[:, None, :],
+            int_sim_ims_rel_2[:, None, :],
+            obs_sim_ims_rel_1[:, None, :],
+            obs_sim_ims_rel_2[:, None, :],
+            obs_obs_ims[:, None, :],
         ),
         dim=1,
     ).to(device, dtype=torch.float32)
 
     scalar_features = scalar_features.to(device, dtype=torch.float32)
 
-    pred = ranking_model(pSA_data, scalar_features)
+    pred = ranking_model(im_data, scalar_features)
 
     return pred
 
@@ -566,30 +562,30 @@ def get_dataset_predictions(
         for i, (
             data_ind,
             scalar_features,
-            int_sim_pSA_rel_1,
-            int_sim_pSA_rel_2,
-            obs_sim_pSA_rel_1,
-            obs_sim_pSA_rel_2,
-            obs_obs_pSA,
-            res_area_rel_1,
-            res_area_rel_2,
+            int_sim_ims_rel_1,
+            int_sim_ims_rel_2,
+            obs_sim_ims_rel_1,
+            obs_sim_ims_rel_2,
+            obs_obs_ims,
+            res_misfit_rel_1,
+            res_misfit_rel_2,
             site_correlations,
         ) in enumerate(pred_dataloader):
             pred = get_prediction(
                 ranking_model,
                 scalar_features,
-                int_sim_pSA_rel_1,
-                int_sim_pSA_rel_2,
-                obs_sim_pSA_rel_1,
-                obs_sim_pSA_rel_2,
-                obs_obs_pSA,
+                int_sim_ims_rel_1,
+                int_sim_ims_rel_2,
+                obs_sim_ims_rel_1,
+                obs_sim_ims_rel_2,
+                obs_obs_ims,
                 device,
             )
             bce_loss_value, weighted_loss_value, true, weights = compute_loss(
                 loss,
                 pred,
-                res_area_rel_1,
-                res_area_rel_2,
+                res_misfit_rel_1,
+                res_misfit_rel_2,
                 site_correlations,
                 device,
                 reduce=False,
@@ -654,10 +650,10 @@ def _compute_model_residuals(
     sim_event_ids: np.ndarray,
     sim_site_ids: np.ndarray,
     sim_rel_ids: np.ndarray,
-    sim_pSA: np.ndarray,
+    sim_ims: np.ndarray,
     obs_event_ids: np.ndarray,
     obs_site_ids: np.ndarray,
-    obs_pSA: np.ndarray,
+    obs_ims: np.ndarray,
 ):
     """
     Computes the residual between the highest ranked realisation and
@@ -666,7 +662,7 @@ def _compute_model_residuals(
     Note: All string arrays have to be converted to integers arrays
         using hash, as numba does not handle string arrays at this point
     """
-    res_result = np.zeros((group_keys.shape[0], obs_pSA.shape[1]))
+    res_result = np.zeros((group_keys.shape[0], obs_ims.shape[1]))
     for ix in range(group_keys.shape[0]):
         cur_event, cur_site_int, cur_site_obs = group_keys[ix, :]
         m = (
@@ -685,8 +681,8 @@ def _compute_model_residuals(
         cur_obs_ix = np.flatnonzero(
             (obs_event_ids == cur_event) & (obs_site_ids == cur_site_int)
         )[0]
-        res_result[ix, :] = np.log(obs_pSA[cur_obs_ix, :]) - np.log(
-            sim_pSA[cur_sim_ix, :]
+        res_result[ix, :] = np.log(obs_ims[cur_obs_ix, :]) - np.log(
+            sim_ims[cur_sim_ix, :]
         )
 
     return res_result
@@ -716,13 +712,13 @@ def compute_sample_residuals(
         string_to_int(sim_df.event_id.values.astype(str)),
         string_to_int(sim_df.site_id.values.astype(str)),
         string_to_int(sim_df.rel_id.values.astype(str)),
-        sim_df.loc[:, constants.PSA_KEYS].values,
+        sim_df.loc[:, constants.IMs].values,
         string_to_int(obs_df.event_id.values.astype(str)),
         string_to_int(obs_df.site_id.values.astype(str)),
-        obs_df.loc[:, constants.PSA_KEYS].values,
+        obs_df.loc[:, constants.IMs].values,
     )
 
-    res_df = pd.DataFrame(data=res_results, columns=constants.PSA_KEYS)
+    res_df = pd.DataFrame(data=res_results, columns=constants.IMs)
     res_df["event_id"] = group_keys[:, 0]
     res_df["site_int"] = group_keys[:, 1]
     res_df["site_obs"] = group_keys[:, 2]
@@ -772,10 +768,10 @@ def compute_scenario_residuals(
     obs_idx = np.stack(np.char.rsplit(sim_idx, "_", 1), axis=0)[:, 0]
 
     res_df = pd.DataFrame(
-        data=np.log(obs_df.loc[obs_idx, constants.PSA_KEYS].values)
-        - np.log(sim_df.loc[sim_idx, constants.PSA_KEYS].values),
+        data=np.log(obs_df.loc[obs_idx, constants.IMs].values)
+        - np.log(sim_df.loc[sim_idx, constants.IMs].values),
         index=sim_idx,
-        columns=constants.PSA_KEYS,
+        columns=constants.IMs,
     )
     res_df = pd.concat([best_rel_df, res_df], axis=1)
 
@@ -973,19 +969,18 @@ def data_prep(
     # Compute mean and standard deviation for each period
     # for normalisation (only training events)
     obs_data = db.get_obs_df()
-    pSA_mean = np.mean(np.log(obs_data.loc[:, constants.PSA_KEYS]), axis=0)
-    pSA_std = np.std(np.log(obs_data.loc[:, constants.PSA_KEYS]), axis=0)
+    ims_mean = np.mean(np.log(obs_data.loc[:, constants.IMs]), axis=0)
+    ims_std = np.std(np.log(obs_data.loc[:, constants.IMs]), axis=0)
 
     # Create the datasets
     train_dataset = PairDataset(
         train_event_sites,
         train_site_combs,
         db,
-        constants.PERIODS,
-        constants.PSA_KEYS,
+        constants.IMs,
         scalar_features,
-        pSA_mean,
-        pSA_std,
+        ims_mean,
+        ims_std,
         run_config.max_n_rels,
         sim_corr_dir=sim_corr_dir,
     )
@@ -994,11 +989,10 @@ def data_prep(
         val_event_sites,
         val_site_combs,
         db,
-        constants.PERIODS,
-        constants.PSA_KEYS,
+        constants.IMs,
         scalar_features,
-        pSA_mean,
-        pSA_std,
+        ims_mean,
+        ims_std,
         run_config.max_n_rels,
         sim_corr_dir=sim_corr_dir,
     )
@@ -1018,8 +1012,8 @@ def data_prep(
             "event_site_features": scalar_features.event_site_feature_keys,
             "event_site_to_site_features": scalar_features.event_site_to_site_feature_keys,
             "site_feature_stats": site_feature_stats.to_dict(),
-            "pSA_mean": pSA_mean.to_dict(),
-            "pSA_std": pSA_std.to_dict(),
+            "ims_mean": ims_mean.to_dict(),
+            "ims_std": ims_std.to_dict(),
             "n_scalar_features": int(scalar_features.n_scalar_features),
         },
     }
@@ -1031,33 +1025,30 @@ def data_prep(
 
 
 def create_model(hp_config: HyperParamsConfig, scalar_features: ml_data.ScalarFeatures):
-    # Create the model
-    n_conv_layers = len(hp_config.kernel_sizes)
-    padding = (
-        [
-            mlt.dl_utils.compute_same_conv_padding(
-                len(constants.PERIODS), hp_config.kernel_sizes[0]
-            )
-        ]
-        * n_conv_layers
-        if n_conv_layers > 0
-        else []
-    )
+    # # Create the model
+    # n_conv_layers = len(hp_config.kernel_sizes)
+    # padding = (
+    #     [
+    #         mlt.dl_utils.compute_same_conv_padding(
+    #             len(constants.IMs), hp_config.kernel_sizes[0]
+    #         )
+    #     ]
+    #     * n_conv_layers
+    #     if n_conv_layers > 0
+    #     else []
+    # )
 
     ranking_model = models.PairWiseModel(
-        hp_config.kernel_sizes,
-        hp_config.n_channels,
-        padding,
         hp_config.fc_units,
         scalar_features.n_scalar_features,
-        len(constants.PERIODS),
+        len(constants.IMs),
     )
 
     print(f"Ranking model summary")
     summary(
         ranking_model,
         input_size=[
-            (hp_config.batch_size, 5, 31),
+            (hp_config.batch_size, 5, len(constants.IMs)),
             (hp_config.batch_size, scalar_features.n_scalar_features),
         ],
     )
@@ -1072,22 +1063,23 @@ def _compute_single_best_sim_res(
     sim_event_ids: np.ndarray,
     sim_site_ids: np.ndarray,
     rel_ids: np.ndarray,
-    sim_pSA: np.ndarray,
+    sim_ims: np.ndarray,
     obs_event_ids: np.ndarray,
     obs_site_ids: np.ndarray,
-    obs_pSA: np.ndarray,
+    obs_ims: np.ndarray,
 ):
     """Helper function"""
     cur_sim_mask = (sim_event_ids == event) & (sim_site_ids == site_id)
-    cur_sim_pSA = sim_pSA[cur_sim_mask, :]
+    cur_sim_ims = sim_ims[cur_sim_mask, :]
 
     cur_obs_mask = (obs_event_ids == event) & (obs_site_ids == site_id)
     if np.count_nonzero(cur_obs_mask) == 0:
-        return np.full(sim_pSA.shape[1], np.nan), 0
+        return np.full(sim_ims.shape[1], np.nan), 0
 
-    cur_obs_pSA = obs_pSA[cur_obs_mask, :]
+    cur_obs_ims = obs_ims[cur_obs_mask, :]
 
-    cur_res = np.log(cur_obs_pSA) - np.log(cur_sim_pSA)
+    ## TODO: Update this for more IMs
+    cur_res = np.log(cur_obs_ims) - np.log(cur_sim_ims)
     cur_best_res_ix = np.argmin(np.sum(np.abs(cur_res), axis=1))
 
     return cur_res[cur_best_res_ix, :], rel_ids[cur_sim_mask][cur_best_res_ix]
@@ -1099,13 +1091,13 @@ def _compute_best_sim_res(
     sim_event_ids: np.ndarray,
     sim_site_ids: np.ndarray,
     rel_ids: np.ndarray,
-    sim_pSA: np.ndarray,
+    sim_ims: np.ndarray,
     obs_event_ids: np.ndarray,
     obs_site_ids: np.ndarray,
-    obs_pSA: np.ndarray,
+    obs_ims: np.ndarray,
 ):
     """Computes the residual for each site using the best simulation residual"""
-    best_res = np.full((group_keys.shape[0], sim_pSA.shape[1]), np.nan)
+    best_res = np.full((group_keys.shape[0], sim_ims.shape[1]), np.nan)
     best_rel = np.zeros(group_keys.shape[0], dtype=np.int64)
     for ix in nb.prange(group_keys.shape[0]):
         best_res[ix, :], best_rel[ix] = _compute_single_best_sim_res(
@@ -1114,10 +1106,10 @@ def _compute_best_sim_res(
             sim_event_ids,
             sim_site_ids,
             rel_ids,
-            sim_pSA,
+            sim_ims,
             obs_event_ids,
             obs_site_ids,
-            obs_pSA,
+            obs_ims,
         )
 
     return best_res, best_rel
@@ -1137,10 +1129,10 @@ def compute_best_sim_res(sim_df: pd.DataFrame, obs_df: pd.DataFrame):
         string_to_int(sim_df.event_id.values.astype(str)),
         string_to_int(sim_df.site_id.values.astype(str)),
         string_to_int(sim_df.rel_id.values.astype(str)),
-        sim_df[constants.PSA_KEYS].values,
+        sim_df[constants.IMs].values,
         string_to_int(obs_df.event_id.values.astype(str)),
         string_to_int(obs_df.site_id.values.astype(str)),
-        obs_df[constants.PSA_KEYS].values,
+        obs_df[constants.IMs].values,
     )
 
     # Drop rows with no observation values
@@ -1156,7 +1148,7 @@ def compute_best_sim_res(sim_df: pd.DataFrame, obs_df: pd.DataFrame):
         index=mlt.array_utils.numpy_str_join(
             "_", group_keys[~drop_mask, 0], group_keys[~drop_mask, 1]
         ),
-        columns=constants.PSA_KEYS,
+        columns=constants.IMs,
     )
     best_res_df["event_id"] = group_keys[~drop_mask, 0]
     best_res_df["site_id"] = group_keys[~drop_mask, 1]

@@ -53,6 +53,8 @@ PERIODS = [
 ]
 PSA_KEYS = [f"pSA_{x}" for x in PERIODS]
 
+IMs = ["PGA", "PGV", "AI", "CAV", "Ds575", "Ds595"] + PSA_KEYS
+
 COMPONENTS = ["090", "000", "ver"]
 
 CANTERBURY_REGION = [171.54, 173.12, -43.95, -43.22]

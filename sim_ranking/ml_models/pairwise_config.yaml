@@ -11,8 +11,8 @@ weight_penalty_factor: 0.02
 # Model Params
 #n_channels: [5, 16, 32]
 #kernel_sizes: [3, 3]
-n_channels: []
-kernel_sizes: []
+#n_channels: []
+#kernel_sizes: []
 fc_units: [32, 32, 16] # Seems to work well
 #fc_units: [32, 64, 64]
 

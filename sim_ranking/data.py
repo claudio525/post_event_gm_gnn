@@ -1,5 +1,6 @@
 import os
 import pickle
+import warnings
 import multiprocessing as mp
 from pathlib import Path
 from typing import Sequence, NamedTuple, Dict, List, Union
@@ -601,9 +602,11 @@ def _process_sim_gm_params_mera_event(event: str, db_ffp: Path, ims: List[str]):
 
     # Run the mixed-effects regression
     # This treats each realisation as an event
-    event_res_df, within_res, bias_std_df = run_mera(
-        residual_df, ims, "rel", "site", compute_site_term=False, verbose=False
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+        event_res_df, within_res, bias_std_df = run_mera(
+            residual_df, ims, "rel", "site", compute_site_term=False, verbose=False
+        )
 
     # Add site and rel column to within event residuals
     assert np.all(within_res.index == residual_df.index)
@@ -656,7 +659,8 @@ def compute_sim_gm_params_mera(db_ffp: Path, data_source: str = None, n_procs: i
     """
     db = DB(db_ffp)
     events = db.get_avail_events(data_source=data_source)
-    ims = constants.PSA_KEYS
+    # ims = constants.PSA_KEYS
+    ims = constants.IMs
 
     if n_procs > 1:
         with mp.Pool(n_procs) as p:
