@@ -18,7 +18,6 @@ from torchview import draw_graph
 import ml_tools as mlt
 import spatial_hazard as sh
 
-from .. import data
 from . import data as ml_data
 from . import features
 from . import models
@@ -64,7 +63,6 @@ def compute_res_score(obs_ims: np.ndarray, sim_ims: np.ndarray, weights: np.ndar
 class HyperParamsConfig:
     n_epochs: int
     batch_size: int
-    weight_penalty_factor: float
     l2_reg: float
     lr: float
 
@@ -79,7 +77,6 @@ class HyperParamsConfig:
         return cls(
             params["n_epochs"],
             params["batch_size"],
-            params["weight_penalty_factor"],
             params["l2_reg"],
             params["lr"],
             # params["n_channels"],
@@ -91,7 +88,6 @@ class HyperParamsConfig:
         return {
             "n_epochs": self.n_epochs,
             "batch_size": self.batch_size,
-            "weight_penalty_factor": self.weight_penalty_factor,
             "l2_reg": self.l2_reg,
             "lr": self.lr,
             # "n_channels": self.n_channels,
@@ -733,42 +729,42 @@ def _compute_model_residuals(
     return res_result
 
 
-def compute_sample_best_residuals(
-    ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame
-):
-    """
-    Computes the residual between the highest ranked realisation and
-    the observed GM at the site of interest
-    """
-    groups = ranking_df.groupby(["event_id", "site_int", "site_obs"])
-    group_keys = np.asarray(list(groups.groups.keys()))
-
-    # Convert strings to integers as
-    # numba doesn't handle strings
-    string_to_int = np.vectorize(lambda x: hash(x))
-
-    res_results = _compute_model_residuals(
-        string_to_int(group_keys.astype(str)),
-        string_to_int(ranking_df.event_id.values.astype(str)),
-        string_to_int(ranking_df.site_int.values.astype(str)),
-        string_to_int(ranking_df.site_obs.values.astype(str)),
-        string_to_int(ranking_df.rel_id.values.astype(str)),
-        ranking_df["rank"].values.astype(int),
-        string_to_int(sim_df.event_id.values.astype(str)),
-        string_to_int(sim_df.site_id.values.astype(str)),
-        string_to_int(sim_df.rel_id.values.astype(str)),
-        sim_df.loc[:, constants.IMs].values,
-        string_to_int(obs_df.event_id.values.astype(str)),
-        string_to_int(obs_df.site_id.values.astype(str)),
-        obs_df.loc[:, constants.IMs].values,
-    )
-
-    res_df = pd.DataFrame(data=res_results, columns=constants.IMs)
-    res_df["event_id"] = group_keys[:, 0]
-    res_df["site_int"] = group_keys[:, 1]
-    res_df["site_obs"] = group_keys[:, 2]
-
-    return res_df
+# def compute_sample_best_residuals(
+#     ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame
+# ):
+#     """
+#     Computes the residual between the highest ranked realisation and
+#     the observed GM at the site of interest
+#     """
+#     groups = ranking_df.groupby(["event_id", "site_int", "site_obs"])
+#     group_keys = np.asarray(list(groups.groups.keys()))
+#
+#     # Convert strings to integers as
+#     # numba doesn't handle strings
+#     string_to_int = np.vectorize(lambda x: hash(x))
+#
+#     res_results = _compute_model_residuals(
+#         string_to_int(group_keys.astype(str)),
+#         string_to_int(ranking_df.event_id.values.astype(str)),
+#         string_to_int(ranking_df.site_int.values.astype(str)),
+#         string_to_int(ranking_df.site_obs.values.astype(str)),
+#         string_to_int(ranking_df.rel_id.values.astype(str)),
+#         ranking_df["rank"].values.astype(int),
+#         string_to_int(sim_df.event_id.values.astype(str)),
+#         string_to_int(sim_df.site_id.values.astype(str)),
+#         string_to_int(sim_df.rel_id.values.astype(str)),
+#         sim_df.loc[:, constants.IMs].values,
+#         string_to_int(obs_df.event_id.values.astype(str)),
+#         string_to_int(obs_df.site_id.values.astype(str)),
+#         obs_df.loc[:, constants.IMs].values,
+#     )
+#
+#     res_df = pd.DataFrame(data=res_results, columns=constants.IMs)
+#     res_df["event_id"] = group_keys[:, 0]
+#     res_df["site_int"] = group_keys[:, 1]
+#     res_df["site_obs"] = group_keys[:, 2]
+#
+#     return res_df
 
 
 # def compute_scenario_residuals(
@@ -1189,102 +1185,101 @@ def create_model(hp_config: HyperParamsConfig, scalar_features: ml_data.ScalarFe
     return ranking_model
 
 
-@nb.njit
-def _compute_single_best_sim_res(
-    event: int,
-    site_id: int,
-    sim_event_ids: np.ndarray,
-    sim_site_ids: np.ndarray,
-    rel_ids: np.ndarray,
-    sim_ims: np.ndarray,
-    obs_event_ids: np.ndarray,
-    obs_site_ids: np.ndarray,
-    obs_ims: np.ndarray,
-):
-    """Helper function"""
-    cur_sim_mask = (sim_event_ids == event) & (sim_site_ids == site_id)
-    cur_sim_ims = sim_ims[cur_sim_mask, :]
-
-    cur_obs_mask = (obs_event_ids == event) & (obs_site_ids == site_id)
-    if np.count_nonzero(cur_obs_mask) == 0:
-        return np.full(sim_ims.shape[1], np.nan), 0
-
-    cur_obs_ims = obs_ims[cur_obs_mask, :]
-
-    ## TODO: Update this for more IMs
-    cur_res = np.log(cur_obs_ims) - np.log(cur_sim_ims)
-    cur_best_res_ix = np.argmin(np.sum(np.abs(cur_res), axis=1))
-
-    return cur_res[cur_best_res_ix, :], rel_ids[cur_sim_mask][cur_best_res_ix]
-
-
-@nb.njit(parallel=True)
-def _compute_best_sim_res(
-    group_keys: np.ndarray,
-    sim_event_ids: np.ndarray,
-    sim_site_ids: np.ndarray,
-    rel_ids: np.ndarray,
-    sim_ims: np.ndarray,
-    obs_event_ids: np.ndarray,
-    obs_site_ids: np.ndarray,
-    obs_ims: np.ndarray,
-):
-    """Computes the residual for each site using the best simulation residual"""
-    best_res = np.full((group_keys.shape[0], sim_ims.shape[1]), np.nan)
-    best_rel = np.zeros(group_keys.shape[0], dtype=np.int64)
-    for ix in nb.prange(group_keys.shape[0]):
-        best_res[ix, :], best_rel[ix] = _compute_single_best_sim_res(
-            group_keys[ix, 0],
-            group_keys[ix, 1],
-            sim_event_ids,
-            sim_site_ids,
-            rel_ids,
-            sim_ims,
-            obs_event_ids,
-            obs_site_ids,
-            obs_ims,
-        )
-
-    return best_res, best_rel
+# @nb.njit
+# def _compute_single_best_sim_res(
+#     event: int,
+#     site_id: int,
+#     sim_event_ids: np.ndarray,
+#     sim_site_ids: np.ndarray,
+#     rel_ids: np.ndarray,
+#     sim_ims: np.ndarray,
+#     obs_event_ids: np.ndarray,
+#     obs_site_ids: np.ndarray,
+#     obs_ims: np.ndarray,
+# ):
+#     """Helper function"""
+#     cur_sim_mask = (sim_event_ids == event) & (sim_site_ids == site_id)
+#     cur_sim_ims = sim_ims[cur_sim_mask, :]
+#
+#     cur_obs_mask = (obs_event_ids == event) & (obs_site_ids == site_id)
+#     if np.count_nonzero(cur_obs_mask) == 0:
+#         return np.full(sim_ims.shape[1], np.nan), 0
+#
+#     cur_obs_ims = obs_ims[cur_obs_mask, :]
+#
+#     cur_res = np.log(cur_obs_ims) - np.log(cur_sim_ims)
+#     cur_best_res_ix = np.argmin(np.sum(np.abs(cur_res), axis=1))
+#
+#     return cur_res[cur_best_res_ix, :], rel_ids[cur_sim_mask][cur_best_res_ix]
 
 
-def compute_best_sim_res(sim_df: pd.DataFrame, obs_df: pd.DataFrame):
-    """
-    Computes the residual for each event &
-    site using the best simulation realisation
-    """
-    string_to_int = np.vectorize(lambda x: hash(x))
+# @nb.njit(parallel=True)
+# def _compute_best_sim_res(
+#     group_keys: np.ndarray,
+#     sim_event_ids: np.ndarray,
+#     sim_site_ids: np.ndarray,
+#     rel_ids: np.ndarray,
+#     sim_ims: np.ndarray,
+#     obs_event_ids: np.ndarray,
+#     obs_site_ids: np.ndarray,
+#     obs_ims: np.ndarray,
+# ):
+#     """Computes the residual for each site using the best simulation residual"""
+#     best_res = np.full((group_keys.shape[0], sim_ims.shape[1]), np.nan)
+#     best_rel = np.zeros(group_keys.shape[0], dtype=np.int64)
+#     for ix in nb.prange(group_keys.shape[0]):
+#         best_res[ix, :], best_rel[ix] = _compute_single_best_sim_res(
+#             group_keys[ix, 0],
+#             group_keys[ix, 1],
+#             sim_event_ids,
+#             sim_site_ids,
+#             rel_ids,
+#             sim_ims,
+#             obs_event_ids,
+#             obs_site_ids,
+#             obs_ims,
+#         )
+#
+#     return best_res, best_rel
 
-    group_keys = np.asarray(list(sim_df.groupby(["event_id", "site_id"]).groups.keys()))
 
-    best_res, best_rel = _compute_best_sim_res(
-        string_to_int(group_keys),
-        string_to_int(sim_df.event_id.values.astype(str)),
-        string_to_int(sim_df.site_id.values.astype(str)),
-        string_to_int(sim_df.rel_id.values.astype(str)),
-        sim_df[constants.IMs].values,
-        string_to_int(obs_df.event_id.values.astype(str)),
-        string_to_int(obs_df.site_id.values.astype(str)),
-        obs_df[constants.IMs].values,
-    )
-
-    # Drop rows with no observation values
-    drop_mask = np.all(np.isnan(best_res), axis=1)
-    best_res = best_res[~drop_mask, :]
-    best_rel = best_rel[~drop_mask]
-
-    unique_rels = np.unique(sim_df.rel_id.values.astype(str))
-    rel_lookup = pd.Series(index=string_to_int(unique_rels), data=unique_rels)
-
-    best_res_df = pd.DataFrame(
-        data=best_res,
-        index=mlt.array_utils.numpy_str_join(
-            "_", group_keys[~drop_mask, 0], group_keys[~drop_mask, 1]
-        ),
-        columns=constants.IMs,
-    )
-    best_res_df["event_id"] = group_keys[~drop_mask, 0]
-    best_res_df["site_id"] = group_keys[~drop_mask, 1]
-    best_res_df["rel_id"] = rel_lookup.loc[best_rel].values
-
-    return best_res_df
+# def compute_best_sim_res(sim_df: pd.DataFrame, obs_df: pd.DataFrame):
+#     """
+#     Computes the residual for each event &
+#     site using the best simulation realisation
+#     """
+#     string_to_int = np.vectorize(lambda x: hash(x))
+#
+#     group_keys = np.asarray(list(sim_df.groupby(["event_id", "site_id"]).groups.keys()))
+#
+#     best_res, best_rel = _compute_best_sim_res(
+#         string_to_int(group_keys),
+#         string_to_int(sim_df.event_id.values.astype(str)),
+#         string_to_int(sim_df.site_id.values.astype(str)),
+#         string_to_int(sim_df.rel_id.values.astype(str)),
+#         sim_df[constants.IMs].values,
+#         string_to_int(obs_df.event_id.values.astype(str)),
+#         string_to_int(obs_df.site_id.values.astype(str)),
+#         obs_df[constants.IMs].values,
+#     )
+#
+#     # Drop rows with no observation values
+#     drop_mask = np.all(np.isnan(best_res), axis=1)
+#     best_res = best_res[~drop_mask, :]
+#     best_rel = best_rel[~drop_mask]
+#
+#     unique_rels = np.unique(sim_df.rel_id.values.astype(str))
+#     rel_lookup = pd.Series(index=string_to_int(unique_rels), data=unique_rels)
+#
+#     best_res_df = pd.DataFrame(
+#         data=best_res,
+#         index=mlt.array_utils.numpy_str_join(
+#             "_", group_keys[~drop_mask, 0], group_keys[~drop_mask, 1]
+#         ),
+#         columns=constants.IMs,
+#     )
+#     best_res_df["event_id"] = group_keys[~drop_mask, 0]
+#     best_res_df["site_id"] = group_keys[~drop_mask, 1]
+#     best_res_df["rel_id"] = rel_lookup.loc[best_rel].values
+#
+#     return best_res_df

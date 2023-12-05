@@ -142,14 +142,14 @@ def _load_scenario_residuals(results_dir: Path):
     return train_residuals, val_residuals
 
 
-@st.cache_data
-def _get_sim_residuals(results_dir: Path):
-    metadata = _get_metadata(results_dir)
-    db_ffp = os.path.expandvars(metadata["data"]["db"])
-
-    db = sr.db.DB(db_ffp)
-
-    return sr.ml.pairwise.compute_best_sim_res(db.get_sim_df(), db.get_obs_df())
+# @st.cache_data
+# def _get_sim_residuals(results_dir: Path):
+#     metadata = _get_metadata(results_dir)
+#     db_ffp = os.path.expandvars(metadata["data"]["db"])
+#
+#     db = sr.db.DB(db_ffp)
+#
+#     return sr.ml.pairwise.compute_best_sim_res(db.get_sim_df(), db.get_obs_df())
 
 
 @st.cache_data
