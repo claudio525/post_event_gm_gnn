@@ -103,6 +103,7 @@ def train_model(
         best_model_epoch,
         scalar_features,
         data_metadata,
+        sim_corr_dir=sim_corr_dir
     )
 
 

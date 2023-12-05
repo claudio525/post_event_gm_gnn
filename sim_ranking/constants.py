@@ -1,6 +1,9 @@
 import os
 from enum import Enum
 
+import numpy as np
+
+
 class RankingMethod(Enum):
     emp_cMVN = 1
     sim_cMVN = 2
@@ -53,7 +56,10 @@ PERIODS = [
 ]
 PSA_KEYS = [f"pSA_{x}" for x in PERIODS]
 
-IMs = ["PGA", "PGV", "AI", "CAV", "Ds575", "Ds595"] + PSA_KEYS
+IMs = ["PGV", "AI", "CAV", "Ds575", "Ds595", "PGA"] + PSA_KEYS
+
+# 1/3 of weights for other IMs and 2/3 for pSA (inc. PGA)
+IM_weights = np.asarray([(1/3) / 5] * 5 + [(2/3) / (len(PSA_KEYS) + 1)] * (len(PSA_KEYS) + 1))
 
 COMPONENTS = ["090", "000", "ver"]
 

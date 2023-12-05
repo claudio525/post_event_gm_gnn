@@ -18,6 +18,7 @@ from torchview import draw_graph
 import ml_tools as mlt
 import spatial_hazard as sh
 
+from .. import data
 from . import data as ml_data
 from . import features
 from . import models
@@ -26,18 +27,20 @@ from ..db import DB
 from .. import constants
 
 
-def compute_res_score(rs_obs: np.ndarray, rs_sim: np.ndarray):
+def compute_res_score(obs_ims: np.ndarray, sim_ims: np.ndarray, weights: np.ndarray):
     """
     Computes the similarity score for response spectrum
 
     Parameters
     ----------
-    rs_obs: array of floats
-        Observed response spectrum
+    obs_ims: array of floats
+        Observed IMs
         Format [n_periods]
-    rs_sim: array of floats
-        Simulation realisation response spectra
+    sim_ims: array of floats
+        Simulation realisation IMs
         Format [n_realisations, n_periods]
+    weights: array of floats
+        Weights for each IM
 
     Returns
     -------
@@ -46,10 +49,15 @@ def compute_res_score(rs_obs: np.ndarray, rs_sim: np.ndarray):
         Format [n_realisations]
     """
     # Compute the residual
-    res = rs_obs[..., None] - rs_sim
-    res_score = np.sum(np.abs(res), axis=1)
+    res = obs_ims[..., None] - sim_ims
+    # res_score = np.sum(np.abs(res), axis=1)
+    # res_score = np.average(res**2, axis=1, weights=weights)
+    res_score = np.sum(weights[None, :, None] * res ** 2, axis=1)
 
     return res_score
+
+# def test(res_df: pd.DataFrame):
+#     return np.sum(constants.IM_weights * (res_df.loc[:, constants.IMs].values ** 2), axis=1)
 
 
 @dataclass
@@ -164,9 +172,7 @@ class PairDataset(Dataset):
         for cur_event, cur_sites in event_sites.items():
             # Observed
             cur_obs_df = db.get_obs_data(cur_event, cur_sites)
-            cur_obs_df.loc[:, self.ims] = np.log(
-                cur_obs_df.loc[:, self.ims]
-            )
+            cur_obs_df.loc[:, self.ims] = np.log(cur_obs_df.loc[:, self.ims])
 
             self.obs_ims[cur_event] = (
                 cur_obs_df.loc[cur_sites, self.ims].values
@@ -175,9 +181,7 @@ class PairDataset(Dataset):
 
             # Get the simulation data
             cur_sim_df = db.get_sim_data(cur_event, cur_sites)
-            cur_sim_df.loc[:, self.ims] = np.log(
-                cur_sim_df.loc[:, self.ims]
-            )
+            cur_sim_df.loc[:, self.ims] = np.log(cur_sim_df.loc[:, self.ims])
             cur_sim_data = np.full(
                 (cur_sites.size, self.ims.size, self.n_rels_event[cur_event]),
                 fill_value=np.nan,
@@ -192,9 +196,12 @@ class PairDataset(Dataset):
                 )
                 cur_sim_data[:, :, ix] = cur_rel_data
 
-            # Need to compute residual area before normalizing
+            # Need to compute residual misfit before normalizing
+            assert np.all(self.ims == constants.IMs)
             cur_res_area = compute_res_score(
-                cur_obs_df.loc[cur_sites, self.ims].values, cur_sim_data
+                cur_obs_df.loc[cur_sites, self.ims].values,
+                cur_sim_data,
+                constants.IM_weights,
             )
             self.res_area[cur_event] = cur_res_area
 
@@ -203,9 +210,7 @@ class PairDataset(Dataset):
             ) / self.ims_std[self.ims].values[None, :, None]
 
             # Get the (absolute) spatial correlations
-            cur_corrs_values = np.ones(
-                (cur_sites.size, cur_sites.size, len(self.ims))
-            )
+            cur_corrs_values = np.ones((cur_sites.size, cur_sites.size, len(self.ims)))
             if sim_corr_dir is not None:
                 cur_corrs = pd.read_pickle(sim_corr_dir / f"{cur_event}.pickle")
                 for ix, cur_im in enumerate(constants.IMs):
@@ -312,25 +317,32 @@ class RunParamsConfig:
 def compute_loss(
     loss: nn.Module,
     pred: torch.Tensor,
-    res_area_1: torch.Tensor,
-    res_area_2: torch.Tensor,
+    res_misfit_1: torch.Tensor,
+    res_misfit_2: torch.Tensor,
     site_correlations: torch.Tensor,
     device: str,
     reduce: bool = True,
 ):
     # Classification, is Rel 1 better than Rel 2?
-    true = (res_area_1 < res_area_2)[:, None].to(device, dtype=torch.float32)
+    true = (res_misfit_1 < res_misfit_2)[:, None].to(device, dtype=torch.float32)
     loss_value = loss(pred, true)
 
-    res_diff = torch.abs(res_area_1 - res_area_2).to(device, dtype=torch.float32)
+    res_diff = torch.abs(res_misfit_1 - res_misfit_2).to(device, dtype=torch.float32)
 
     # Compute and normalize the sample weights
     res_weights = 1 - torch.exp(-0.075 * res_diff) + 0.05
-    # res_weights = res_weights * (res_weights.shape[0] / res_weights.sum())
+    res_weights = res_weights * (res_weights.shape[0] / res_weights.sum())
 
     # Compute site-correlation weights
-    site_weights = torch.mean(site_correlations.to(device, dtype=torch.float32), dim=1)
-    # site_weights = site_weights * (site_weights.shape[0] / site_weights.sum())
+    # Normalize IM weights such that they sum to number of IMs
+    im_weights = torch.tensor(constants.IM_weights).to(
+        device, dtype=torch.float32
+    ) * len(constants.IM_weights)
+    # Weighted (based on IM weights) average of the site-correlations
+    site_weights = torch.mean(
+        im_weights * site_correlations.to(device, dtype=torch.float32), dim=1
+    )
+    site_weights = site_weights * (site_weights.shape[0] / site_weights.sum())
 
     sample_weights = site_weights * res_weights
     sample_weights = sample_weights * (sample_weights.shape[0] / sample_weights.sum())
@@ -418,7 +430,12 @@ def train(
                 device,
             )
 
-            bce_loss_value, cur_weighted_bce_loss_value, true, sample_weights = compute_loss(
+            (
+                bce_loss_value,
+                cur_weighted_bce_loss_value,
+                true,
+                sample_weights,
+            ) = compute_loss(
                 loss, pred, res_area_rel_1, res_area_rel_2, site_correlations, device
             )
             cur_loss_value = cur_weighted_bce_loss_value
@@ -435,9 +452,13 @@ def train(
                 .sum()
                 .item()
             )
-            correct = ((torch.nn.functional.sigmoid(pred) >= 0.5).float() == true).ravel()
+            correct = (
+                (torch.nn.functional.sigmoid(pred) >= 0.5).float() == true
+            ).ravel()
             metrics["acc_hist_train"][epoch_ix] += correct.sum().item()
-            metrics["weighted_acc_hist_train"][epoch_ix] += sample_weights[correct].sum().item()
+            metrics["weighted_acc_hist_train"][epoch_ix] += (
+                sample_weights[correct].sum().item()
+            )
 
             iter_loop.set_postfix(
                 {"loss": cur_loss_value.item(), "acc": n_correct / pred.size(0)}
@@ -475,7 +496,12 @@ def train(
                     device,
                 )
 
-                bce_loss_value, cur_weighted_bce_loss_value, true, sample_weights = compute_loss(
+                (
+                    bce_loss_value,
+                    cur_weighted_bce_loss_value,
+                    true,
+                    sample_weights,
+                ) = compute_loss(
                     loss,
                     pred,
                     res_area_rel_1,
@@ -488,9 +514,13 @@ def train(
                 metrics["loss_hist_val"][epoch_ix] += cur_loss_value.item()
                 metrics["bce_loss_hist_val"][epoch_ix] += bce_loss_value.item()
 
-                correct = ((torch.nn.functional.sigmoid(pred) >= 0.5).float() == true).ravel()
+                correct = (
+                    (torch.nn.functional.sigmoid(pred) >= 0.5).float() == true
+                ).ravel()
                 metrics["acc_hist_val"][epoch_ix] += correct.sum().item()
-                metrics["weighted_acc_hist_val"][epoch_ix] += sample_weights[correct].sum().item()
+                metrics["weighted_acc_hist_val"][epoch_ix] += (
+                    sample_weights[correct].sum().item()
+                )
 
             metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
             metrics["bce_loss_hist_val"][epoch_ix] /= len(val_dataloader)
@@ -609,9 +639,13 @@ def get_dataset_predictions(
         return results
 
 
-def _get_ranking(results_df: pd.DataFrame):
+def _get_sample_distribution(comp_results_df: pd.DataFrame):
+    """
+    Computes the ranking for each
+    (event, site_int, site_obs) combination
+    """
     rankings_df = []
-    groups = results_df.groupby(["event_id", "site_int", "site_obs"])
+    groups = comp_results_df.groupby(["event_id", "site_int", "site_obs"])
     for (cur_event, cur_site_int, cur_site_obs), cur_group in groups:
         cur_group = cur_group.sort_values(["rel_1", "rel_2"])
         cur_rel_combs = cur_group[["rel_1", "rel_2"]].values
@@ -623,7 +657,7 @@ def _get_ranking(results_df: pd.DataFrame):
             cur_pred, cur_rel_combs
         )
 
-        results_df.loc[cur_group.index, "pred"] = cur_pred
+        comp_results_df.loc[cur_group.index, "pred"] = cur_pred
         cur_rank_df = pd.DataFrame(
             data=[cur_ranking, np.arange(1, cur_ranking.size + 1), cur_comps_won],
             index=["rel_id", "rank", "comps_won"],
@@ -631,12 +665,22 @@ def _get_ranking(results_df: pd.DataFrame):
         cur_rank_df["event_id"] = cur_event
         cur_rank_df["site_int"] = cur_site_int
         cur_rank_df["site_obs"] = cur_site_obs
+        # cur_rank_df["model_rel_prob"] = (
+        #     cur_rank_df["comps_won"] / cur_rank_df["comps_won"].sum()
+        # )
 
         rankings_df.append(cur_rank_df)
 
     rankings_df = pd.concat(rankings_df, axis=0, ignore_index=True)
+    rankings_df.index = mlt.array_utils.numpy_str_join(
+        "_",
+        rankings_df.event_id.values.astype(str),
+        rankings_df.site_int.values.astype(str),
+        rankings_df.site_obs.values.astype(str),
+        rankings_df.rel_id.values.astype(str),
+    )
 
-    return results_df, rankings_df
+    return comp_results_df, rankings_df
 
 
 @nb.njit
@@ -681,6 +725,7 @@ def _compute_model_residuals(
         cur_obs_ix = np.flatnonzero(
             (obs_event_ids == cur_event) & (obs_site_ids == cur_site_int)
         )[0]
+
         res_result[ix, :] = np.log(obs_ims[cur_obs_ix, :]) - np.log(
             sim_ims[cur_sim_ix, :]
         )
@@ -688,7 +733,7 @@ def _compute_model_residuals(
     return res_result
 
 
-def compute_sample_residuals(
+def compute_sample_best_residuals(
     ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame
 ):
     """
@@ -726,56 +771,141 @@ def compute_sample_residuals(
     return res_df
 
 
-def compute_scenario_residuals(
-    ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame
+# def compute_scenario_residuals(
+#     ranking_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame
+# ):
+#     """
+#     Determines the best realisation for each scenario
+#     and then computes the residuals with the observed GM
+#     """
+#     # Determine the best realisation for each scenario
+#     rel_votes = {cur_event: {} for cur_event in ranking_df.event_id.unique()}
+#     best_rel_df = []
+#     groups = ranking_df.groupby(["event_id", "site_int"])
+#     for (cur_event, cur_site_int), cur_group in groups:
+#         cur_rel_comps_won
+#
+#
+#         cur_best_rels = cur_group.loc[(cur_group["rank"] == 1)].copy()
+#         assert cur_best_rels.shape[0] == cur_group.site_obs.unique().size
+#
+#         cur_best_rels["weight"] = np.ones(cur_best_rels.shape[0])
+#         cur_rel_votes = (
+#             cur_best_rels[["rel_id", "weight"]]
+#             .groupby("rel_id")
+#             .sum()
+#             .sort_values("weight", ascending=False)
+#         )
+#         cur_best_rel = cur_rel_votes.index[0]
+#
+#         rel_votes[cur_event][cur_site_int] = cur_rel_votes
+#         best_rel_df.append([cur_event, cur_site_int, cur_best_rel])
+#
+#     best_rel_df = pd.DataFrame(
+#         data=best_rel_df, columns=["event_id", "site_int", "rel_id"]
+#     )
+#     best_rel_df.index = mlt.array_utils.numpy_str_join(
+#         "_",
+#         best_rel_df.event_id.values.astype(str),
+#         best_rel_df.site_int.values.astype(str),
+#         best_rel_df.rel_id.values.astype(str),
+#     )
+#
+#     # Compute residuals
+#     sim_idx = best_rel_df.index.values.astype(str)
+#     obs_idx = np.stack(np.char.rsplit(sim_idx, "_", 1), axis=0)[:, 0]
+#
+#     res_df = pd.DataFrame(
+#         data=np.log(obs_df.loc[obs_idx, constants.IMs].values)
+#         - np.log(sim_df.loc[sim_idx, constants.IMs].values),
+#         index=sim_idx,
+#         columns=constants.IMs,
+#     )
+#     res_df = pd.concat([best_rel_df, res_df], axis=1)
+#
+#     return res_df, rel_votes
+
+
+def compute_residuals(
+    df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame
 ):
     """
-    Determines the best realisation for each scenario
-    and then computes the residuals with the observed GM
+    Computes the residual for each row
+    Required columns: event_id, site_int, rel_id
     """
-    # Determine the best realisation for each scenario
-    rel_votes = {cur_event: {} for cur_event in ranking_df.event_id.unique()}
-    best_rel_df = []
-    groups = ranking_df.groupby(["event_id", "site_int"])
-    for (cur_event, cur_site_int), cur_group in groups:
-        cur_best_rels = cur_group.loc[(cur_group["rank"] == 1)].copy()
-        assert cur_best_rels.shape[0] == cur_group.site_obs.unique().size
+    df = df.copy()
 
-        cur_best_rels["weight"] = np.ones(cur_best_rels.shape[0])
-        cur_rel_votes = (
-            cur_best_rels[["rel_id", "weight"]]
-            .groupby("rel_id")
-            .sum()
-            .sort_values("weight", ascending=False)
+    group = df.groupby(["event_id", "site_int"])
+    for (cur_event, cur_site_int), cur_df in group:
+        # Get the simulation data
+        cur_sim_keys = mlt.array_utils.numpy_str_join(
+            "_", cur_event, cur_site_int, cur_df.rel_id.values.astype(str)
         )
-        cur_best_rel = cur_rel_votes.index[0]
+        cur_sim_df = sim_df.loc[cur_sim_keys, constants.IMs]
 
-        rel_votes[cur_event][cur_site_int] = cur_rel_votes
-        best_rel_df.append([cur_event, cur_site_int, cur_best_rel])
+        # Compute the residual
+        cur_res = (
+            np.log(
+                obs_df.loc[
+                    mlt.array_utils.numpy_str_join("_", cur_event, cur_site_int),
+                    constants.IMs,
+                ].values.astype(float)
+            )
+            - np.log(cur_sim_df.values)
+        )
 
-    best_rel_df = pd.DataFrame(
-        data=best_rel_df, columns=["event_id", "site_int", "rel_id"]
-    )
-    best_rel_df.index = mlt.array_utils.numpy_str_join(
-        "_",
-        best_rel_df.event_id.values.astype(str),
-        best_rel_df.site_int.values.astype(str),
-        best_rel_df.rel_id.values.astype(str),
-    )
+        df.loc[cur_df.index, constants.IMs] = cur_res
 
-    # Compute residuals
-    sim_idx = best_rel_df.index.values.astype(str)
-    obs_idx = np.stack(np.char.rsplit(sim_idx, "_", 1), axis=0)[:, 0]
+    return df
 
-    res_df = pd.DataFrame(
-        data=np.log(obs_df.loc[obs_idx, constants.IMs].values)
-        - np.log(sim_df.loc[sim_idx, constants.IMs].values),
-        index=sim_idx,
-        columns=constants.IMs,
-    )
-    res_df = pd.concat([best_rel_df, res_df], axis=1)
 
-    return res_df, rel_votes
+def get_sample_weights(
+    sim_corr_dir: Path, cur_event: str, site_int: int, site_obs: np.ndarray
+):
+    if sim_corr_dir is not None:
+        site_corrs = pd.read_pickle(sim_corr_dir / f"{cur_event}.pickle")
+        sample_weights = np.mean(
+            np.abs(site_corrs.get_site_im_corrs(site_int, constants.IMs)
+            .loc[site_obs]
+            .values)
+            * (constants.IM_weights * len(constants.IM_weights)),
+            axis=1,
+        )
+    # Uniform weights otherwise
+    else:
+        print(f"Warning: Using uniform sample weights!")
+        sample_weights = np.ones(site_obs.size) / site_obs.size
+
+    # Normalize such that they add to one
+    sample_weights = sample_weights / sample_weights.sum()
+
+    return pd.Series(index=site_obs, data=sample_weights, name="sample_weight")
+
+def compute_scenario_distribution(sample_results: pd.DataFrame, sim_corr_dir: Path):
+    """
+    Computes the realisation distribution for each scenario
+    """
+    scenario_results = []
+    groups = sample_results.groupby(["event_id", "site_int"])
+    for (cur_event, cur_site_int), cur_group in groups:
+        site_obs = cur_group.site_obs.unique()
+
+        sample_weights = get_sample_weights(sim_corr_dir, cur_event, cur_site_int, site_obs)
+
+        # Compute the scenario realisation distribution
+        wm = lambda x: np.average(x.comps_won.values.astype(float), weights=sample_weights.loc[x.site_obs])
+        cur_result = cur_group.groupby("rel_id").apply(wm).to_frame("comps_won")
+        cur_result["event_id"] = cur_event
+        cur_result["site_int"] = cur_site_int
+        cur_result["rel_id"] = cur_result.index
+        # cur_result["model_rel_prob"] = cur_result["comps_won"] / cur_result["comps_won"].sum()
+        cur_result.index = mlt.array_utils.numpy_str_join("_", cur_event, cur_site_int, cur_result.index.values.astype(str))
+
+        scenario_results.append(cur_result)
+
+    scenario_df = pd.concat(scenario_results, axis=0)
+
+    return scenario_df
 
 
 def post_processing(
@@ -788,6 +918,7 @@ def post_processing(
     best_epoch: int,
     scalar_features: ml_data.ScalarFeatures,
     data_metadata: Dict,
+    sim_corr_dir: Path = None,
 ):
     (cur_out_dir := run_config.results_dir / mlt.utils.create_run_id(False)).mkdir()
 
@@ -798,46 +929,47 @@ def post_processing(
     # Get predictions
     print(f"Getting dataset predictions")
     start_time = time.time()
-    train_results = get_dataset_predictions(
+    train_comp_results = get_dataset_predictions(
         train_dataset, ranking_model, run_config.device
     )
-    val_results = get_dataset_predictions(val_dataset, ranking_model, run_config.device)
+    val_comp_results = get_dataset_predictions(
+        val_dataset, ranking_model, run_config.device
+    )
     print(f"Took {time.time() - start_time} to get predictions")
 
-    print(f"Getting rankings")
+    print(f"Computing sample distributions")
     start_time = time.time()
-    train_results, train_ranking = _get_ranking(train_results)
-    val_results, val_ranking = _get_ranking(val_results)
+    train_comp_results, train_sample_results = _get_sample_distribution(train_comp_results)
+    val_comp_results, val_sample_results = _get_sample_distribution(val_comp_results)
     print(f"Took {time.time() - start_time}")
 
     print(f"Computing sample residuals")
     start_time = time.time()
-    train_sample_residuals = compute_sample_residuals(train_ranking, sim_df, obs_df)
-    val_sample_residuals = compute_sample_residuals(val_ranking, sim_df, obs_df)
-    print(f"Took {time.time() - start_time} to compute sample residuals")
+    train_sample_results = compute_residuals(train_sample_results, sim_df, obs_df)
+    val_sample_results = compute_residuals(val_sample_results, sim_df, obs_df)
+    print(f"Took {time.time() - start_time} to compute residuals")
+
+    print(f"Computing scenario distributions")
+    start_time = time.time()
+    train_scenario_results = compute_scenario_distribution(train_sample_results, sim_corr_dir)
+    val_scenario_results = compute_scenario_distribution(val_sample_results, sim_corr_dir)
+    print(f"Took {time.time() - start_time} to compute scenario distributions")
 
     print(f"Computing scenario residuals")
     start_time = time.time()
-    train_scenario_res_df, train_scenario_rel_votes = compute_scenario_residuals(
-        train_ranking, sim_df, obs_df
-    )
-    val_scenario_res_df, val_scenario_rel_votes = compute_scenario_residuals(
-        val_ranking, sim_df, obs_df
-    )
-    print(f"Took {time.time() - start_time} to compute scenario best rels")
+    train_scenario_results = compute_residuals(train_scenario_results, sim_df, obs_df)
+    val_scenario_results = compute_residuals(val_scenario_results, sim_df, obs_df)
+    print(f"Took {time.time() - start_time} to compute scenario residuals")
 
     # Save results
-    train_ranking.to_csv(cur_out_dir / "train_rankings.csv")
-    val_ranking.to_csv(cur_out_dir / "val_rankings.csv")
+    train_comp_results.to_parquet(cur_out_dir / "train_comp_results.parquet")
+    val_comp_results.to_parquet(cur_out_dir / "val_comp_results.parquet")
 
-    train_results.to_csv(cur_out_dir / "train_results.csv")
-    val_results.to_csv(cur_out_dir / "val_results.csv")
+    train_sample_results.to_parquet(cur_out_dir / "train_sample_results.parquet")
+    val_sample_results.to_parquet(cur_out_dir / "val_sample_results.parquet")
 
-    train_sample_residuals.to_csv(cur_out_dir / "train_sample_residuals.csv")
-    val_sample_residuals.to_csv(cur_out_dir / "val_sample_residuals.csv")
-
-    train_scenario_res_df.to_csv(cur_out_dir / "train_scenario_residuals.csv")
-    val_scenario_res_df.to_csv(cur_out_dir / "val_scenario_residuals.csv")
+    train_scenario_results.to_parquet(cur_out_dir / "train_scenario_results.parquet")
+    val_scenario_results.to_parquet(cur_out_dir / "val_scenario_results.parquet")
 
     # Save loss history
     pd.to_pickle(metrics, cur_out_dir / "metrics.pickle")
@@ -857,7 +989,7 @@ def post_processing(
     draw_graph(
         ranking_model,
         input_size=[
-            (hp_config.batch_size, 5, 31),
+            (hp_config.batch_size, 5, len(constants.IMs)),
             (hp_config.batch_size, scalar_features.n_scalar_features),
         ],
         expand_nested=True,
@@ -993,7 +1125,8 @@ def data_prep(
         scalar_features,
         ims_mean,
         ims_std,
-        run_config.max_n_rels,
+        # run_config.max_n_rels,
+        max_n_rels=25,
         sim_corr_dir=sim_corr_dir,
     )
 
