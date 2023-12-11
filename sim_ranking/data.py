@@ -13,22 +13,165 @@ import numpy as np
 
 from qcore.timeseries import BBSeis, read_ascii
 import ml_tools as mlt
+import spatial_hazard as sh
+import sha_calc as sha
 
 from . import constants
 from . import utils
 from .db import DB
 
 
+def gen_emp_synthetic_observed(
+    emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path, nzgmdb_flat_file: Path
+):
+    """
+    Generates synthetic observed data
+    based on the (perturbed) empirical
+    GMM parameters correlated using the
+    Loth and Baker spatial correlation model
+
+    The nzgmdb_flat_file is only used to get
+    r_rup and r_x
+    """
+    # Load data
+    gm_params = pd.read_csv(emp_gm_params_ffp, index_col=0)
+    site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")
+
+    nzgmdb_df = pd.read_csv(nzgmdb_flat_file, dtype={"evid": str})
+    nzgmdb_df.index = mlt.array_utils.numpy_str_join("_", nzgmdb_df.evid.values.astype(str), nzgmdb_df.sta.values.astype(str))
+
+    # Shift the mean
+    mean_cols = [f"{cur_im}_mean" for cur_im in constants.PSA_KEYS]
+    gm_params.loc[:, mean_cols] = np.log(np.exp(gm_params.loc[:, mean_cols]) + 0.25 * np.exp(gm_params.loc[:, mean_cols]))
+
+
+    # Generate the realisation
+    rels = gen_emp_realisations(gm_params, site_df, n_rels=1)
+
+    # Combine
+    dfs = []
+    for cur_key, cur_df in rels.items():
+        cur_event = cur_key.split("_")[0]
+        cur_df["event"] = cur_event
+        cur_df["site"] = cur_df.index.values.astype(str)
+        cur_df.index = mlt.array_utils.numpy_str_join(
+            "_", cur_df.event.values.astype(str), cur_df.site.values.astype(str)
+        )
+        dfs.append(cur_df)
+
+    df = pd.concat(dfs, axis=0)
+    df["r_rup"] = nzgmdb_df.loc[df.index, "r_rup"].values
+    df["r_x"] = nzgmdb_df.loc[df.index, "r_x"].values
+    df = df.rename(columns={"event": "evid", "site": "sta"})
+
+    return df
+
+
+def gen_emp_realisations(
+    gm_params: pd.DataFrame, site_df: pd.DataFrame, n_rels: int = 25
+):
+    """
+    Generates correlated synthetic observed data
+    based on the empirical GM parameters
+    and the Loth and Baker spatial correlation
+    model
+
+    Parameters
+    ----------
+    gm_params: DataFrame
+        The empirical GM parameters
+    site_df: DataFrame
+        The NZGMDB site data
+    n_rels: int, optional
+        The number of realisations to generate
+
+    Returns
+    -------
+    dict[str, DataFrame]
+        The generated realisations
+        Keys are {event}_{rel}
+    """
+    events = gm_params.event.unique().astype(str)
+
+    # Calculate the distance matrix
+    dist_matrix = sh.im_dist.calculate_distance_matrix(
+        site_df.index.values.astype(str), site_df
+    )
+    ims = constants.PSA_KEYS
+
+    result_dict = {}
+    col_names = ["mu", "between_event_sigma", "within_event_sigma"]
+    for event_ix, cur_event in enumerate(events):
+        print(f"Processing event: {cur_event}, {event_ix + 1}/{events.size}")
+        cur_df = gm_params.loc[gm_params.event == cur_event, :]
+        cur_sites = cur_df.site.values.astype(str)
+        n_sites = cur_sites.size
+
+        im_values = np.full((n_sites, len(ims), n_rels), fill_value=np.nan)
+
+        # Generate realisations
+        for im_ix, cur_im in enumerate(ims):
+            cur_between_std = np.mean(cur_df.loc[:, f"{cur_im}_std_Inter"].values)
+            cur_within_std = cur_df.loc[:, f"{cur_im}_std_Intra"].values
+
+            cur_upper_mask = np.triu(np.ones((n_sites, n_sites), dtype=bool), k=1)
+            corr_values = sha.models.loth_baker_corr_model.get_correlations(
+                cur_im,
+                cur_im,
+                dist_matrix.loc[cur_sites, cur_sites].values[cur_upper_mask],
+            )
+
+            cur_R = np.eye(n_sites, n_sites)
+            cur_R[cur_upper_mask] = corr_values
+            cur_R = cur_R + np.tril(cur_R.T, k=-1)
+
+            cur_within_std_matrix = np.eye(n_sites, n_sites) * cur_within_std
+            t = (
+                np.eye(n_sites, n_sites) * cur_between_std ** 2
+                + cur_within_std_matrix @ cur_R @ cur_within_std_matrix
+            )
+            corr_matrix = np.eye(n_sites, n_sites) * cur_between_std ** 2 + np.einsum(
+                "i,ik,k-> ik", cur_within_std, cur_R, cur_within_std
+            )
+
+            assert np.all(corr_matrix == t)
+
+            cur_cols = [f"{cur_im}_mean", f"{cur_im}_std_Inter", f"{cur_im}_std_Intra"]
+            cur_im_values, _, __ = sh.im_dist.generate_im_values(
+                n_rels,
+                cur_R,
+                cur_df.loc[:, cur_cols].rename(columns=dict(zip(cur_cols, col_names))),
+            )
+            im_values[:, im_ix, :] = np.exp(cur_im_values.T)
+
+        # Save the results
+        for ix in range(n_rels):
+            cur_df = pd.DataFrame(
+                data=im_values[:, :, ix],
+                index=cur_sites,
+                columns=ims,
+            )
+            result_dict[f"{cur_event}_REL{ix + 1:02}"] = cur_df
+
+    return result_dict
+
+
 def run_emp_gmms(
     output_ffp: Path,
-    site_dir: Path,
-    srf_dir: Path,
-    nz_gmdb_source_ffp: Path,
+    nzgmdb_source_ffp: Path,
     rjb_max: float,
+    srf_dir: Path = None,
+    nzgmdb_flatfile_ffp: Path = None,
+    site_dir: Path = None,
+    nzgmdb_site_ffp: Path = None,
+    events: Sequence[str] = None,
 ):
     """
     Computes the empirical GMM parameters for all
         specified sites and sources
+
+    Note I: One of srf_dir or nzgmdb_flatfile_ffp must be specified
+    Note II: One of site_dir or nzgmdb_site_ffp must be specified
 
     Parameters
     ----------
@@ -36,12 +179,14 @@ def run_emp_gmms(
     site_dir: Path
         Directory that contains all the site
         information files (i.e. vs30, ll, and z)
-    srf_dir: Path
-        Directory that contains the srf files
-    nz_gmdb_source_ffp: Path
+    nzgmdb_source_ffp: Path
         Path to the NZ-GMDB source file
     rjb_max: float
         RJB distance threshold
+    srf_dir: Path, optional
+        Directory that contains the srf files
+    nzgmdb_flatfile_ffp: Path, optional
+        Path to the NZ-GMDB flat file
 
     Returns
     -------
@@ -49,7 +194,7 @@ def run_emp_gmms(
         The empirical GMM parameters for PGA
         and the default set of pSA periods
     """
-    from qcore import srf
+
     from empirical.util.openquake_wrapper_vectorized import oq_run
     from empirical.util.classdef import TectType, GMM
     from IM_calculation.source_site_dist import src_site_dist
@@ -82,44 +227,73 @@ def run_emp_gmms(
         "hypo_depth",
     ]
 
+    # Input sanity checking
+    assert (srf_dir is not None) or (nzgmdb_flatfile_ffp is not None)
+    assert not ((srf_dir is not None) and (nzgmdb_flatfile_ffp is not None))
+
     ### Data loading
     # Get all srf files
-    srf_ffps = list(srf_dir.rglob("*.srf"))
-    events = [cur_ffp.stem for cur_ffp in srf_ffps]
+    if srf_dir is not None:
+        from qcore import srf
+
+        srf_ffps = list(srf_dir.rglob("*.srf"))
+        srf_events = [cur_ffp.stem for cur_ffp in srf_ffps]
+
+        # Load srf data
+        srf_points, plane_infos = {}, {}
+        for cur_srf_ffp in srf_ffps:
+            srf_points[cur_srf_ffp.stem] = srf.read_srf_points(str(cur_srf_ffp))
+            plane_infos[cur_srf_ffp.stem] = srf.read_header(str(cur_srf_ffp), idx=True)
+
+        events = (
+            np.intersect1d(events, srf_events) if events is not None else srf_events
+        )
+    else:
+        nzgmdb_flatfile = pd.read_csv(
+            nzgmdb_flatfile_ffp, index_col=0, dtype={"evid": str}
+        )
+        nzgmdb_events = np.unique(nzgmdb_flatfile.evid).astype(str)
+
+        events = (
+            np.intersect1d(events, nzgmdb_events)
+            if events is not None
+            else nzgmdb_events
+        )
 
     # Load source info
-    source_df = pd.read_csv(nz_gmdb_source_ffp, index_col=0)
-
-    # Load srf data
-    srf_points, plane_infos = {}, {}
-    for cur_srf_ffp in srf_ffps:
-        srf_points[cur_srf_ffp.stem] = srf.read_srf_points(str(cur_srf_ffp))
-        plane_infos[cur_srf_ffp.stem] = srf.read_header(str(cur_srf_ffp), idx=True)
+    source_df = pd.read_csv(nzgmdb_source_ffp, index_col=0)
 
     # Load the site_data
-    stations_df = pd.read_csv(
-        site_dir / f"{constants.STATION_FN_NAME}.ll",
-        sep=" ",
-        index_col=2,
-        header=None,
-        names=["lon", "lat"],
-    )
-    vs30_df = pd.read_csv(
-        site_dir / f"{constants.STATION_FN_NAME}.vs30",
-        sep=" ",
-        index_col=0,
-        header=None,
-        names=["vs30"],
-    )
-    z_df = pd.read_csv(site_dir / f"{constants.STATION_FN_NAME}.z", index_col=0)
+    if site_dir is not None:
+        stations_df = pd.read_csv(
+            site_dir / f"{constants.STATION_FN_NAME}.ll",
+            sep=" ",
+            index_col=2,
+            header=None,
+            names=["lon", "lat"],
+        )
+        vs30_df = pd.read_csv(
+            site_dir / f"{constants.STATION_FN_NAME}.vs30",
+            sep=" ",
+            index_col=0,
+            header=None,
+            names=["vs30"],
+        )
+        z_df = pd.read_csv(site_dir / f"{constants.STATION_FN_NAME}.z", index_col=0)
 
-    ### Data merging/re-naming and tidy up
-    assert np.all(stations_df.index == vs30_df.index) and np.all(
-        stations_df.index == z_df.index
-    )
-    site_df = pd.concat([stations_df, vs30_df, z_df], axis=1)
-    site_df = site_df.rename(columns={"Z_1.0(km)": "z1pt0"})
-    del stations_df, vs30_df, z_df
+        ### Data merging/re-naming and tidy up
+        assert np.all(stations_df.index == vs30_df.index) and np.all(
+            stations_df.index == z_df.index
+        )
+        site_df = pd.concat([stations_df, vs30_df, z_df], axis=1)
+        site_df = site_df.rename(columns={"Z_1.0(km)": "z1pt0"})
+        del stations_df, vs30_df, z_df
+    else:
+        site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")[
+            ["lat", "lon", "Vs30", "Z1.0"]
+        ]
+        site_df = site_df.rename(columns={"Vs30": "vs30", "Z1.0": "z1pt0"})
+        site_df["z1pt0"] = site_df["z1pt0"] / 1000
 
     ### Distance calculation
     site_locs = np.concatenate(
@@ -127,14 +301,31 @@ def run_emp_gmms(
     )
     data_dfs = []
     for cur_event in events:
-        cur_data_df = site_df.copy(True)
-        cur_data_df["rrup"], cur_data_df["rjb"] = src_site_dist.calc_rrup_rjb(
-            srf_points[cur_event], site_locs
-        )
+        if srf_dir is not None:
+            cur_data_df = site_df.copy(True)
+            cur_data_df["rrup"], cur_data_df["rjb"] = src_site_dist.calc_rrup_rjb(
+                srf_points[cur_event], site_locs
+            )
 
-        cur_data_df["rx"], cur_data_df["ry"] = src_site_dist.calc_rx_ry(
-            srf_points[cur_event], plane_infos[cur_event], site_locs
-        )
+            cur_data_df["rx"], cur_data_df["ry"] = src_site_dist.calc_rx_ry(
+                srf_points[cur_event], plane_infos[cur_event], site_locs
+            )
+        else:
+            cur_nzgmdb_flatfile = nzgmdb_flatfile.loc[
+                nzgmdb_flatfile.evid == cur_event
+            ].copy(True)
+            cur_nzgmdb_flatfile = cur_nzgmdb_flatfile.set_index("sta")
+            cur_sites = np.intersect1d(
+                cur_nzgmdb_flatfile.index.values.astype(str),
+                site_df.index.values.astype(str),
+            )
+
+            cur_data_df = site_df.loc[cur_sites].copy(True)
+            cur_data_df["rrup"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_rup"].values
+            cur_data_df["rjb"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_jb"].values
+            cur_data_df["rx"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_x"].values
+            cur_data_df["ry"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_y"].values
+
         # Enforce distance threshold
         cur_data_df = cur_data_df.loc[cur_data_df.rjb <= rjb_max]
         cur_data_df["site"] = cur_data_df.index.values
@@ -148,7 +339,8 @@ def run_emp_gmms(
             cur_event, ["mag", "tect_class", "z_tor", "rake", "dip", "depth"]
         ]
 
-        data_dfs.append(cur_data_df)
+        if cur_data_df.shape[0] > 0:
+            data_dfs.append(cur_data_df)
 
     data_df = pd.concat(data_dfs, axis=0)
     data_df["vs30measured"] = False
@@ -191,32 +383,6 @@ def run_emp_gmms(
 
     result_df = pd.concat(dfs, axis=0)
     result_df.to_csv(output_ffp, index_label="id")
-
-
-class SimWithinEventSiteCorrelations(NamedTuple):
-
-    event: str
-    ims: List[str]
-    sites: List[str]
-    correlations: Dict[str, pd.DataFrame]
-
-    def write(self, data_dir: Path):
-        mlt.utils.write_to_yaml(
-            dict(event=self.event, ims=self.ims, sites=self.sites),
-            data_dir / "meta.yaml",
-        )
-        for cur_im, cur_df in self.correlations.items():
-            cur_df.to_csv(data_dir / f"{cur_im.replace('.', 'p')}.csv")
-
-    @classmethod
-    def load(cls, data_dir: Path):
-        meta = mlt.utils.load_yaml(data_dir / "meta.yaml")
-        correlations = {}
-        for cur_ffp in data_dir.iterdir():
-            correlations[utils.reverse_im_filename(cur_ffp.stem)] = pd.read_csv(
-                cur_ffp, index_col=0
-            )
-        return cls(meta["event"], meta["ims"], meta["sites"], correlations)
 
 
 @dataclass
@@ -603,7 +769,7 @@ def _process_sim_gm_params_mera_event(event: str, db_ffp: Path, ims: List[str]):
     # Run the mixed-effects regression
     # This treats each realisation as an event
     with warnings.catch_warnings():
-        warnings.simplefilter(action='ignore', category=FutureWarning)
+        warnings.simplefilter(action="ignore", category=FutureWarning)
         event_res_df, within_res, bias_std_df = run_mera(
             residual_df, ims, "rel", "site", compute_site_term=False, verbose=False
         )

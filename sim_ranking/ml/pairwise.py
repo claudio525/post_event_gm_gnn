@@ -55,6 +55,7 @@ def compute_res_score(obs_ims: np.ndarray, sim_ims: np.ndarray, weights: np.ndar
 
     return res_score
 
+
 # def test(res_df: pd.DataFrame):
 #     return np.sum(constants.IM_weights * (res_df.loc[:, constants.IMs].values ** 2), axis=1)
 
@@ -103,6 +104,7 @@ class PairDataset(Dataset):
         site_combs: Dict[str, np.ndarray],
         db: DB,
         ims: Sequence[str],
+        im_weights: np.ndarray,
         scalar_features: ml_data.ScalarFeatures,
         ims_mean: np.ndarray,
         ims_std: np.ndarray,
@@ -116,6 +118,7 @@ class PairDataset(Dataset):
         self.events = np.asarray(list(event_sites.keys()))
 
         self.ims = np.asarray(ims)
+        self.im_weights = im_weights
 
         self.ims_mean = ims_mean
         self.ims_std = ims_std
@@ -193,11 +196,10 @@ class PairDataset(Dataset):
                 cur_sim_data[:, :, ix] = cur_rel_data
 
             # Need to compute residual misfit before normalizing
-            assert np.all(self.ims == constants.IMs)
             cur_res_area = compute_res_score(
                 cur_obs_df.loc[cur_sites, self.ims].values,
                 cur_sim_data,
-                constants.IM_weights,
+                self.im_weights,
             )
             self.res_area[cur_event] = cur_res_area
 
@@ -209,7 +211,7 @@ class PairDataset(Dataset):
             cur_corrs_values = np.ones((cur_sites.size, cur_sites.size, len(self.ims)))
             if sim_corr_dir is not None:
                 cur_corrs = pd.read_pickle(sim_corr_dir / f"{cur_event}.pickle")
-                for ix, cur_im in enumerate(constants.IMs):
+                for ix, cur_im in enumerate(self.ims):
                     cur_corr_df = cur_corrs.get_im_corrs(cur_im)
                     cur_corrs_values[:, :, ix] = np.abs(
                         cur_corr_df.loc[cur_sites, cur_sites].values
@@ -303,6 +305,8 @@ class PairDataset(Dataset):
 class RunParamsConfig:
     max_dist: float
     max_n_rels: int
+    ims: Sequence[str]
+    im_weights: np.ndarray
 
     debug: bool
     device: str
@@ -316,6 +320,7 @@ def compute_loss(
     res_misfit_1: torch.Tensor,
     res_misfit_2: torch.Tensor,
     site_correlations: torch.Tensor,
+    im_weights: torch.Tensor,
     device: str,
     reduce: bool = True,
 ):
@@ -331,9 +336,7 @@ def compute_loss(
 
     # Compute site-correlation weights
     # Normalize IM weights such that they sum to number of IMs
-    im_weights = torch.tensor(constants.IM_weights).to(
-        device, dtype=torch.float32
-    ) * len(constants.IM_weights)
+    im_weights = im_weights * len(im_weights)
     # Weighted (based on IM weights) average of the site-correlations
     site_weights = torch.mean(
         im_weights * site_correlations.to(device, dtype=torch.float32), dim=1
@@ -378,7 +381,7 @@ def train(
         ranking_model.parameters(), lr=hp_config.lr, weight_decay=hp_config.l2_reg
     )
 
-    n_workers = 0 if run_config.debug else 4
+    n_workers = 0 if run_config.debug else 8
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=hp_config.batch_size,
@@ -386,6 +389,7 @@ def train(
         num_workers=n_workers,
         pin_memory=True,
         persistent_workers=True if n_workers > 0 else False,
+        prefetch_factor=25,
     )
     val_dataloader = DataLoader(
         val_dataset,
@@ -394,7 +398,11 @@ def train(
         num_workers=n_workers,
         pin_memory=True,
         persistent_workers=True if n_workers > 0 else False,
+        prefetch_factor=25,
     )
+
+
+    im_weights = torch.from_numpy(train_dataset.im_weights).to(device, dtype=torch.float32)
 
     # loss = nn.BCELoss()
     loss = nn.BCEWithLogitsLoss(reduction="none")
@@ -432,7 +440,7 @@ def train(
                 true,
                 sample_weights,
             ) = compute_loss(
-                loss, pred, res_area_rel_1, res_area_rel_2, site_correlations, device
+                loss, pred, res_area_rel_1, res_area_rel_2, site_correlations, im_weights, device
             )
             cur_loss_value = cur_weighted_bce_loss_value
 
@@ -503,6 +511,7 @@ def train(
                     res_area_rel_1,
                     res_area_rel_2,
                     site_correlations,
+                    im_weights,
                     device,
                 )
                 cur_loss_value = cur_weighted_bce_loss_value
@@ -581,6 +590,8 @@ def get_dataset_predictions(
         dataset, shuffle=False, batch_size=4096, num_workers=0, pin_memory=True
     )
 
+    im_weights = torch.from_numpy(dataset.im_weights).to(device, dtype=torch.float32)
+
     results = []
     with torch.no_grad():
         loss = nn.BCEWithLogitsLoss(reduction="none")
@@ -613,6 +624,7 @@ def get_dataset_predictions(
                 res_misfit_rel_1,
                 res_misfit_rel_2,
                 site_correlations,
+                im_weights,
                 device,
                 reduce=False,
             )
@@ -822,9 +834,7 @@ def _compute_model_residuals(
 #     return res_df, rel_votes
 
 
-def compute_residuals(
-    df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame
-):
+def compute_residuals(df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame):
     """
     Computes the residual for each row
     Required columns: event_id, site_int, rel_id
@@ -861,9 +871,11 @@ def get_sample_weights(
     if sim_corr_dir is not None:
         site_corrs = pd.read_pickle(sim_corr_dir / f"{cur_event}.pickle")
         sample_weights = np.mean(
-            np.abs(site_corrs.get_site_im_corrs(site_int, constants.IMs)
-            .loc[site_obs]
-            .values)
+            np.abs(
+                site_corrs.get_site_im_corrs(site_int, constants.IMs)
+                .loc[site_obs]
+                .values
+            )
             * (constants.IM_weights * len(constants.IM_weights)),
             axis=1,
         )
@@ -877,6 +889,7 @@ def get_sample_weights(
 
     return pd.Series(index=site_obs, data=sample_weights, name="sample_weight")
 
+
 def compute_scenario_distribution(sample_results: pd.DataFrame, sim_corr_dir: Path):
     """
     Computes the realisation distribution for each scenario
@@ -886,16 +899,22 @@ def compute_scenario_distribution(sample_results: pd.DataFrame, sim_corr_dir: Pa
     for (cur_event, cur_site_int), cur_group in groups:
         site_obs = cur_group.site_obs.unique()
 
-        sample_weights = get_sample_weights(sim_corr_dir, cur_event, cur_site_int, site_obs)
+        sample_weights = get_sample_weights(
+            sim_corr_dir, cur_event, cur_site_int, site_obs
+        )
 
         # Compute the scenario realisation distribution
-        wm = lambda x: np.average(x.comps_won.values.astype(float), weights=sample_weights.loc[x.site_obs])
+        wm = lambda x: np.average(
+            x.comps_won.values.astype(float), weights=sample_weights.loc[x.site_obs]
+        )
         cur_result = cur_group.groupby("rel_id").apply(wm).to_frame("comps_won")
         cur_result["event_id"] = cur_event
         cur_result["site_int"] = cur_site_int
         cur_result["rel_id"] = cur_result.index
         # cur_result["model_rel_prob"] = cur_result["comps_won"] / cur_result["comps_won"].sum()
-        cur_result.index = mlt.array_utils.numpy_str_join("_", cur_event, cur_site_int, cur_result.index.values.astype(str))
+        cur_result.index = mlt.array_utils.numpy_str_join(
+            "_", cur_event, cur_site_int, cur_result.index.values.astype(str)
+        )
 
         scenario_results.append(cur_result)
 
@@ -915,8 +934,12 @@ def post_processing(
     scalar_features: ml_data.ScalarFeatures,
     data_metadata: Dict,
     sim_corr_dir: Path = None,
+    id_suffix: str = "",
 ):
-    (cur_out_dir := run_config.results_dir / mlt.utils.create_run_id(False)).mkdir()
+    (
+        cur_out_dir := run_config.results_dir
+        / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+    ).mkdir()
 
     db = DB(os.path.expandvars(data_metadata["db"]))
     sim_df = db.get_sim_df()
@@ -935,7 +958,9 @@ def post_processing(
 
     print(f"Computing sample distributions")
     start_time = time.time()
-    train_comp_results, train_sample_results = _get_sample_distribution(train_comp_results)
+    train_comp_results, train_sample_results = _get_sample_distribution(
+        train_comp_results
+    )
     val_comp_results, val_sample_results = _get_sample_distribution(val_comp_results)
     print(f"Took {time.time() - start_time}")
 
@@ -947,8 +972,12 @@ def post_processing(
 
     print(f"Computing scenario distributions")
     start_time = time.time()
-    train_scenario_results = compute_scenario_distribution(train_sample_results, sim_corr_dir)
-    val_scenario_results = compute_scenario_distribution(val_sample_results, sim_corr_dir)
+    train_scenario_results = compute_scenario_distribution(
+        train_sample_results, sim_corr_dir
+    )
+    val_scenario_results = compute_scenario_distribution(
+        val_sample_results, sim_corr_dir
+    )
     print(f"Took {time.time() - start_time} to compute scenario distributions")
 
     print(f"Computing scenario residuals")
@@ -1097,15 +1126,16 @@ def data_prep(
     # Compute mean and standard deviation for each period
     # for normalisation (only training events)
     obs_data = db.get_obs_df()
-    ims_mean = np.mean(np.log(obs_data.loc[:, constants.IMs]), axis=0)
-    ims_std = np.std(np.log(obs_data.loc[:, constants.IMs]), axis=0)
+    ims_mean = np.mean(np.log(obs_data.loc[:, run_config.ims]), axis=0)
+    ims_std = np.std(np.log(obs_data.loc[:, run_config.ims]), axis=0)
 
     # Create the datasets
     train_dataset = PairDataset(
         train_event_sites,
         train_site_combs,
         db,
-        constants.IMs,
+        run_config.ims,
+        run_config.im_weights,
         scalar_features,
         ims_mean,
         ims_std,
@@ -1117,7 +1147,8 @@ def data_prep(
         val_event_sites,
         val_site_combs,
         db,
-        constants.IMs,
+        run_config.ims,
+        run_config.im_weights,
         scalar_features,
         ims_mean,
         ims_std,
@@ -1153,7 +1184,7 @@ def data_prep(
     return train_dataset, val_dataset, scalar_features, metadata
 
 
-def create_model(hp_config: HyperParamsConfig, scalar_features: ml_data.ScalarFeatures):
+def create_model(hp_config: HyperParamsConfig, scalar_features: ml_data.ScalarFeatures, n_ims: int):
     # # Create the model
     # n_conv_layers = len(hp_config.kernel_sizes)
     # padding = (
@@ -1170,14 +1201,14 @@ def create_model(hp_config: HyperParamsConfig, scalar_features: ml_data.ScalarFe
     ranking_model = models.PairWiseModel(
         hp_config.fc_units,
         scalar_features.n_scalar_features,
-        len(constants.IMs),
+        n_ims,
     )
 
     print(f"Ranking model summary")
     summary(
         ranking_model,
         input_size=[
-            (hp_config.batch_size, 5, len(constants.IMs)),
+            (hp_config.batch_size, 5, n_ims),
             (hp_config.batch_size, scalar_features.n_scalar_features),
         ],
     )

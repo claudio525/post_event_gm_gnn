@@ -3,7 +3,6 @@ from typing import Sequence, Dict
 import numpy as np
 import pandas as pd
 from pyproj import Transformer
-from sklearn.preprocessing import minmax_scale
 
 
 def pre_process_dist(dist_array: np.ndarray, max_dist: float):

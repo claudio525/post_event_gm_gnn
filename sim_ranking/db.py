@@ -25,6 +25,7 @@ class DB:
         site_ffp: Path,
         source_ffp: Path,
         data_source: str,
+        ims: Sequence[str],
     ):
         """Adds the simulation and observation data to the database"""
         site_df = pd.read_csv(site_ffp, index_col="sta")
@@ -50,7 +51,7 @@ class DB:
             # Read simulation IM data
             cur_im_df = pd.read_csv(cur_ffp, index_col=0)
             cur_im_df = cur_im_df.loc[cur_im_df["component"] == "rotd50"]
-            cur_df = cur_im_df.loc[:, constants.IMs]
+            cur_df = cur_im_df.loc[:, ims]
 
             # Add extra columns and update index
             cur_df["event_id"] = cur_event_id
@@ -74,7 +75,7 @@ class DB:
             # Re-order and add to db
             cur_df = cur_df.loc[
                 :,
-                ["event_id", "rel_id", "site_id", "data_source"] + constants.IMs,
+                ["event_id", "rel_id", "site_id", "data_source"] + ims,
             ]
             cur_df.to_sql("sim_im_data", self.con, if_exists="append")
 
@@ -88,7 +89,7 @@ class DB:
 
                 # Split into observed IM and record data
                 cur_record_df = cur_obs_df.loc[:, ["evid", "sta", "r_rup", "r_x"]]
-                cur_obs_df = cur_obs_df[["evid", "sta"] + constants.IMs]
+                cur_obs_df = cur_obs_df[["evid", "sta"] + ims]
 
                 # Write observed IM data
                 cur_obs_df = cur_obs_df.rename(
@@ -248,7 +249,7 @@ class DB:
         ).drop(columns=["event_id", "record_id"])
 
     @classmethod
-    def create(cls, db_ffp: Path):
+    def create(cls, db_ffp: Path, ims: Sequence[str]):
         if db_ffp.exists():
             raise ValueError(f"DB already exists at {db_ffp}")
 
@@ -268,7 +269,7 @@ class DB:
             "CREATE TABLE sim_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, rel_id TEXT,"
             "site_id TEXT, data_source TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
         )
-        for cur_im in constants.IMs:
+        for cur_im in ims:
             cur.execute(f"ALTER TABLE sim_im_data ADD COLUMN [{cur_im}] REAL")
 
         # Create the observed table
@@ -276,7 +277,7 @@ class DB:
             "CREATE TABLE obs_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, "
             "site_id TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
         )
-        for cur_im in constants.IMs:
+        for cur_im in ims:
             cur.execute(f"ALTER TABLE obs_im_data ADD COLUMN [{cur_im}] REAL")
 
         # Create the records table
