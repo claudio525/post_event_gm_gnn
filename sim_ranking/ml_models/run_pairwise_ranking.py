@@ -91,33 +91,40 @@ def train_model(
     from torch.utils.data import DataLoader
     from tqdm import tqdm
 
-    # n_workers = 0 if run_config.debug else 8
-    n_workers = 0
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=hp_config.batch_size,
-        shuffle=True,
-        num_workers=n_workers,
-        pin_memory=True,
-        persistent_workers=True if n_workers > 0 else False,
-        prefetch_factor=25,
-    )
-
-    iter_loop = tqdm(train_dataloader)
+    data_loader = pr.CustomTabularDataLoader(train_dataset, hp_config.batch_size, True)
+    iter_loop = tqdm(data_loader)
     iter_loop.set_description(f"Epoch 0/{hp_config.n_epochs}")
-    for i, (
-            _,
-            scalar_features,
-            int_sim_ims_rel_1,
-            int_sim_ims_rel_2,
-            obs_sim_ims_rel_1,
-            obs_sim_ims_rel_2,
-            obs_obs_ims,
-            res_area_rel_1,
-            res_area_rel_2,
-            site_correlations,
-    ) in enumerate(iter_loop):
+
+    for i, t in enumerate(iter_loop):
         pass
+
+    # # n_workers = 0 if run_config.debug else 8
+    # n_workers = 0
+    # train_dataloader = DataLoader(
+    #     train_dataset,
+    #     batch_size=hp_config.batch_size,
+    #     shuffle=True,
+    #     num_workers=n_workers,
+    #     pin_memory=True,
+    #     persistent_workers=True if n_workers > 0 else False,
+    #     prefetch_factor=25,
+    # )
+    #
+    # iter_loop = tqdm(train_dataloader)
+    # iter_loop.set_description(f"Epoch 0/{hp_config.n_epochs}")
+    # for i, (
+    #         _,
+    #         scalar_features,
+    #         int_sim_ims_rel_1,
+    #         int_sim_ims_rel_2,
+    #         obs_sim_ims_rel_1,
+    #         obs_sim_ims_rel_2,
+    #         obs_obs_ims,
+    #         res_area_rel_1,
+    #         res_area_rel_2,
+    #         site_correlations,
+    # ) in enumerate(iter_loop):
+    #     pass
 
     exit()
 

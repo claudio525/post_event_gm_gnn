@@ -62,7 +62,9 @@ def compute_site_combinations(
     site_combs, used_sites = {}, {}
     for cur_event in events:
         cur_sites = sites[cur_event]
-        cur_sites = cur_sites[np.isin(cur_sites, site_int) | np.isin(cur_sites, site_obs)]
+        cur_sites = cur_sites[
+            np.isin(cur_sites, site_int) | np.isin(cur_sites, site_obs)
+        ]
 
         # Need at least two sites for the event
         if len(cur_sites) < 2:
@@ -101,29 +103,31 @@ def create_scalar_feature_tensor(
     events: np.ndarray,
     event_sites: Dict[str, np.ndarray],
     scalar_features: ScalarFeatures,
+    event_site_combs: Dict[str, np.ndarray],
 ):
     """
     Create feature matrix for all site combinations
-    of shape [n_sites, n_sites, n_features]
-    per event, where i/axis 0 = site of interest
-    and j/axis 1 = observation site
+    of shape [n_event_site_combinations, n_features]
     Order of the features is:
-    1) Site of interest - site features
-    2) Observation site - site features
-    3) Site of interest - event site features
-    4) Observation site - event site features
-    5) Site to site features
-    6) Event site to site features
+        1) Site of interest - site features
+        2) Observation site - site features
+        3) Site of interest - event site features
+        4) Observation site - event site features
+        5) Site to site features
+        6) Event site to site features
     """
     assert np.all(np.asarray(list(event_sites.keys())) == events)
 
-    scalar_features_tensors = {}
+    scalar_features_values = []
     for cur_event in events:
         cur_sites = event_sites[cur_event]
+        cur_site_combs = event_site_combs[cur_event]
+        cur_site_ints = cur_sites[cur_site_combs[:, 0]]
+        cur_site_obs = cur_sites[cur_site_combs[:, 1]]
+
         cur_tensor = np.full(
             (
-                cur_sites.size,
-                cur_sites.size,
+                cur_site_combs.shape[0],
                 scalar_features.n_scalar_features,
             ),
             fill_value=np.nan,
@@ -131,43 +135,53 @@ def create_scalar_feature_tensor(
 
         # Set the site features
         n_site_features = len(scalar_features.site_feature_keys)
-        for i, feature_i in enumerate(scalar_features.site_feature_keys):
-            for j, site_j in enumerate(cur_sites):
-                # Site of interest/observation site
-                cur_tensor[j, :, i] = cur_tensor[
-                    :, j, i + n_site_features
-                ] = scalar_features.site_features_data.loc[site_j, feature_i]
+        cur_tensor[:, :n_site_features] = scalar_features.site_features_data.loc[
+            cur_site_ints, scalar_features.site_feature_keys
+        ]
+        cur_tensor[
+            :, n_site_features : n_site_features * 2
+        ] = scalar_features.site_features_data.loc[
+            cur_site_obs, scalar_features.site_feature_keys
+        ]
+
         # Set the event site features
         cur_f_ix = n_site_features * 2
         n_event_site_features = len(scalar_features.event_site_feature_keys)
-        for i, feature_i in enumerate(scalar_features.event_site_feature_keys):
-            for j, site_j in enumerate(cur_sites):
-                # Site of interest/observation site
-                cur_tensor[j, :, cur_f_ix + i] = cur_tensor[
-                    :, j, cur_f_ix + i + n_event_site_features
-                ] = scalar_features.event_site_features_data[cur_event].loc[
-                    site_j, feature_i
-                ]
+        cur_tensor[
+            :, cur_f_ix : cur_f_ix + n_event_site_features
+        ] = scalar_features.event_site_features_data[cur_event].loc[
+            cur_site_ints, scalar_features.event_site_feature_keys
+        ]
+        cur_tensor[
+            :, cur_f_ix + n_event_site_features : cur_f_ix + n_event_site_features * 2
+        ] = scalar_features.event_site_features_data[cur_event].loc[
+            cur_site_obs, scalar_features.event_site_feature_keys
+        ]
+
         # Set the site to site features
         cur_f_ix += n_event_site_features * 2
         for i, feature_i in enumerate(scalar_features.site_to_site_feature_keys):
-            cur_tensor[:, :, cur_f_ix + i] = scalar_features.site_to_site_features_data[
-                feature_i
-            ].loc[cur_sites, cur_sites]
+            cur_feature_df = scalar_features.site_to_site_features_data[feature_i]
+
+            cur_tensor[:, cur_f_ix + i] = cur_feature_df.values[
+                cur_feature_df.index.get_indexer_for(cur_site_ints),
+                cur_feature_df.columns.get_indexer_for(cur_site_obs),
+            ]
+
         # Set the event site to site features
         cur_f_ix += len(scalar_features.site_to_site_feature_keys)
         for i, feature_i in enumerate(scalar_features.event_site_to_site_feature_keys):
-            cur_tensor[
-                :, :, cur_f_ix + i
-            ] = scalar_features.event_site_to_site_features_data[feature_i][
-                cur_event
-            ].loc[
-                cur_sites, cur_sites
+            cur_feature_df = scalar_features.event_site_to_site_features_data[feature_i][cur_event]
+
+            cur_tensor[:, cur_f_ix + i] = cur_feature_df.values[
+                cur_feature_df.index.get_indexer_for(cur_site_ints),
+                cur_feature_df.columns.get_indexer_for(cur_site_obs),
             ]
 
-        scalar_features_tensors[cur_event] = cur_tensor
+        scalar_features_values.append(cur_tensor)
 
-    return scalar_features_tensors
+    scalar_features_values = np.concatenate(scalar_features_values, axis=0)
+    return scalar_features_values
 
 
 def _station_df_sanity_check(station_df: pd.DataFrame, site_features: Sequence[str]):

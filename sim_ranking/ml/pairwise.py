@@ -97,7 +97,7 @@ class HyperParamsConfig:
         }
 
 
-class PairDataset(Dataset):
+class PairDataset2(Dataset):
     def __init__(
         self,
         event_sites: Dict[str, np.ndarray],
@@ -127,178 +127,423 @@ class PairDataset(Dataset):
 
         self.n_events = len(self.event_sites)
 
+        self.n_rels_event = {}
+        self.event_rels = {}
+        self.sim_df = []
+        self.obs_df = []
+        for cur_event, cur_sites in event_sites.items():
+            # Load IM data
+            cur_sim_data = db.get_sim_data(cur_event, cur_sites)
+            cur_obs_df = db.get_obs_data(cur_event, cur_sites)
+            cur_obs_df.loc[:, self.ims] = np.log(cur_obs_df.loc[:, self.ims])
+
+            # Select a random subset of realisations
+            cur_rels = np.random.choice(
+                np.unique(cur_sim_data.rel_id.values.astype(str)),
+                max_n_rels,
+                replace=False,
+            )
+
+            # Filter
+            cur_sim_data = cur_sim_data.loc[
+                np.isin(cur_sim_data.rel_id, cur_rels)
+                & np.isin(cur_sim_data.site_id, cur_sites)
+            ]
+            cur_obs_df = cur_obs_df.loc[np.isin(cur_obs_df.site_id, cur_sites)]
+
+            self.sim_df.append(cur_sim_data)
+            self.obs_df.append(cur_obs_df)
+
+        self.sim_df = pd.concat(self.sim_df)
+        self.obs_df = pd.concat(self.obs_df)
+
+
+class PairDataset(Dataset):
+    def __init__(
+        self,
+        event_sites: Dict[str, np.ndarray],
+        event_site_combs: Dict[str, np.ndarray],
+        db: DB,
+        ims: Sequence[str],
+        im_weights: np.ndarray,
+        scalar_features: ml_data.ScalarFeatures,
+        ims_mean: np.ndarray,
+        ims_std: np.ndarray,
+        max_n_rels: int,
+        sim_corr_dir: Path = None,
+    ):
+        self.db = db
+        self.event_sites = event_sites
+        self.event_site_combs = event_site_combs
+
+        self.events = np.asarray(list(event_sites.keys()))
+
+        self.ims = np.asarray(ims)
+        self.im_weights = im_weights
+
+        self.ims_mean = ims_mean
+        self.ims_std = ims_std
+
+        self.scalar_features = scalar_features
+
+        self.n_events = len(self.event_sites)
+
         # Compute the number of samples per event
         self.event_rels = {}
         self.n_rels_event = {}
         self.n_samples_event = []
+        self.n_site_combs_event = []
+        self.n_sites_event = []
         for cur_event, cur_sites in event_sites.items():
             cur_sim_data = db.get_sim_data(cur_event, cur_sites)
+            self.n_sites_event.append(cur_sites.size)
 
             # cur_n_rels = np.unique(cur_sim_data.rel_id.values).size
             # self.n_rels_event[cur_event] = cur_n_rels if cur_n_rels < max_n_rels else max_n_rels
+            cur_avail_rels = np.unique(cur_sim_data.rel_id.values.astype(str))
+            assert max_n_rels <= cur_avail_rels.size
             self.event_rels[cur_event] = np.random.choice(
-                np.unique(cur_sim_data.rel_id.values.astype(str)),
+                cur_avail_rels,
                 max_n_rels,
                 replace=False,
             )
             cur_n_rels = self.n_rels_event[cur_event] = self.event_rels[cur_event].size
 
-            # cur_n_samples = self.site_combs[cur_event].shape[0] * int(
-            #     (cur_n_rels ** 2 - cur_n_rels) / 2
-            # )
-            cur_n_samples = self.site_combs[cur_event].shape[0] * int(
+            cur_n_samples = self.event_site_combs[cur_event].shape[0] * int(
                 cur_n_rels ** 2 - cur_n_rels
             )
             self.n_samples_event.append(cur_n_samples)
+            self.n_site_combs_event.append(self.event_site_combs[cur_event].shape[0])
+
+        self.n_sites_event = np.asarray(self.n_sites_event)
+
         self.cum_n_samples_event = np.cumsum(self.n_samples_event)
+        self.cum_n_site_combs_event = np.cumsum(self.n_site_combs_event)
+        self.cum_n_sites_event = np.cumsum(self.n_sites_event)
 
         # Create the feature tensor
-        self.scalar_features_tensor = ml_data.create_scalar_feature_tensor(
-            self.events, self.event_sites, self.scalar_features
+        self.scalar_features_values = ml_data.create_scalar_feature_tensor(
+            self.events, self.event_sites, self.scalar_features, self.event_site_combs
         )
 
-        # Create the (normalised) IM inputs in the format
-        # obs: (n_sites, n_ims)
-        # sim: (n_sites, n_ims, n_rels)
-        # And create the residual area scores
-        #   format: (n_sites, n_rels)
-        # And get the spatial correlations
-        #   format: (n_sites, n_sites, n_ims)
-        self.obs_ims = {}
-        self.sim_ims = {}
-        self.res_area = {}
-        self.corr = {}
+        # Create the (normalised) IM inputs
+        self.obs_ims, self.sim_ims = [], []
+        self.misfit_score, self.corr = [], []
+        self.sim_n_records_event = []
         for cur_event, cur_sites in event_sites.items():
-            # Observed
-            cur_obs_df = db.get_obs_data(cur_event, cur_sites)
-            cur_obs_df.loc[:, self.ims] = np.log(cur_obs_df.loc[:, self.ims])
+            cur_n_sites = self.event_sites[cur_event].size
 
-            self.obs_ims[cur_event] = (
-                cur_obs_df.loc[cur_sites, self.ims].values
-                - self.ims_mean[self.ims].values
-            ) / self.ims_std[self.ims].values
+            # Observed
+            cur_obs_data = db.get_obs_data(cur_event, cur_sites)
+            cur_obs_data = np.log(cur_obs_data.loc[cur_sites, self.ims]).values
 
             # Get the simulation data
             cur_sim_df = db.get_sim_data(cur_event, cur_sites)
             cur_sim_df.loc[:, self.ims] = np.log(cur_sim_df.loc[:, self.ims])
+
             cur_sim_data = np.full(
-                (cur_sites.size, self.ims.size, self.n_rels_event[cur_event]),
+                (cur_sites.size * self.n_rels_event[cur_event], self.ims.size),
                 fill_value=np.nan,
             )
+            cur_misfit_score = cur_sim_data.copy()
 
-            for ix, cur_rel in enumerate(self.event_rels[cur_event]):
+            for rel_ix, cur_rel in enumerate(self.event_rels[cur_event]):
                 cur_rel_data = (
                     cur_sim_df.loc[cur_sim_df.rel_id == cur_rel]
                     .set_index("site_id")
                     .loc[cur_sites, self.ims]
                     .values
                 )
-                cur_sim_data[:, :, ix] = cur_rel_data
 
-            # Need to compute residual misfit before normalizing
-            cur_res_area = compute_res_score(
-                cur_obs_df.loc[cur_sites, self.ims].values,
-                cur_sim_data,
-                self.im_weights,
-            )
-            self.res_area[cur_event] = cur_res_area
+                cur_misfit_score[
+                    rel_ix * cur_n_sites : (rel_ix + 1) * cur_n_sites, :
+                ] = (cur_obs_data - cur_rel_data)
+                cur_sim_data[
+                    rel_ix * cur_n_sites : (rel_ix + 1) * cur_n_sites, :
+                ] = cur_rel_data
+            self.sim_n_records_event.append(cur_sim_data.shape[0])
 
-            self.sim_ims[cur_event] = (
-                cur_sim_data - self.ims_mean[self.ims].values[None, :, None]
-            ) / self.ims_std[self.ims].values[None, :, None]
+            # Compute misfit score
+            cur_misfit_score = np.sum(im_weights * cur_misfit_score ** 2, axis=1)
+            self.misfit_score.append(cur_misfit_score)
+
+            # Normalise & Append
+            # TODO: Re-enable
+            # cur_obs_data = (cur_obs_data - self.ims_mean[self.ims].values) / self.ims_std[self.ims].values
+            self.obs_ims.append(cur_obs_data)
+
+            # cur_sim_data = (cur_sim_data - self.ims_mean[self.ims].values) / self.ims_std[self.ims].values
+            self.sim_ims.append(cur_sim_data)
 
             # Get the (absolute) spatial correlations
-            cur_corrs_values = np.ones((cur_sites.size, cur_sites.size, len(self.ims)))
+            # Stored per site-combination
+            cur_site_combs = self.event_site_combs[cur_event]
+            cur_corrs_values = np.ones((cur_site_combs.shape[0], len(self.ims)))
             if sim_corr_dir is not None:
                 cur_corrs = pd.read_pickle(sim_corr_dir / f"{cur_event}.pickle")
-                for ix, cur_im in enumerate(self.ims):
-                    cur_corr_df = cur_corrs.get_im_corrs(cur_im)
-                    cur_corrs_values[:, :, ix] = np.abs(
-                        cur_corr_df.loc[cur_sites, cur_sites].values
+
+                for im_ix, cur_im in enumerate(self.ims):
+                    cur_corr_df = cur_corrs.get_im_corrs(cur_im).loc[
+                        cur_sites, cur_sites
+                    ]
+                    cur_corrs_values[:, im_ix] = np.abs(
+                        cur_corr_df.values[cur_site_combs[:, 0], cur_site_combs[:, 1]]
                     )
 
-            self.corr[cur_event] = cur_corrs_values
+            self.corr.append(cur_corrs_values)
+
+        self.sim_ims = np.concatenate(self.sim_ims, axis=0)
+        self.obs_ims = np.concatenate(self.obs_ims, axis=0)
+        self.misfit_score = np.concatenate(self.misfit_score, axis=0)
+        self.corr = np.concatenate(self.corr, axis=0)
+
+        self.n_rels_event = pd.Series(self.n_rels_event)
+        self.cum_sim_n_records_event = np.cumsum(self.sim_n_records_event)
+
+        # Convert all site-combination to a dataframe for fast indexing
+        site_combs_df, sim_ims_df = [], []
+        site_combs_ix, sim_ims_ix = 0, 0
+        for cur_event in self.events:
+            # Site Combinations
+            cur_site_comb_df = pd.DataFrame(
+                self.event_site_combs[cur_event], columns=["site_int", "site_obs"]
+            )
+            cur_site_comb_df["event"] = cur_event
+            cur_site_comb_df["ix"] = np.arange(
+                site_combs_ix, site_combs_ix + cur_site_comb_df.shape[0]
+            )
+            site_combs_ix += cur_site_comb_df.shape[0]
+            site_combs_df.append(cur_site_comb_df)
+
+        self.site_combs_df = pd.concat(site_combs_df)
+        self.site_combs_df = self.site_combs_df.set_index("ix")
 
     def __len__(self):
         return int(np.sum(self.n_samples_event))
 
     def get_metadata(self, idx: int):
         """Get the metadata for a specific sample"""
-        event_ix, event, site_comb_ix, rel_1_ix, rel_2_ix = self.get_indices(idx)
+        raise NotImplementedError()
+        # event_ix, event, site_comb_ix, rel_1_ix, rel_2_ix = self.get_indices(idx)
+        #
+        # # Get the site of interest and observation site
+        # site_int_ix = self.site_combs[event][site_comb_ix, 0]
+        # site_obs_ix = self.site_combs[event][site_comb_ix, 1]
+        #
+        # site_int = self.event_sites[event][site_int_ix]
+        # site_obs = self.event_sites[event][site_obs_ix]
+        #
+        # rel_1 = self.event_rels[event][rel_1_ix]
+        # rel_2 = self.event_rels[event][rel_2_ix]
+        #
+        # return (event, site_int, site_obs, rel_1, rel_2)
 
-        # Get the site of interest and observation site
-        site_int_ix = self.site_combs[event][site_comb_ix, 0]
-        site_obs_ix = self.site_combs[event][site_comb_ix, 1]
-
-        site_int = self.event_sites[event][site_int_ix]
-        site_obs = self.event_sites[event][site_obs_ix]
-
-        rel_1 = self.event_rels[event][rel_1_ix]
-        rel_2 = self.event_rels[event][rel_2_ix]
-
-        return (event, site_int, site_obs, rel_1, rel_2)
-
-    def get_indices(self, idx: int):
+    def get_indices(self, ind: np.ndarray):
         # Have to it this way, as some events may not have samples
-        event_ix = np.flatnonzero(idx - self.cum_n_samples_event < 0)[0]
+        event_ind = np.argmax(ind - self.cum_n_samples_event[:, None] < 0, axis=0)
 
-        within_event_ix = (
-            idx - self.cum_n_samples_event[event_ix - 1] if event_ix > 0 else idx
+        within_event_ind = np.where(
+            event_ind > 0, ind - self.cum_n_samples_event[event_ind - 1], ind
         )
 
-        event = self.events[event_ix]
+        events = self.events[event_ind]
 
-        n_rels = self.n_rels_event[event]
-        # n_rel_combs = int((n_rels * (n_rels - 1)) / 2)
+        n_rels = self.n_rels_event[events].values
+
         n_rel_combs = n_rels ** 2 - n_rels
 
-        within_site_ix = int(within_event_ix % n_rel_combs)
+        within_site_ind = within_event_ind % n_rel_combs
 
-        # # Get the realisation indices
-        # # Based on https://stackoverflow.com/questions/27086195/linear-index-upper-triangular-matrix
-        # rel_1_ix = int(
-        #     n_rels
-        #     - 2
-        #     - np.floor(
-        #         np.sqrt(-8 * within_site_ix + 4 * n_rels * (n_rels - 1) - 7) / 2 - 0.5
-        #     )
-        # )
-        # rel_2_ix = int(
-        #     within_site_ix
-        #     + rel_1_ix
-        #     + 1
-        #     - n_rels * (n_rels - 1) / 2
-        #     + (n_rels - rel_1_ix) * ((n_rels - rel_1_ix) - 1) / 2
-        # )
+        row_length_m = n_rels - 1
 
-        row_length = n_rels - 1
-        rel_1_ix = within_site_ix // row_length
-        rel_2_ix = within_site_ix % row_length + (
-            within_site_ix % row_length >= rel_1_ix
+        rel_1_ind = within_site_ind // row_length_m
+
+        rel_2_ind = within_site_ind % row_length_m + (
+            within_site_ind % row_length_m >= rel_1_ind
         )
 
-        site_comb_ix = within_event_ix // n_rel_combs
+        site_comb_ind = within_event_ind // n_rel_combs
 
-        return event_ix, event, site_comb_ix, rel_1_ix, rel_2_ix
+        return event_ind, events, site_comb_ind, rel_1_ind, rel_2_ind
 
-    def __getitem__(self, idx: int):
-        event_ix, event, site_comb_ix, rel_1_ix, rel_2_ix = self.get_indices(idx)
+    def get_batch(self, batch_ind: np.ndarray):
+        event_ind, events, site_comb_ind, rel_1_ind, rel_2_ind = self.get_indices(
+            batch_ind
+        )
 
-        site_int_ix = self.site_combs[event][site_comb_ix, 0]
-        site_obs_ix = self.site_combs[event][site_comb_ix, 1]
+        # Site indices
+        event_site_comb_ind = (
+            np.where(event_ind > 0, self.cum_n_site_combs_event[event_ind - 1], 0)
+            + site_comb_ind
+        )
+        site_int_ind = self.site_combs_df.loc[event_site_comb_ind, "site_int"].values
+        site_obs_ind = self.site_combs_df.loc[event_site_comb_ind, "site_obs"].values
+
+        # Event - Site
+        event_site_int_ind = (
+            np.where(event_ind > 0, self.cum_n_sites_event[event_ind - 1], 0)
+            + site_int_ind
+        )
+        # event_site_obs_ind = np.where(event_ind > 0, self.cum_n_sites_event[event_ind - 1], 0) + site_obs_ind
+
+        # Event - Realisation - Site
+        sim_record_event_ind = np.where(
+            event_ind > 0, self.cum_sim_n_records_event[event_ind - 1], 0
+        )
+        sim_int_rel_1_ind = (
+            sim_record_event_ind
+            + rel_1_ind * self.n_sites_event[event_ind]
+            + site_int_ind
+        )
+        sim_int_rel_2_ind = (
+            sim_record_event_ind
+            + rel_2_ind * self.n_sites_event[event_ind]
+            + site_int_ind
+        )
+
+        sim_obs_rel_1_ind = (
+            sim_record_event_ind
+            + rel_1_ind * self.n_sites_event[event_ind]
+            + site_obs_ind
+        )
+        sim_obs_rel_2_ind = (
+            sim_record_event_ind
+            + rel_2_ind * self.n_sites_event[event_ind]
+            + site_obs_ind
+        )
+
+        sim_int_rel_1 = self.sim_ims[sim_int_rel_1_ind]
+        sim_int_rel_2 = self.sim_ims[sim_int_rel_2_ind]
+
+        sim_obs_rel_1 = self.sim_ims[sim_obs_rel_1_ind]
+        sim_obs_rel_2 = self.sim_ims[sim_obs_rel_2_ind]
+
+        obs_int = self.obs_ims[event_site_int_ind]
+
+        misfit_rel_1 = self.misfit_score[sim_int_rel_1_ind]
+        misfit_rel_2 = self.misfit_score[sim_int_rel_2_ind]
+
+        corr = self.corr[event_site_comb_ind]
+
+        scalar_features = self.scalar_features_values[event_site_comb_ind]
+
+        # Sanity checks
+        for ix in range(events.size):
+            event_ix = event_ind[ix]
+            site_comb_ix = site_comb_ind[ix]
+            event = events[ix]
+
+            rel_id_1 = self.event_rels[event][rel_1_ind[ix]]
+            rel_id_2 = self.event_rels[event][rel_2_ind[ix]]
+
+            site_int = self.event_sites[event][site_int_ind[ix]]
+            site_obs = self.event_sites[event][site_obs_ind[ix]]
+
+            site_int_ix = self.event_site_combs[event][site_comb_ix, 0]
+            site_obs_ix = self.event_site_combs[event][site_comb_ix, 1]
+
+            assert site_int_ix == site_int_ind[ix]
+            assert site_obs_ix == site_obs_ind[ix]
+
+            assert np.all(
+                self.scalar_features.site_features_data.loc[
+                    site_int, self.scalar_features.site_feature_keys
+                ]
+                == scalar_features[ix, : len(self.scalar_features.site_feature_keys)]
+            )
+            assert np.all(
+                self.scalar_features.site_features_data.loc[
+                    site_obs, self.scalar_features.site_feature_keys
+                ]
+                == scalar_features[
+                    ix,
+                    len(self.scalar_features.site_feature_keys) : len(
+                        self.scalar_features.site_feature_keys
+                    )
+                    * 2,
+                ]
+            )
+
+            obs_t = self.db.get_obs_data(
+                event,
+                [
+                    self.event_sites[event][site_int_ix],
+                    self.event_sites[event][site_obs_ix],
+                ],
+            )
+            assert np.allclose(
+                obs_t.loc[self.event_sites[event][site_int_ix], self.ims].values,
+                np.exp(obs_int[ix]),
+            )
+
+            sim_t = self.db.get_sim_data(
+                event,
+                [
+                    self.event_sites[event][site_int_ix],
+                    self.event_sites[event][site_obs_ix],
+                ],
+            )
+            assert np.allclose(
+                sim_t.loc[f"{event}_{site_int}_{rel_id_1}", self.ims].values.astype(
+                    float
+                ),
+                np.exp(sim_int_rel_1[ix]),
+            )
+            assert np.allclose(
+                sim_t.loc[f"{event}_{site_int}_{rel_id_2}", self.ims].values.astype(
+                    float
+                ),
+                np.exp(sim_int_rel_2[ix]),
+            )
+
+            assert np.allclose(
+                sim_t.loc[f"{event}_{site_obs}_{rel_id_1}", self.ims].values.astype(
+                    float
+                ),
+                np.exp(sim_obs_rel_1[ix]),
+            )
+            assert np.allclose(
+                sim_t.loc[f"{event}_{site_obs}_{rel_id_2}", self.ims].values.astype(
+                    float
+                ),
+                np.exp(sim_obs_rel_2[ix]),
+            )
+
+        print(f"wtf")
 
         return (
-            idx,
-            self.scalar_features_tensor[event][site_int_ix, site_obs_ix, :],
-            self.sim_ims[event][site_int_ix, :, rel_1_ix],
-            self.sim_ims[event][site_int_ix, :, rel_2_ix],
-            self.sim_ims[event][site_obs_ix, :, rel_1_ix],
-            self.sim_ims[event][site_obs_ix, :, rel_2_ix],
-            self.obs_ims[event][site_obs_ix],
-            self.res_area[event][site_int_ix, rel_1_ix],
-            self.res_area[event][site_int_ix, rel_2_ix],
-            self.corr[event][site_int_ix, site_obs_ix, :],
+            batch_ind,
+            self.scalar_features_values[events][site_int_ind, site_obs_ind, :],
+            self.sim_ims[events][site_int_ind, :, rel_1_ind],
+            self.sim_ims[events][site_int_ind, :, rel_2_ind],
+            self.sim_ims[events][site_obs_ind, :, rel_1_ind],
+            self.sim_ims[events][site_obs_ind, :, rel_2_ind],
+            self.obs_ims[events][site_obs_ind],
+            self.misfit_score[events][site_int_ind, rel_1_ind],
+            self.misfit_score[events][site_int_ind, rel_2_ind],
+            self.corr[events][site_int_ind, site_obs_ind, :],
         )
+
+    def __getitem__(self, idx: int):
+        raise NotImplementedError()
+
+        # event_ix, event, site_comb_ix, rel_1_ix, rel_2_ix = self.get_single_indices(idx)
+        #
+        # site_int_ix = self.site_combs[event][site_comb_ix, 0]
+        # site_obs_ix = self.site_combs[event][site_comb_ix, 1]
+        #
+        # return (
+        #     idx,
+        #     self.scalar_features_tensor[event][site_int_ix, site_obs_ix, :],
+        #     self.sim_ims[event][site_int_ix, :, rel_1_ix],
+        #     self.sim_ims[event][site_int_ix, :, rel_2_ix],
+        #     self.sim_ims[event][site_obs_ix, :, rel_1_ix],
+        #     self.sim_ims[event][site_obs_ix, :, rel_2_ix],
+        #     self.obs_ims[event][site_obs_ix],
+        #     self.res_area[event][site_int_ix, rel_1_ix],
+        #     self.res_area[event][site_int_ix, rel_2_ix],
+        #     self.corr[event][site_int_ix, site_obs_ix, :],
+        # )
 
 
 @dataclass
@@ -401,8 +646,9 @@ def train(
         prefetch_factor=25,
     )
 
-
-    im_weights = torch.from_numpy(train_dataset.im_weights).to(device, dtype=torch.float32)
+    im_weights = torch.from_numpy(train_dataset.im_weights).to(
+        device, dtype=torch.float32
+    )
 
     # loss = nn.BCELoss()
     loss = nn.BCEWithLogitsLoss(reduction="none")
@@ -440,7 +686,13 @@ def train(
                 true,
                 sample_weights,
             ) = compute_loss(
-                loss, pred, res_area_rel_1, res_area_rel_2, site_correlations, im_weights, device
+                loss,
+                pred,
+                res_area_rel_1,
+                res_area_rel_2,
+                site_correlations,
+                im_weights,
+                device,
             )
             cur_loss_value = cur_weighted_bce_loss_value
 
@@ -1130,6 +1382,7 @@ def data_prep(
     ims_std = np.std(np.log(obs_data.loc[:, run_config.ims]), axis=0)
 
     # Create the datasets
+    print(f"Creating datasets")
     train_dataset = PairDataset(
         train_event_sites,
         train_site_combs,
@@ -1184,7 +1437,9 @@ def data_prep(
     return train_dataset, val_dataset, scalar_features, metadata
 
 
-def create_model(hp_config: HyperParamsConfig, scalar_features: ml_data.ScalarFeatures, n_ims: int):
+def create_model(
+    hp_config: HyperParamsConfig, scalar_features: ml_data.ScalarFeatures, n_ims: int
+):
     # # Create the model
     # n_conv_layers = len(hp_config.kernel_sizes)
     # padding = (
@@ -1214,6 +1469,39 @@ def create_model(hp_config: HyperParamsConfig, scalar_features: ml_data.ScalarFe
     )
 
     return ranking_model
+
+
+class CustomTabularDataLoader:
+    """
+    Loosely based on
+    https://discuss.pytorch.org/t/dataloader-much-slower-than-manual-batching/27014/6
+    """
+
+    def __init__(self, dataset: PairDataset, batch_size: int, shuffle: bool):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+        # Calculate number of batches
+        self.n_samples = len(self.dataset)
+        self.n_batches = int(np.ceil(self.n_samples // self.batch_size))
+
+    def __iter__(self):
+        if self.shuffle:
+            self.indices = np.random.permutation(self.n_samples)
+        else:
+            self.indices = np.arange(self.n_samples)
+        self.i = 0
+        return self
+
+    def __next__(self):
+        if self.i >= len(self.dataset):
+            raise StopIteration
+
+        batch_ind = self.indices[
+            self.i : min(self.i + self.batch_size, self.n_samples - 1)
+        ]
+        return self.dataset.get_batch(batch_ind)
 
 
 # @nb.njit
