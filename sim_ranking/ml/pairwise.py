@@ -268,11 +268,10 @@ class PairDataset(Dataset):
             self.misfit_score.append(cur_misfit_score)
 
             # Normalise & Append
-            # TODO: Re-enable
-            # cur_obs_data = (cur_obs_data - self.ims_mean[self.ims].values) / self.ims_std[self.ims].values
+            cur_obs_data = (cur_obs_data - self.ims_mean[self.ims].values) / self.ims_std[self.ims].values
             self.obs_ims.append(cur_obs_data)
 
-            # cur_sim_data = (cur_sim_data - self.ims_mean[self.ims].values) / self.ims_std[self.ims].values
+            cur_sim_data = (cur_sim_data - self.ims_mean[self.ims].values) / self.ims_std[self.ims].values
             self.sim_ims.append(cur_sim_data)
 
             # Get the (absolute) spatial correlations
@@ -371,7 +370,7 @@ class PairDataset(Dataset):
             batch_ind
         )
 
-        # Site indices
+        # Site Combination indices
         event_site_comb_ind = (
             np.where(event_ind > 0, self.cum_n_site_combs_event[event_ind - 1], 0)
             + site_comb_ind
@@ -384,7 +383,6 @@ class PairDataset(Dataset):
             np.where(event_ind > 0, self.cum_n_sites_event[event_ind - 1], 0)
             + site_int_ind
         )
-        # event_site_obs_ind = np.where(event_ind > 0, self.cum_n_sites_event[event_ind - 1], 0) + site_obs_ind
 
         # Event - Realisation - Site
         sim_record_event_ind = np.where(
@@ -427,101 +425,17 @@ class PairDataset(Dataset):
 
         scalar_features = self.scalar_features_values[event_site_comb_ind]
 
-        # Sanity checks
-        for ix in range(events.size):
-            event_ix = event_ind[ix]
-            site_comb_ix = site_comb_ind[ix]
-            event = events[ix]
-
-            rel_id_1 = self.event_rels[event][rel_1_ind[ix]]
-            rel_id_2 = self.event_rels[event][rel_2_ind[ix]]
-
-            site_int = self.event_sites[event][site_int_ind[ix]]
-            site_obs = self.event_sites[event][site_obs_ind[ix]]
-
-            site_int_ix = self.event_site_combs[event][site_comb_ix, 0]
-            site_obs_ix = self.event_site_combs[event][site_comb_ix, 1]
-
-            assert site_int_ix == site_int_ind[ix]
-            assert site_obs_ix == site_obs_ind[ix]
-
-            assert np.all(
-                self.scalar_features.site_features_data.loc[
-                    site_int, self.scalar_features.site_feature_keys
-                ]
-                == scalar_features[ix, : len(self.scalar_features.site_feature_keys)]
-            )
-            assert np.all(
-                self.scalar_features.site_features_data.loc[
-                    site_obs, self.scalar_features.site_feature_keys
-                ]
-                == scalar_features[
-                    ix,
-                    len(self.scalar_features.site_feature_keys) : len(
-                        self.scalar_features.site_feature_keys
-                    )
-                    * 2,
-                ]
-            )
-
-            obs_t = self.db.get_obs_data(
-                event,
-                [
-                    self.event_sites[event][site_int_ix],
-                    self.event_sites[event][site_obs_ix],
-                ],
-            )
-            assert np.allclose(
-                obs_t.loc[self.event_sites[event][site_int_ix], self.ims].values,
-                np.exp(obs_int[ix]),
-            )
-
-            sim_t = self.db.get_sim_data(
-                event,
-                [
-                    self.event_sites[event][site_int_ix],
-                    self.event_sites[event][site_obs_ix],
-                ],
-            )
-            assert np.allclose(
-                sim_t.loc[f"{event}_{site_int}_{rel_id_1}", self.ims].values.astype(
-                    float
-                ),
-                np.exp(sim_int_rel_1[ix]),
-            )
-            assert np.allclose(
-                sim_t.loc[f"{event}_{site_int}_{rel_id_2}", self.ims].values.astype(
-                    float
-                ),
-                np.exp(sim_int_rel_2[ix]),
-            )
-
-            assert np.allclose(
-                sim_t.loc[f"{event}_{site_obs}_{rel_id_1}", self.ims].values.astype(
-                    float
-                ),
-                np.exp(sim_obs_rel_1[ix]),
-            )
-            assert np.allclose(
-                sim_t.loc[f"{event}_{site_obs}_{rel_id_2}", self.ims].values.astype(
-                    float
-                ),
-                np.exp(sim_obs_rel_2[ix]),
-            )
-
-        print(f"wtf")
-
         return (
             batch_ind,
-            self.scalar_features_values[events][site_int_ind, site_obs_ind, :],
-            self.sim_ims[events][site_int_ind, :, rel_1_ind],
-            self.sim_ims[events][site_int_ind, :, rel_2_ind],
-            self.sim_ims[events][site_obs_ind, :, rel_1_ind],
-            self.sim_ims[events][site_obs_ind, :, rel_2_ind],
-            self.obs_ims[events][site_obs_ind],
-            self.misfit_score[events][site_int_ind, rel_1_ind],
-            self.misfit_score[events][site_int_ind, rel_2_ind],
-            self.corr[events][site_int_ind, site_obs_ind, :],
+            scalar_features,
+            sim_int_rel_1,
+            sim_int_rel_2,
+            sim_obs_rel_1,
+            sim_obs_rel_2,
+            obs_int,
+            misfit_rel_1,
+            misfit_rel_2,
+            corr,
         )
 
     def __getitem__(self, idx: int):
