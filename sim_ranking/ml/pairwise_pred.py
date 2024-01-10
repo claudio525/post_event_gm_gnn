@@ -4,6 +4,7 @@ from typing import Dict
 
 import pandas as pd
 import numpy as np
+import numba as nb
 import torch
 
 import ml_tools as mlt
@@ -18,8 +19,7 @@ from . import features
 def prep_data(results_dir: Path):
     metadata = mlt.utils.load_yaml(results_dir / "meta.yaml")
 
-    db_ff = Path(os.path.expandvars(metadata["data"]["db"]))
-    db = DB(db_ff)
+    db = DB(Path(os.path.expandvars("$wdata")) / metadata["data"]["db"])
 
     event_df = db.get_event_df()
     record_df = db.get_record_df()
@@ -204,8 +204,8 @@ def get_site_prediction(
     pSA_tensor = torch.stack(pSA_tensor)
 
     # Normalize the pSA data
-    pSA_mean = pd.Series(metadata["data"]["features"]["pSA_mean"])
-    pSA_std = pd.Series(metadata["data"]["features"]["pSA_std"])
+    pSA_mean = pd.Series(metadata["data"]["features"]["ims_mean"])
+    pSA_std = pd.Series(metadata["data"]["features"]["ims_std"])
     pSA_tensor = (
         pSA_tensor
         - pSA_mean.loc[constants.PSA_KEYS].values[None, None, :].astype(np.float32)
@@ -224,6 +224,22 @@ def get_site_prediction(
     pred = normalize_preds(rel_combs, pred)
 
     return pred, rel_combs
+
+
+@nb.njit
+def nb_normalize_preds(n_rels: int, pred: np.ndarray):
+    for i in range(n_rels):
+        for j in range(i + 1, n_rels):
+            # Conversion of matrix index to index into rel_combs
+            ix_1 = i * (n_rels - 1) + (j - 1)
+            ix_2 = (j * (n_rels - 1)) + i
+
+            # Normalize
+            pred[ix_1] = pred[ix_1] / (pred[ix_1] + pred[ix_2])
+            pred[ix_2] = 1 - pred[ix_1]
+
+    return pred
+
 
 
 def normalize_preds(rel_combs: np.ndarray, pred: np.ndarray):

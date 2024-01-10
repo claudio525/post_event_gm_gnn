@@ -27,16 +27,19 @@ def train_model(
     hyperparams_ffp: Path,
     max_dist: float = 75,
     debug: bool = False,
-    max_n_rels: int = 25,
+    train_max_n_rels: int = 25,
+    val_max_n_rels: int = 25,
     rel_sim_corr_dir: Path = None,
     id_suffix: str = "",
     data_source: str = None,
     im_set: str = "all",
+    quiet: bool = False,
 ):
     """Trains a single model"""
     run_config = pr.RunParamsConfig(
         max_dist,
-        max_n_rels,
+        train_max_n_rels,
+        val_max_n_rels,
         sr.constants.IM_SETS[im_set],
         sr.constants.IM_WEIGTHS_SETS[im_set],
         debug,
@@ -72,7 +75,7 @@ def train_model(
     val_int_sites = np.random.choice(all_sites, 100, replace=False)
     train_sites = np.setdiff1d(all_sites, val_int_sites)
 
-    val_events = np.random.choice(events, 100, replace=False)
+    val_events = np.random.choice(events, 75, replace=False)
     train_events = np.setdiff1d(events, val_events)
 
     # Data prep
@@ -88,46 +91,27 @@ def train_model(
         sim_corr_dir=sim_corr_dir,
     )
 
-    from torch.utils.data import DataLoader
-    from tqdm import tqdm
-
-    data_loader = pr.CustomTabularDataLoader(train_dataset, hp_config.batch_size, True)
-    iter_loop = tqdm(data_loader)
-    iter_loop.set_description(f"Epoch 0/{hp_config.n_epochs}")
-
-    for i, t in enumerate(iter_loop):
-        pass
-
-    # # n_workers = 0 if run_config.debug else 8
-    # n_workers = 0
-    # train_dataloader = DataLoader(
-    #     train_dataset,
-    #     batch_size=hp_config.batch_size,
-    #     shuffle=True,
-    #     num_workers=n_workers,
-    #     pin_memory=True,
-    #     persistent_workers=True if n_workers > 0 else False,
-    #     prefetch_factor=25,
-    # )
+    # from torch.utils.data import DataLoader
+    # from tqdm import tqdm
     #
-    # iter_loop = tqdm(train_dataloader)
+    # data_loader = pr.CustomTabularDataLoader(train_dataset, 64_000, False)
+    # iter_loop = tqdm(data_loader)
     # iter_loop.set_description(f"Epoch 0/{hp_config.n_epochs}")
-    # for i, (
-    #         _,
-    #         scalar_features,
-    #         int_sim_ims_rel_1,
-    #         int_sim_ims_rel_2,
-    #         obs_sim_ims_rel_1,
-    #         obs_sim_ims_rel_2,
-    #         obs_obs_ims,
-    #         res_area_rel_1,
-    #         res_area_rel_2,
-    #         site_correlations,
-    # ) in enumerate(iter_loop):
-    #     pass
-
-    exit()
-
+    #
+    # ind = []
+    # for i, t in enumerate(iter_loop):
+    #     meta_df = pd.DataFrame(
+    #         train_dataset.get_metadata(t[0]),
+    #         index=["event_id", "site_int", "site_obs", "rel_1", "rel_2"],
+    #     ).T
+    #
+    #     m = (meta_df.event_id == "2012p003376") & (meta_df.site_int == "AKSS") & (meta_df.site_obs == "KPOC")
+    #     if np.count_nonzero(meta_df.loc[m]) > 0:
+    #         print(f"wtf")
+    #
+    #     ind.append(t[0])
+    #
+    # print(f"wtf")
 
     # Create the model
     ranking_model = pr.create_model(hp_config, scalar_features, len(run_config.ims))
@@ -135,7 +119,7 @@ def train_model(
 
     # Train
     metrics, best_model_state, best_model_epoch = pr.train(
-        ranking_model, train_dataset, val_dataset, device, hp_config, run_config
+        ranking_model, train_dataset, val_dataset, device, hp_config, run_config, quiet=quiet
     )
     ranking_model.load_state_dict(best_model_state)
 
@@ -147,8 +131,8 @@ def train_model(
         f"\tBCELoss: {metrics['bce_loss_hist_val'][best_model_epoch]:.4f}\n"
     )
 
-    data_metadata["db"] = rel_db_ffp
-    data_metadata["sim_corr_dir"] = rel_sim_corr_dir
+    data_metadata["db"] = str(rel_db_ffp)
+    data_metadata["sim_corr_dir"] = str(rel_sim_corr_dir)
 
     # Post-processing
     pr.post_processing(

@@ -23,41 +23,6 @@ from . import features
 from . import models
 from . import pairwise_pred
 from ..db import DB
-from .. import constants
-
-
-def compute_res_score(obs_ims: np.ndarray, sim_ims: np.ndarray, weights: np.ndarray):
-    """
-    Computes the similarity score for response spectrum
-
-    Parameters
-    ----------
-    obs_ims: array of floats
-        Observed IMs
-        Format [n_periods]
-    sim_ims: array of floats
-        Simulation realisation IMs
-        Format [n_realisations, n_periods]
-    weights: array of floats
-        Weights for each IM
-
-    Returns
-    -------
-    array of floats
-        Similarity score for each realisation
-        Format [n_realisations]
-    """
-    # Compute the residual
-    res = obs_ims[..., None] - sim_ims
-    # res_score = np.sum(np.abs(res), axis=1)
-    # res_score = np.average(res**2, axis=1, weights=weights)
-    res_score = np.sum(weights[None, :, None] * res ** 2, axis=1)
-
-    return res_score
-
-
-# def test(res_df: pd.DataFrame):
-#     return np.sum(constants.IM_weights * (res_df.loc[:, constants.IMs].values ** 2), axis=1)
 
 
 @dataclass
@@ -96,66 +61,6 @@ class HyperParamsConfig:
             "fc_units": self.fc_units,
         }
 
-
-class PairDataset2(Dataset):
-    def __init__(
-        self,
-        event_sites: Dict[str, np.ndarray],
-        site_combs: Dict[str, np.ndarray],
-        db: DB,
-        ims: Sequence[str],
-        im_weights: np.ndarray,
-        scalar_features: ml_data.ScalarFeatures,
-        ims_mean: np.ndarray,
-        ims_std: np.ndarray,
-        max_n_rels: int,
-        sim_corr_dir: Path = None,
-    ):
-        self.db = db
-        self.event_sites = event_sites
-        self.site_combs = site_combs
-
-        self.events = np.asarray(list(event_sites.keys()))
-
-        self.ims = np.asarray(ims)
-        self.im_weights = im_weights
-
-        self.ims_mean = ims_mean
-        self.ims_std = ims_std
-
-        self.scalar_features = scalar_features
-
-        self.n_events = len(self.event_sites)
-
-        self.n_rels_event = {}
-        self.event_rels = {}
-        self.sim_df = []
-        self.obs_df = []
-        for cur_event, cur_sites in event_sites.items():
-            # Load IM data
-            cur_sim_data = db.get_sim_data(cur_event, cur_sites)
-            cur_obs_df = db.get_obs_data(cur_event, cur_sites)
-            cur_obs_df.loc[:, self.ims] = np.log(cur_obs_df.loc[:, self.ims])
-
-            # Select a random subset of realisations
-            cur_rels = np.random.choice(
-                np.unique(cur_sim_data.rel_id.values.astype(str)),
-                max_n_rels,
-                replace=False,
-            )
-
-            # Filter
-            cur_sim_data = cur_sim_data.loc[
-                np.isin(cur_sim_data.rel_id, cur_rels)
-                & np.isin(cur_sim_data.site_id, cur_sites)
-            ]
-            cur_obs_df = cur_obs_df.loc[np.isin(cur_obs_df.site_id, cur_sites)]
-
-            self.sim_df.append(cur_sim_data)
-            self.obs_df.append(cur_obs_df)
-
-        self.sim_df = pd.concat(self.sim_df)
-        self.obs_df = pd.concat(self.obs_df)
 
 
 class PairDataset(Dataset):
@@ -268,10 +173,14 @@ class PairDataset(Dataset):
             self.misfit_score.append(cur_misfit_score)
 
             # Normalise & Append
-            cur_obs_data = (cur_obs_data - self.ims_mean[self.ims].values) / self.ims_std[self.ims].values
+            cur_obs_data = (
+                cur_obs_data - self.ims_mean[self.ims].values
+            ) / self.ims_std[self.ims].values
             self.obs_ims.append(cur_obs_data)
 
-            cur_sim_data = (cur_sim_data - self.ims_mean[self.ims].values) / self.ims_std[self.ims].values
+            cur_sim_data = (
+                cur_sim_data - self.ims_mean[self.ims].values
+            ) / self.ims_std[self.ims].values
             self.sim_ims.append(cur_sim_data)
 
             # Get the (absolute) spatial correlations
@@ -316,26 +225,46 @@ class PairDataset(Dataset):
 
         self.site_combs_df = pd.concat(site_combs_df)
         self.site_combs_df = self.site_combs_df.set_index("ix")
+        self.site_combs = self.site_combs_df[["site_int", "site_obs"]].values
+
+        self.sites = np.concatenate(
+            [self.event_sites[cur_event] for cur_event in self.events]
+        )
+        self.rels = np.concatenate(
+            [self.event_rels[cur_event] for cur_event in self.events]
+        )
 
     def __len__(self):
         return int(np.sum(self.n_samples_event))
 
-    def get_metadata(self, idx: int):
+    def get_metadata(self, batch_ind: Sequence[int]):
         """Get the metadata for a specific sample"""
-        raise NotImplementedError()
-        # event_ix, event, site_comb_ix, rel_1_ix, rel_2_ix = self.get_indices(idx)
-        #
-        # # Get the site of interest and observation site
-        # site_int_ix = self.site_combs[event][site_comb_ix, 0]
-        # site_obs_ix = self.site_combs[event][site_comb_ix, 1]
-        #
-        # site_int = self.event_sites[event][site_int_ix]
-        # site_obs = self.event_sites[event][site_obs_ix]
-        #
-        # rel_1 = self.event_rels[event][rel_1_ix]
-        # rel_2 = self.event_rels[event][rel_2_ix]
-        #
-        # return (event, site_int, site_obs, rel_1, rel_2)
+        (
+            event_ind,
+            events,
+            site_comb_ind,
+            rel_1_ind,
+            rel_2_ind,
+            event_site_comb_ind,
+            site_int_ind,
+            site_obs_ind,
+        ) = self.get_indices(batch_ind)
+
+        # Event Site indices
+        event_site_ind = np.where(
+            event_ind > 0, self.cum_n_sites_event[event_ind - 1], 0
+        )
+        event_site_int_ind = event_site_ind + site_int_ind
+        event_site_obs_ind = event_site_ind + site_obs_ind
+
+        return (
+            events,
+            self.sites[event_site_int_ind],
+            self.sites[event_site_obs_ind],
+            self.rels[rel_1_ind],
+            self.rels[rel_2_ind],
+        )
+
 
     def get_indices(self, ind: np.ndarray):
         # Have to it this way, as some events may not have samples
@@ -344,11 +273,9 @@ class PairDataset(Dataset):
         within_event_ind = np.where(
             event_ind > 0, ind - self.cum_n_samples_event[event_ind - 1], ind
         )
-
         events = self.events[event_ind]
 
         n_rels = self.n_rels_event[events].values
-
         n_rel_combs = n_rels ** 2 - n_rels
 
         within_site_ind = within_event_ind % n_rel_combs
@@ -363,20 +290,42 @@ class PairDataset(Dataset):
 
         site_comb_ind = within_event_ind // n_rel_combs
 
-        return event_ind, events, site_comb_ind, rel_1_ind, rel_2_ind
-
-    def get_batch(self, batch_ind: np.ndarray):
-        event_ind, events, site_comb_ind, rel_1_ind, rel_2_ind = self.get_indices(
-            batch_ind
-        )
-
         # Site Combination indices
         event_site_comb_ind = (
             np.where(event_ind > 0, self.cum_n_site_combs_event[event_ind - 1], 0)
             + site_comb_ind
         )
-        site_int_ind = self.site_combs_df.loc[event_site_comb_ind, "site_int"].values
-        site_obs_ind = self.site_combs_df.loc[event_site_comb_ind, "site_obs"].values
+        site_int_ind = self.site_combs[event_site_comb_ind, 0]
+        site_obs_ind = self.site_combs[event_site_comb_ind, 1]
+
+        # site_int = self.sites[site_int_ind]
+        # site_obs = self.sites[site_obs_ind]
+        #
+        # rel_1 = self.rels[rel_1_ind]
+        # rel_2 = self.rels[rel_2_ind]
+
+        return (
+            event_ind,
+            events,
+            site_comb_ind,
+            rel_1_ind,
+            rel_2_ind,
+            event_site_comb_ind,
+            site_int_ind,
+            site_obs_ind,
+        )
+
+    def get_batch(self, batch_ind: np.ndarray):
+        (
+            event_ind,
+            events,
+            site_comb_ind,
+            rel_1_ind,
+            rel_2_ind,
+            event_site_comb_ind,
+            site_int_ind,
+            site_obs_ind,
+        ) = self.get_indices(batch_ind)
 
         # Event - Site
         event_site_int_ind = (
@@ -463,7 +412,8 @@ class PairDataset(Dataset):
 @dataclass
 class RunParamsConfig:
     max_dist: float
-    max_n_rels: int
+    train_max_n_rels: int
+    val_max_n_rels: int
     ims: Sequence[str]
     im_weights: np.ndarray
 
@@ -471,6 +421,17 @@ class RunParamsConfig:
     device: str
 
     results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
+
+    def to_dict(self):
+        return {
+            "max_dist": self.max_dist,
+            "train_max_n_rels": self.train_max_n_rels,
+            "val_max_n_rels": self.val_max_n_rels,
+            "ims": self.ims,
+            "im_weights": self.im_weights.tolist(),
+            "debug": self.debug,
+            "device": self.device,
+        }
 
 
 def compute_loss(
@@ -520,6 +481,7 @@ def train(
     device: str,
     hp_config: HyperParamsConfig,
     run_config: RunParamsConfig,
+    quiet: bool = False,
 ):
     metrics = {
         "bce_loss_hist_train": torch.zeros(hp_config.n_epochs),
@@ -540,25 +502,30 @@ def train(
         ranking_model.parameters(), lr=hp_config.lr, weight_decay=hp_config.l2_reg
     )
 
-    n_workers = 0 if run_config.debug else 8
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=hp_config.batch_size,
-        shuffle=True,
-        num_workers=n_workers,
-        pin_memory=True,
-        persistent_workers=True if n_workers > 0 else False,
-        prefetch_factor=25,
+    train_dataloader = CustomTabularDataLoader(
+        train_dataset, hp_config.batch_size, True
     )
-    val_dataloader = DataLoader(
-        val_dataset,
-        batch_size=hp_config.batch_size,
-        shuffle=True,
-        num_workers=n_workers,
-        pin_memory=True,
-        persistent_workers=True if n_workers > 0 else False,
-        prefetch_factor=25,
-    )
+    val_dataloader = CustomTabularDataLoader(val_dataset, hp_config.batch_size, True)
+
+    # n_workers = 0 if run_config.debug else 8
+    # train_dataloader = DataLoader(
+    #     train_dataset,
+    #     batch_size=hp_config.batch_size,
+    #     shuffle=True,
+    #     num_workers=n_workers,
+    #     pin_memory=True,
+    #     persistent_workers=True if n_workers > 0 else False,
+    #     prefetch_factor=25,
+    # )
+    # val_dataloader = DataLoader(
+    #     val_dataset,
+    #     batch_size=hp_config.batch_size,
+    #     shuffle=True,
+    #     num_workers=n_workers,
+    #     pin_memory=True,
+    #     persistent_workers=True if n_workers > 0 else False,
+    #     prefetch_factor=25,
+    # )
 
     im_weights = torch.from_numpy(train_dataset.im_weights).to(
         device, dtype=torch.float32
@@ -568,7 +535,7 @@ def train(
     loss = nn.BCEWithLogitsLoss(reduction="none")
     for epoch_ix in range(hp_config.n_epochs):
         ranking_model.train()
-        iter_loop = tqdm(train_dataloader)
+        iter_loop = tqdm(train_dataloader, disable=quiet)
         iter_loop.set_description(f"Epoch {epoch_ix}/{hp_config.n_epochs}")
         for i, (
             _,
@@ -582,7 +549,6 @@ def train(
             res_area_rel_2,
             site_correlations,
         ) in enumerate(iter_loop):
-
             pred = get_prediction(
                 ranking_model,
                 scalar_features,
@@ -752,13 +718,18 @@ def get_prediction(
 def get_dataset_predictions(
     dataset: PairDataset, ranking_model: nn.Module, device: str
 ):
-    pred_dataloader = DataLoader(
-        dataset, shuffle=False, batch_size=4096, num_workers=0, pin_memory=True
-    )
+    pred_dataloader = CustomTabularDataLoader(dataset, int(1e6), False)
 
     im_weights = torch.from_numpy(dataset.im_weights).to(device, dtype=torch.float32)
 
-    results = []
+    results = {
+        "ids": [],
+        "pred": [],
+        "true": [],
+        "bce_loss": [],
+        "weighted_loss": [],
+        "weights": [],
+    }
     with torch.no_grad():
         loss = nn.BCEWithLogitsLoss(reduction="none")
         ranking_model.eval()
@@ -795,22 +766,31 @@ def get_dataset_predictions(
                 reduce=False,
             )
 
-            meta_df = pd.DataFrame(
-                [dataset.get_metadata(ix) for ix in data_ind],
-                columns=["event_id", "site_int", "site_obs", "rel_1", "rel_2"],
-            )
-            meta_df["pred"] = (
+            cur_data = dataset.get_metadata(data_ind)
+            cur_ids = pd.DataFrame()
+            cur_ids["event_id"] = pd.Categorical(cur_data[0])
+            cur_ids["site_int"] = pd.Categorical(cur_data[1])
+            cur_ids["site_obs"] = pd.Categorical(cur_data[2])
+            cur_ids["rel_1"] = pd.Categorical(cur_data[3])
+            cur_ids["rel_2"] = pd.Categorical(cur_data[4])
+
+            results["ids"].append(cur_ids)
+            results["pred"].append(
                 torch.nn.functional.sigmoid(pred).numpy(force=True).ravel()
             )
-            meta_df["true"] = true.numpy(force=True).ravel()
-            meta_df["bce_loss"] = bce_loss_value.numpy(force=True).ravel()
-            meta_df["weighted_loss"] = weighted_loss_value.numpy(force=True).ravel()
-            meta_df["weights"] = weights.numpy(force=True).ravel()
+            results["true"].append(true.numpy(force=True).ravel())
+            results["bce_loss"].append(bce_loss_value.numpy(force=True).ravel())
+            results["weighted_loss"].append(weighted_loss_value.numpy(force=True).ravel())
+            results["weights"].append(weights.numpy(force=True).ravel())
 
-            results.append(meta_df)
+        # Create the dataframe
+        result_df = pd.concat(results["ids"])
+        result_df = result_df.reset_index()
+        for k, v in results.items():
+            if k != "ids":
+                result_df[k] = np.concatenate(v)
 
-        results = pd.concat(results, axis=0, ignore_index=True)
-        return results
+        return result_df
 
 
 def _get_sample_distribution(comp_results_df: pd.DataFrame):
@@ -819,19 +799,19 @@ def _get_sample_distribution(comp_results_df: pd.DataFrame):
     (event, site_int, site_obs) combination
     """
     rankings_df = []
-    groups = comp_results_df.groupby(["event_id", "site_int", "site_obs"])
+    groups = comp_results_df.groupby(["event_id", "site_int", "site_obs"], observed=True)
     for (cur_event, cur_site_int, cur_site_obs), cur_group in groups:
         cur_group = cur_group.sort_values(["rel_1", "rel_2"])
         cur_rel_combs = cur_group[["rel_1", "rel_2"]].values
         cur_pred = cur_group["pred"].values
 
         # pairwise_pred.get_site_ranking(cur_pred)
-        cur_pred = pairwise_pred.normalize_preds(cur_rel_combs, cur_pred)
+        cur_pred = pairwise_pred.nb_normalize_preds(np.unique(cur_rel_combs).size, cur_pred.copy())
         cur_ranking, cur_comps_won = pairwise_pred.get_site_ranking(
             cur_pred, cur_rel_combs
         )
 
-        comp_results_df.loc[cur_group.index, "pred"] = cur_pred
+        comp_results_df.loc[cur_group.index.values, "pred"] = cur_pred
         cur_rank_df = pd.DataFrame(
             data=[cur_ranking, np.arange(1, cur_ranking.size + 1), cur_comps_won],
             index=["rel_id", "rank", "comps_won"],
@@ -839,9 +819,9 @@ def _get_sample_distribution(comp_results_df: pd.DataFrame):
         cur_rank_df["event_id"] = cur_event
         cur_rank_df["site_int"] = cur_site_int
         cur_rank_df["site_obs"] = cur_site_obs
-        # cur_rank_df["model_rel_prob"] = (
-        #     cur_rank_df["comps_won"] / cur_rank_df["comps_won"].sum()
-        # )
+        cur_rank_df["model_rel_prob"] = (
+            cur_rank_df["comps_won"] / cur_rank_df["comps_won"].sum()
+        )
 
         rankings_df.append(cur_rank_df)
 
@@ -1000,49 +980,57 @@ def _compute_model_residuals(
 #     return res_df, rel_votes
 
 
-def compute_residuals(df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame):
+def compute_residuals(rank_df: pd.DataFrame, sim_df: pd.DataFrame, obs_df: pd.DataFrame, run_config: RunParamsConfig):
     """
     Computes the residual for each row
     Required columns: event_id, site_int, rel_id
     """
-    df = df.copy()
+    rank_df = rank_df.copy()
 
-    group = df.groupby(["event_id", "site_int"])
+    group = rank_df.groupby(["event_id", "site_int"])
     for (cur_event, cur_site_int), cur_df in group:
         # Get the simulation data
         cur_sim_keys = mlt.array_utils.numpy_str_join(
             "_", cur_event, cur_site_int, cur_df.rel_id.values.astype(str)
         )
-        cur_sim_df = sim_df.loc[cur_sim_keys, constants.IMs]
+        cur_sim_df = sim_df.loc[cur_sim_keys, run_config.ims]
 
         # Compute the residual
         cur_res = (
             np.log(
                 obs_df.loc[
                     mlt.array_utils.numpy_str_join("_", cur_event, cur_site_int),
-                    constants.IMs,
+                    run_config.ims,
                 ].values.astype(float)
             )
             - np.log(cur_sim_df.values)
         )
 
-        df.loc[cur_df.index, constants.IMs] = cur_res
+        cur_misfit_score = np.sum(run_config.im_weights * cur_res ** 2, axis=1)
 
-    return df
+        rank_df.loc[cur_df.index, run_config.ims] = cur_res
+        rank_df.loc[cur_df.index, "misfit_score"] = cur_misfit_score
+
+    return rank_df
 
 
 def get_sample_weights(
-    sim_corr_dir: Path, cur_event: str, site_int: int, site_obs: np.ndarray
+    sim_corr_dir: Path,
+    cur_event: str,
+    site_int: int,
+    site_obs: np.ndarray,
+    ims: Sequence[str],
+    im_weights: np.ndarray,
 ):
     if sim_corr_dir is not None:
         site_corrs = pd.read_pickle(sim_corr_dir / f"{cur_event}.pickle")
         sample_weights = np.mean(
             np.abs(
-                site_corrs.get_site_im_corrs(site_int, constants.IMs)
+                site_corrs.get_site_im_corrs(site_int, ims)
                 .loc[site_obs]
                 .values
             )
-            * (constants.IM_weights * len(constants.IM_weights)),
+            * (im_weights * im_weights.size),
             axis=1,
         )
     # Uniform weights otherwise
@@ -1056,7 +1044,9 @@ def get_sample_weights(
     return pd.Series(index=site_obs, data=sample_weights, name="sample_weight")
 
 
-def compute_scenario_distribution(sample_results: pd.DataFrame, sim_corr_dir: Path):
+def compute_scenario_distribution(
+    sample_results: pd.DataFrame, sim_corr_dir: Path, run_config: RunParamsConfig
+):
     """
     Computes the realisation distribution for each scenario
     """
@@ -1066,7 +1056,7 @@ def compute_scenario_distribution(sample_results: pd.DataFrame, sim_corr_dir: Pa
         site_obs = cur_group.site_obs.unique()
 
         sample_weights = get_sample_weights(
-            sim_corr_dir, cur_event, cur_site_int, site_obs
+            sim_corr_dir, cur_event, cur_site_int, site_obs, run_config.ims, run_config.im_weights
         )
 
         # Compute the scenario realisation distribution
@@ -1077,7 +1067,9 @@ def compute_scenario_distribution(sample_results: pd.DataFrame, sim_corr_dir: Pa
         cur_result["event_id"] = cur_event
         cur_result["site_int"] = cur_site_int
         cur_result["rel_id"] = cur_result.index
-        # cur_result["model_rel_prob"] = cur_result["comps_won"] / cur_result["comps_won"].sum()
+        cur_result["model_rel_prob"] = cur_result["comps_won"] / cur_result["comps_won"].sum()
+        cur_result = cur_result.sort_values("comps_won", ascending=False)
+        cur_result["rank"] = np.arange(1, cur_result.shape[0] + 1)
         cur_result.index = mlt.array_utils.numpy_str_join(
             "_", cur_event, cur_site_int, cur_result.index.values.astype(str)
         )
@@ -1107,9 +1099,10 @@ def post_processing(
         / f"{mlt.utils.create_run_id(False)}{id_suffix}"
     ).mkdir()
 
-    db = DB(os.path.expandvars(data_metadata["db"]))
+    db = DB(Path(os.path.expandvars("$wdata")) / data_metadata["db"])
     sim_df = db.get_sim_df()
-    obs_df = db.get_obs_df(custom_record_id=True)
+    # obs_df = db.get_obs_df(custom_record_id=True)
+    obs_df = db.get_obs_df()
 
     # Get predictions
     print(f"Getting dataset predictions")
@@ -1132,24 +1125,24 @@ def post_processing(
 
     print(f"Computing sample residuals")
     start_time = time.time()
-    train_sample_results = compute_residuals(train_sample_results, sim_df, obs_df)
-    val_sample_results = compute_residuals(val_sample_results, sim_df, obs_df)
+    train_sample_results = compute_residuals(train_sample_results, sim_df, obs_df, run_config)
+    val_sample_results = compute_residuals(val_sample_results, sim_df, obs_df, run_config)
     print(f"Took {time.time() - start_time} to compute residuals")
 
     print(f"Computing scenario distributions")
     start_time = time.time()
     train_scenario_results = compute_scenario_distribution(
-        train_sample_results, sim_corr_dir
+        train_sample_results, sim_corr_dir, run_config
     )
     val_scenario_results = compute_scenario_distribution(
-        val_sample_results, sim_corr_dir
+        val_sample_results, sim_corr_dir, run_config
     )
     print(f"Took {time.time() - start_time} to compute scenario distributions")
 
     print(f"Computing scenario residuals")
     start_time = time.time()
-    train_scenario_results = compute_residuals(train_scenario_results, sim_df, obs_df)
-    val_scenario_results = compute_residuals(val_scenario_results, sim_df, obs_df)
+    train_scenario_results = compute_residuals(train_scenario_results, sim_df, obs_df, run_config)
+    val_scenario_results = compute_residuals(val_scenario_results, sim_df, obs_df, run_config)
     print(f"Took {time.time() - start_time} to compute scenario residuals")
 
     # Save results
@@ -1173,6 +1166,7 @@ def post_processing(
         "hp_config": hp_config.to_dict(),
         "best_epoch": best_epoch,
         "data": data_metadata,
+        "run_config": run_config.to_dict(),
     }
     mlt.utils.write_to_yaml(metadata, cur_out_dir / "meta.yaml")
 
@@ -1180,7 +1174,7 @@ def post_processing(
     draw_graph(
         ranking_model,
         input_size=[
-            (hp_config.batch_size, 5, len(constants.IMs)),
+            (hp_config.batch_size, 5, len(run_config.ims)),
             (hp_config.batch_size, scalar_features.n_scalar_features),
         ],
         expand_nested=True,
@@ -1306,7 +1300,7 @@ def data_prep(
         scalar_features,
         ims_mean,
         ims_std,
-        run_config.max_n_rels,
+        run_config.train_max_n_rels,
         sim_corr_dir=sim_corr_dir,
     )
 
@@ -1320,7 +1314,7 @@ def data_prep(
         ims_mean,
         ims_std,
         # run_config.max_n_rels,
-        max_n_rels=25,
+        max_n_rels=run_config.val_max_n_rels,
         sim_corr_dir=sim_corr_dir,
     )
 
@@ -1332,7 +1326,8 @@ def data_prep(
         "n_train_samples": len(train_dataset),
         "n_val_samples": len(val_dataset),
         "max_dist": run_config.max_dist,
-        "max_n_rels": run_config.max_n_rels,
+        "train_max_n_rels": run_config.train_max_n_rels,
+        "val_max_n_rels": run_config.val_max_n_rels,
         "features": {
             "site_features": scalar_features.site_feature_keys,
             "site_to_site_features": scalar_features.site_to_site_feature_keys,
@@ -1408,14 +1403,23 @@ class CustomTabularDataLoader:
         self.i = 0
         return self
 
+    def __len__(self):
+        return self.n_batches
+
     def __next__(self):
         if self.i >= len(self.dataset):
             raise StopIteration
 
         batch_ind = self.indices[
-            self.i : min(self.i + self.batch_size, self.n_samples - 1)
+            self.i : min(self.i + self.batch_size, self.n_samples)
         ]
-        return self.dataset.get_batch(batch_ind)
+        self.i += self.batch_size
+
+        # Convert to torch tensors
+        return [
+            torch.from_numpy(cur_array)
+            for cur_array in self.dataset.get_batch(batch_ind)
+        ]
 
 
 # @nb.njit

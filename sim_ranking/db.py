@@ -156,11 +156,11 @@ class DB:
         """Gets the simulation data"""
         return pd.read_sql("SELECT * FROM sim_im_data", self.con, index_col="record_id")
 
-    def get_obs_df(self, custom_record_id: bool = False):
+    def get_obs_df(self):
         """Gets the observation IM data"""
         result_df = pd.read_sql("SELECT * FROM obs_im_data", self.con, index_col="record_id")
-        if custom_record_id:
-            result_df.index = mlt.array_utils.numpy_str_join("_", result_df.event_id.values.astype(str), result_df.site_id.values.astype(str))
+        # if custom_record_id:
+        #     result_df.index = mlt.array_utils.numpy_str_join("_", result_df.event_id.values.astype(str), result_df.site_id.values.astype(str))
 
         return result_df
 

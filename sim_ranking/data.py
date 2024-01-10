@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import Sequence, NamedTuple, Dict, List, Union
 from dataclasses import dataclass
 
-import gmhazard_calc as gc
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
-
+import gmhazard_calc as gc
 from qcore.timeseries import BBSeis, read_ascii
 import ml_tools as mlt
 import spatial_hazard as sh
@@ -38,12 +38,17 @@ def gen_emp_synthetic_observed(
     site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")
 
     nzgmdb_df = pd.read_csv(nzgmdb_flat_file, dtype={"evid": str})
-    nzgmdb_df.index = mlt.array_utils.numpy_str_join("_", nzgmdb_df.evid.values.astype(str), nzgmdb_df.sta.values.astype(str))
+    nzgmdb_df.index = mlt.array_utils.numpy_str_join(
+        "_", nzgmdb_df.evid.values.astype(str), nzgmdb_df.sta.values.astype(str)
+    )
 
     # Shift the mean
     mean_cols = [f"{cur_im}_mean" for cur_im in constants.PSA_KEYS]
-    gm_params.loc[:, mean_cols] = np.log(np.exp(gm_params.loc[:, mean_cols]) + 0.25 * np.exp(gm_params.loc[:, mean_cols]))
-
+    std_total_cols = [f"{cur_im}_std_Total" for cur_im in constants.PSA_KEYS]
+    gm_params.loc[:, mean_cols] = (
+        gm_params.loc[:, mean_cols].values
+        + 0.5 * gm_params.loc[:, std_total_cols].values
+    )
 
     # Generate the realisation
     rels = gen_emp_realisations(gm_params, site_df, n_rels=1)
@@ -99,55 +104,25 @@ def gen_emp_realisations(
     )
     ims = constants.PSA_KEYS
 
+    # Generate the realisations
     result_dict = {}
-    col_names = ["mu", "between_event_sigma", "within_event_sigma"]
     for event_ix, cur_event in enumerate(events):
         print(f"Processing event: {cur_event}, {event_ix + 1}/{events.size}")
-        cur_df = gm_params.loc[gm_params.event == cur_event, :]
-        cur_sites = cur_df.site.values.astype(str)
-        n_sites = cur_sites.size
+        cur_df = gm_params.loc[gm_params.event == cur_event, :].set_index("site")
+        cur_sites = cur_df.index.values.astype(str)
 
-        im_values = np.full((n_sites, len(ims), n_rels), fill_value=np.nan)
-
-        # Generate realisations
-        for im_ix, cur_im in enumerate(ims):
-            cur_between_std = np.mean(cur_df.loc[:, f"{cur_im}_std_Inter"].values)
-            cur_within_std = cur_df.loc[:, f"{cur_im}_std_Intra"].values
-
-            cur_upper_mask = np.triu(np.ones((n_sites, n_sites), dtype=bool), k=1)
-            corr_values = sha.models.loth_baker_corr_model.get_correlations(
-                cur_im,
-                cur_im,
-                dist_matrix.loc[cur_sites, cur_sites].values[cur_upper_mask],
-            )
-
-            cur_R = np.eye(n_sites, n_sites)
-            cur_R[cur_upper_mask] = corr_values
-            cur_R = cur_R + np.tril(cur_R.T, k=-1)
-
-            cur_within_std_matrix = np.eye(n_sites, n_sites) * cur_within_std
-            t = (
-                np.eye(n_sites, n_sites) * cur_between_std ** 2
-                + cur_within_std_matrix @ cur_R @ cur_within_std_matrix
-            )
-            corr_matrix = np.eye(n_sites, n_sites) * cur_between_std ** 2 + np.einsum(
-                "i,ik,k-> ik", cur_within_std, cur_R, cur_within_std
-            )
-
-            assert np.all(corr_matrix == t)
-
-            cur_cols = [f"{cur_im}_mean", f"{cur_im}_std_Inter", f"{cur_im}_std_Intra"]
-            cur_im_values, _, __ = sh.im_dist.generate_im_values(
-                n_rels,
-                cur_R,
-                cur_df.loc[:, cur_cols].rename(columns=dict(zip(cur_cols, col_names))),
-            )
-            im_values[:, im_ix, :] = np.exp(cur_im_values.T)
+        im_values = sh.im_dist.gen_im_rels(
+            cur_df,
+            dist_matrix.loc[cur_sites, cur_sites],
+            ims,
+            n_rels,
+            corr_fn=sha.models.loth_baker_corr_model.get_correlations,
+        )
 
         # Save the results
         for ix in range(n_rels):
             cur_df = pd.DataFrame(
-                data=im_values[:, :, ix],
+                data=np.exp(im_values[:, :, ix]),
                 index=cur_sites,
                 columns=ims,
             )
