@@ -507,25 +507,7 @@ def train(
     )
     val_dataloader = CustomTabularDataLoader(val_dataset, hp_config.batch_size, True)
 
-    # n_workers = 0 if run_config.debug else 8
-    # train_dataloader = DataLoader(
-    #     train_dataset,
-    #     batch_size=hp_config.batch_size,
-    #     shuffle=True,
-    #     num_workers=n_workers,
-    #     pin_memory=True,
-    #     persistent_workers=True if n_workers > 0 else False,
-    #     prefetch_factor=25,
-    # )
-    # val_dataloader = DataLoader(
-    #     val_dataset,
-    #     batch_size=hp_config.batch_size,
-    #     shuffle=True,
-    #     num_workers=n_workers,
-    #     pin_memory=True,
-    #     persistent_workers=True if n_workers > 0 else False,
-    #     prefetch_factor=25,
-    # )
+
 
     im_weights = torch.from_numpy(train_dataset.im_weights).to(
         device, dtype=torch.float32
@@ -659,16 +641,16 @@ def train(
                     sample_weights[correct].sum().item()
                 )
 
-            metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
-            metrics["bce_loss_hist_val"][epoch_ix] /= len(val_dataloader)
-            metrics["acc_hist_val"][epoch_ix] /= len(val_dataloader.dataset)
-            metrics["weighted_acc_hist_val"][epoch_ix] /= len(val_dataloader.dataset)
+        metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
+        metrics["bce_loss_hist_val"][epoch_ix] /= len(val_dataloader)
+        metrics["acc_hist_val"][epoch_ix] /= len(val_dataloader.dataset)
+        metrics["weighted_acc_hist_val"][epoch_ix] /= len(val_dataloader.dataset)
 
-            # Keep track of the best model
-            if metrics[best_epoch_key][epoch_ix] < best_val_loss:
-                best_model_state = ranking_model.state_dict()
-                best_val_loss = metrics[best_epoch_key][epoch_ix]
-                best_model_epoch = epoch_ix
+        # Keep track of the best model
+        if metrics[best_epoch_key][epoch_ix] < best_val_loss:
+            best_model_state = ranking_model.state_dict()
+            best_val_loss = metrics[best_epoch_key][epoch_ix]
+            best_model_epoch = epoch_ix
 
         print(f"Epoch {epoch_ix + 1}/{hp_config.n_epochs}")
         print(
@@ -1204,8 +1186,6 @@ def data_prep(
     # EVENT_SITE_FEATURE_KEYS = []
     EVENT_SITE_TO_SITE_FEATURE_KEYS = ["angular_dist"]
 
-    WEIGHT_SITE_TO_SITE_FEATURE_KEYS = ["dist", "vs30_dist"]
-    WEIGHT_EVENT_SITE_TO_SITE_FEATURE_KEYS = ["angular_dist"]
 
     event_df = db.get_event_df()
     record_df = db.get_record_df()

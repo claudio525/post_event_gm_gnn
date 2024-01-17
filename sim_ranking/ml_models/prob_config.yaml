@@ -1,0 +1,19 @@
+# Training Params
+#batch_size: 512
+batch_size: 64
+lr: 0.001
+l2_reg: 0.005
+
+# Model Params
+# Independent Model
+fc_units: [64, 64,, 16]
+
+# Combined Model
+fc_im_units: [32, 16, 8]
+fc_ss_units: [32, 32]
+fc_comb_units: [32]
+
+
+
+
+

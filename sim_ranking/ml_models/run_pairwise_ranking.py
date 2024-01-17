@@ -91,28 +91,6 @@ def train_model(
         sim_corr_dir=sim_corr_dir,
     )
 
-    # from torch.utils.data import DataLoader
-    # from tqdm import tqdm
-    #
-    # data_loader = pr.CustomTabularDataLoader(train_dataset, 64_000, False)
-    # iter_loop = tqdm(data_loader)
-    # iter_loop.set_description(f"Epoch 0/{hp_config.n_epochs}")
-    #
-    # ind = []
-    # for i, t in enumerate(iter_loop):
-    #     meta_df = pd.DataFrame(
-    #         train_dataset.get_metadata(t[0]),
-    #         index=["event_id", "site_int", "site_obs", "rel_1", "rel_2"],
-    #     ).T
-    #
-    #     m = (meta_df.event_id == "2012p003376") & (meta_df.site_int == "AKSS") & (meta_df.site_obs == "KPOC")
-    #     if np.count_nonzero(meta_df.loc[m]) > 0:
-    #         print(f"wtf")
-    #
-    #     ind.append(t[0])
-    #
-    # print(f"wtf")
-
     # Create the model
     ranking_model = pr.create_model(hp_config, scalar_features, len(run_config.ims))
     ranking_model.to(device)

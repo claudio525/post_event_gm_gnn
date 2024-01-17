@@ -1,9 +1,11 @@
 from typing import Dict, Sequence, List
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 import pandas as pd
 import numpy as np
+import einops
 
 
 class PairWiseModel(nn.Module):
@@ -37,67 +39,123 @@ class PairWiseModel(nn.Module):
 
         return self.fc_layers(x)
 
+class ProbIndModel(nn.Module):
 
-class ResponseSpectrumSimModel(nn.Module):
-    def __init__(
-        self,
-        rs_kernel_sizes: List[int],
-        rs_n_channels: List[int],
-        rs_padding: List[int],
-        fc_units: List[int],
-        rs_input_length: int,
-        n_scalar_inputs: int,
-        n_outputs: int,
-        apply_sigmoid: bool = True,
-    ):
+    def __init__(self,
+                 fc_units: Sequence[int],
+                 n_scalar_inputs: int,
+                 n_ims: int,
+                 ):
         super().__init__()
 
-        self.n_rs_layers = len(rs_kernel_sizes)
-        self.n_fc_layers = len(fc_units)
+        self.fc_units = fc_units
+        self.n_scalar_inputs = n_scalar_inputs
+        self.n_ims = n_ims
 
-        ### Add the convolutional layers
-        self.rs_layers = nn.Sequential()
-        for i in range(self.n_rs_layers):
-            self.rs_layers.append(
-                nn.Conv1d(
-                    rs_n_channels[i],
-                    rs_n_channels[i + 1],
-                    rs_kernel_sizes[i],
-                    padding=rs_padding[i],
-                )
-            )
-            self.rs_layers.append(nn.ELU())
-            self.rs_layers.append(nn.MaxPool1d(2))
-        self.rs_layers.append(nn.Flatten())
+        input_size = n_ims * 3 + n_scalar_inputs
 
-        ### Add the fully connected layers
-        # Get the conv out size
-        conv_out_size = self.rs_layers(torch.zeros(1, 1, rs_input_length)).shape[-1]
-        fc_input_size = (conv_out_size * 3) + n_scalar_inputs
         self.fc_layers = nn.Sequential()
         for i in range(len(fc_units)):
             if i == 0:
-                self.fc_layers.append(nn.Linear(fc_input_size, fc_units[i]))
+                self.fc_layers.append(nn.Linear(input_size, fc_units[i]))
             else:
                 self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
 
-            self.fc_layers.append(nn.ELU())
+            if i == len(fc_units) - 1:
+                self.fc_layers.append(nn.Linear(fc_units[i], 1))
+            else:
+                self.fc_layers.append(nn.BatchNorm1d(self.fc_units[i]))
+                self.fc_layers.append(nn.LeakyReLU())
 
-        self.fc_layers.append(nn.Linear(self.fc_layers[-2].out_features, n_outputs))
-        if apply_sigmoid:
-            self.fc_layers.append(nn.Sigmoid())
+    def forward(self, im_values: torch.Tensor, scalar_values: torch.Tensor):
+        X_im = einops.rearrange(im_values, "batch type rel im -> batch rel (type im)")
+        X_ss = einops.repeat(scalar_values, "batch ss -> batch rel ss", rel=im_values.shape[2])
 
-    def forward(self, rs_int_sim, rs_obs_sim, rs_obs_obs, scalar_features):
-        rs_int_sim_out = self.rs_layers(rs_int_sim)
-        rs_obs_sim_out = self.rs_layers(rs_obs_sim)
-        rs_obs_obs_out = self.rs_layers(rs_obs_obs)
+        X = torch.cat((X_im, X_ss), axis=2)
+        X = einops.rearrange(X, "batch rel feature -> (batch rel) feature")
 
-        rs_conv_out = torch.cat(
-            (rs_int_sim_out, rs_obs_sim_out, rs_obs_obs_out, scalar_features), 1
-        )
+        X = self.fc_layers(X)
+        X = einops.rearrange(X, "(batch rel) 1 -> batch rel", batch=im_values.shape[0], rel=im_values.shape[2])
 
-        return self.fc_layers(rs_conv_out)
+        X = custom_sigmoid(X, 0.5)
 
+        pred = X / X.sum(axis=1, keepdims=True)
+        return pred
+
+
+class ProbCombModel(nn.Module):
+
+    def __init__(self,
+                 fc_im_units: Sequence[int],
+                 n_ims: int,
+                 fc_ss_units: Sequence[int],
+                 fc_comb_units: Sequence[int],
+                 n_ss_inputs: int,
+                 n_rels: int,
+                 ):
+        super().__init__()
+
+        self.n_rels = n_rels
+
+        self.fc_im_units = fc_im_units
+        self.fc_ss_units = fc_ss_units
+        self.fc_comb_units = fc_comb_units
+
+        self.im_input_size = n_ims * 3
+        self.n_ss_inputs = n_ss_inputs
+        self.comb_input_size = self.fc_im_units[-1] * self.n_rels + self.fc_ss_units[-1]
+
+
+
+        # IM layers
+        self.fc_im_layers = nn.Sequential()
+        for i in range(len(self.fc_im_units)):
+            if i == 0:
+                self.fc_im_layers.append(nn.Linear(self.im_input_size, self.fc_im_units[i]))
+            else:
+                self.fc_im_layers.append(nn.Linear(self.fc_im_units[i - 1], self.fc_im_units[i]))
+
+            self.fc_im_layers.append(nn.ELU())
+
+        # Site-to-site layers
+        self.fc_ss_layers = nn.Sequential()
+        for i in range(len(self.fc_ss_units)):
+            if i == 0:
+                self.fc_ss_layers.append(nn.Linear(self.n_ss_inputs, self.fc_ss_units[i]))
+            else:
+                self.fc_ss_layers.append(nn.Linear(self.fc_ss_units[i - 1], self.fc_ss_units[i]))
+
+            self.fc_ss_layers.append(nn.ELU())
+
+        # Combined layers
+        self.fc_comb_layers = nn.Sequential()
+        for i in range(len(self.fc_comb_units)):
+            if i == 0:
+                self.fc_comb_layers.append(nn.Linear(self.comb_input_size, self.fc_comb_units[i]))
+            else:
+                self.fc_comb_layers.append(nn.Linear(self.fc_comb_units[i - 1], self.fc_comb_units[i]))
+
+            self.fc_comb_layers.append(nn.ELU())
+
+        self.fc_comb_layers.append(nn.Linear(self.fc_comb_units[-1], self.n_rels))
+
+    def forward(self, im_values: torch.Tensor, ss_values: torch.Tensor):
+        X_im = []
+        for i in range(self.n_rels):
+            cur_im_values = einops.rearrange(im_values[:, :, i, :], "batch type im -> batch (type im)")
+            X_im.append(self.fc_im_layers(cur_im_values))
+
+        X_im = torch.cat(X_im, axis=1)
+        X_ss = self.fc_ss_layers(ss_values)
+
+        X_comb = torch.cat((X_im, X_ss), axis=1)
+        X_comb = self.fc_comb_layers(X_comb)
+
+        # X_comb = F.sigmoid(X_comb)
+        X_comb = custom_sigmoid(X_comb, 1.0)
+
+        # Normalise
+        return X_comb / X_comb.sum(axis=1, keepdims=True)
 
 
 class ExpWeightModel(nn.Module):
@@ -154,3 +212,7 @@ class MLPModel(nn.Module):
 
     def forward(self, x):
         return self.layers(x)
+
+
+def custom_sigmoid(x: torch.Tensor, a: float):
+    return 1 / (1 + torch.exp(-a * x))
