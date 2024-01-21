@@ -55,11 +55,31 @@ class HyperParamsConfig:
     l2_reg: float
     lr: float
 
+    use_im_sim_site_obs: bool
+    use_im_sim_site_int: bool
+    use_im_obs_site_obs: bool
+
+    use_res_site_obs: bool
+    use_res_sim_site_obs_sim_site_int: bool
+    use_res_obs_site_obs_sim_site_int: bool
+
     fc_units: Sequence[int]
 
     fc_im_units: Sequence[int]
     fc_ss_units: Sequence[int]
     fc_comb_units: Sequence[int]
+
+    def __post_init__(self):
+        self.n_im_features = sum(
+            [
+                self.use_im_sim_site_obs,
+                self.use_im_sim_site_int,
+                self.use_im_obs_site_obs,
+                self.use_res_site_obs,
+                self.use_res_sim_site_obs_sim_site_int,
+                self.use_res_obs_site_obs_sim_site_int,
+            ]
+        )
 
     @classmethod
     def from_yaml(cls, ffp: Path, n_epochs: int):
@@ -70,6 +90,12 @@ class HyperParamsConfig:
             params["batch_size"],
             params["l2_reg"],
             params["lr"],
+            params["im_sim_site_obs"],
+            params["im_sim_site_int"],
+            params["im_obs_site_obs"],
+            params["res_site_obs"],
+            params["res_sim_site_obs_sim_site_int"],
+            params["res_obs_site_obs_sim_site_int"],
             params["fc_units"],
             params["fc_im_units"],
             params["fc_ss_units"],
@@ -82,6 +108,13 @@ class HyperParamsConfig:
             "batch_size": self.batch_size,
             "l2_reg": self.l2_reg,
             "lr": self.lr,
+            "im_sim_site_obs": self.use_im_sim_site_obs,
+            "im_sim_site_int": self.use_im_sim_site_int,
+            "im_obs_site_obs": self.use_im_obs_site_obs,
+            "res_site_obs": self.use_res_site_obs,
+            "res_sim_site_obs_sim_site_int": self.use_res_sim_site_obs_sim_site_int,
+            "res_obs_site_obs_sim_site_int": self.use_res_obs_site_obs_sim_site_int,
+            "n_im_features": self.n_im_features,
             "fc_units": self.fc_units,
             "fc_im_units": self.fc_im_units,
             "fc_ss_units": self.fc_ss_units,
@@ -286,9 +319,10 @@ class ProbDataset(Dataset):
         )
 
         # Create the (normalised) IM inputs
+        self.norm_obs_ims, self.norm_sim_ims = [], []
         self.obs_ims, self.sim_ims = [], []
         self.misfit_score, self.corr = [], []
-        self.misfit = []
+        self.residual = []
         # self.sim_n_records_event = []
         for cur_event, cur_sites in event_sites.items():
             cur_n_sites = self.event_sites[cur_event].size
@@ -296,6 +330,7 @@ class ProbDataset(Dataset):
             # Observed
             cur_obs_data = db.get_obs_data(cur_event, cur_sites)
             cur_obs_data = np.log(cur_obs_data.loc[cur_sites, self.ims]).values
+            self.obs_ims.append(cur_obs_data)
 
             # Get the simulation data
             cur_rels = self.event_rels[cur_event]
@@ -307,25 +342,29 @@ class ProbDataset(Dataset):
             cur_sim_df.loc[:, self.ims] = np.log(cur_sim_df.loc[:, self.ims])
 
             cur_sim_data = einops.rearrange(
-                cur_sim_df.loc[:, self.ims].values, "(rel rec) im -> rec rel im", rel=run_config.n_rels
+                cur_sim_df.loc[:, self.ims].values,
+                "(rel rec) im -> rec rel im",
+                rel=run_config.n_rels,
             )
-            cur_misfit = cur_obs_data[:, None, :] - cur_sim_data
-            self.misfit.append(cur_misfit)
+            self.sim_ims.append(cur_sim_data)
+
+            # Residual
+            cur_residual = cur_obs_data[:, None, :] - cur_sim_data
+            self.residual.append(cur_residual)
 
             # Compute misfit score
-            cur_misfit_score = np.sum(self.im_weights * cur_misfit ** 2, axis=2)
+            cur_misfit_score = np.sum(self.im_weights * cur_residual ** 2, axis=2)
             self.misfit_score.append(cur_misfit_score)
 
             # # Normalise & Append
             cur_obs_data = (
                 cur_obs_data - self.ims_mean[self.ims].values
             ) / self.ims_std[self.ims].values
-            self.obs_ims.append(cur_obs_data)
-            #
+            self.norm_obs_ims.append(cur_obs_data)
             cur_sim_data = (
                 cur_sim_data - self.ims_mean[self.ims].values
             ) / self.ims_std[self.ims].values
-            self.sim_ims.append(cur_sim_data)
+            self.norm_sim_ims.append(cur_sim_data)
 
             # Get the (absolute) spatial correlations
             # Stored per site-combination
@@ -344,9 +383,11 @@ class ProbDataset(Dataset):
 
             self.corr.append(cur_corrs_values)
 
+        self.norm_sim_ims = np.concatenate(self.norm_sim_ims, axis=0)
+        self.norm_obs_ims = np.concatenate(self.norm_obs_ims, axis=0)
         self.sim_ims = np.concatenate(self.sim_ims, axis=0)
         self.obs_ims = np.concatenate(self.obs_ims, axis=0)
-        self.misfit = np.concatenate(self.misfit, axis=0)
+        self.residual = np.concatenate(self.residual, axis=0)
         self.misfit_score = np.concatenate(self.misfit_score, axis=0)
         self.corr = np.concatenate(self.corr, axis=0)
         self.corr_weights = einops.einsum(
@@ -377,7 +418,9 @@ class ProbDataset(Dataset):
         self.sites = np.concatenate(
             [self.event_sites[cur_event] for cur_event in self.events]
         )
-        self.rels = np.stack([self.event_rels[cur_event] for cur_event in self.events], axis=0)
+        self.rels = np.stack(
+            [self.event_rels[cur_event] for cur_event in self.events], axis=0
+        )
 
     def __len__(self):
         return int(np.sum(self.n_samples_event))
@@ -397,7 +440,7 @@ class ProbDataset(Dataset):
             self.sites[record_site_int_ind],
             self.sites[record_site_obs_ind],
             self.rels[event_ind],
-            self.misfit[record_site_int_ind],
+            self.residual[record_site_int_ind],
         )
 
     def get_indices(self, batch_ind: np.ndarray):
@@ -435,9 +478,13 @@ class ProbDataset(Dataset):
             record_site_obs_ind,
         ) = self.get_indices(batch_ind)
 
-        site_int_sims = self.sim_ims[record_site_int_ind, :, :]
-        site_obs_sims = self.sim_ims[record_site_obs_ind, :, :]
-        site_obs_obs = self.obs_ims[record_site_obs_ind, :]
+        site_int_norm_sim_ims = self.norm_sim_ims[record_site_int_ind, :, :]
+        site_obs_norm_sim_ims = self.norm_sim_ims[record_site_obs_ind, :, :]
+        site_obs_norm_obs_ims = self.norm_obs_ims[record_site_obs_ind, :]
+
+        site_int_sim_ims = self.sim_ims[record_site_int_ind, :, :]
+        site_obs_sim_ims = self.sim_ims[record_site_obs_ind, :, :]
+        site_obs_obs_ims = self.obs_ims[record_site_obs_ind, :]
 
         scalar_features = self.scalar_features_values[batch_ind]
         misfit_score = self.misfit_score[record_site_int_ind]
@@ -446,9 +493,12 @@ class ProbDataset(Dataset):
 
         return (
             batch_ind,
-            site_int_sims,
-            site_obs_sims,
-            site_obs_obs,
+            site_int_norm_sim_ims,
+            site_obs_norm_sim_ims,
+            site_obs_norm_obs_ims,
+            site_int_sim_ims,
+            site_obs_sim_ims,
+            site_obs_obs_ims,
             scalar_features,
             misfit_score,
             site_corr_weights,
@@ -513,13 +563,19 @@ def create_model(
         hp_config.fc_units,
         scalar_features.n_scalar_features,
         len(run_config.ims),
+        hp_config.n_im_features,
     )
 
     print(f"Model summary")
     summary(
         prob_model,
         input_size=[
-            (hp_config.batch_size, 3, run_config.n_rels, len(run_config.ims)),
+            (
+                hp_config.batch_size,
+                hp_config.n_im_features,
+                run_config.n_rels,
+                len(run_config.ims),
+            ),
             (hp_config.batch_size, scalar_features.n_scalar_features),
         ],
     )
@@ -536,7 +592,7 @@ def create_model(
 
 
 def train(
-    prob_model: models.ProbCombModel,
+    prob_model: models.ProbIndModel,
     train_dataset: ProbDataset,
     val_dataset: ProbDataset,
     hp_config: HyperParamsConfig,
@@ -567,20 +623,27 @@ def train(
         iter_loop.set_description(f"Epoch {epoch_ix}/{hp_config.n_epochs}")
         for i, (
             _,
-            site_int_sims,
-            site_obs_sims,
-            site_obs_obs,
+            site_int_norm_sim_ims,
+            site_obs_norm_sim_ims,
+            site_obs_norm_obs_ims,
+            site_int_sim_ims,
+            site_obs_sim_ims,
+            site_obs_obs_ims,
             scalar_features,
             misfit_score,
             site_corr_weights,
         ) in enumerate(iter_loop):
             pred = get_prediction(
                 prob_model,
-                site_obs_obs,
-                site_int_sims,
-                site_obs_sims,
+                site_obs_norm_obs_ims,
+                site_int_norm_sim_ims,
+                site_obs_norm_sim_ims,
+                site_obs_obs_ims,
+                site_int_sim_ims,
+                site_obs_sim_ims,
                 scalar_features,
                 run_config,
+                hp_config,
             )
             cur_loss = compute_loss(misfit_score, pred, site_corr_weights, run_config)
 
@@ -598,20 +661,27 @@ def train(
             prob_model.eval()
             for i, (
                 _,
-                site_int_sims,
-                site_obs_sims,
-                site_obs_obs,
+                site_int_norm_sim_ims,
+                site_obs_norm_sim_ims,
+                site_obs_norm_obs_ims,
+                site_int_sim_ims,
+                site_obs_sim_ims,
+                site_obs_obs_ims,
                 scalar_features,
                 misfit_score,
                 site_corr_weights,
             ) in enumerate(val_dataloader):
                 pred = get_prediction(
                     prob_model,
-                    site_obs_obs,
-                    site_int_sims,
-                    site_obs_sims,
+                    site_obs_norm_obs_ims,
+                    site_int_norm_sim_ims,
+                    site_obs_norm_sim_ims,
+                    site_obs_obs_ims,
+                    site_int_sim_ims,
+                    site_obs_sim_ims,
                     scalar_features,
                     run_config,
+                    hp_config,
                 )
 
                 cur_loss = compute_loss(
@@ -634,6 +704,7 @@ def train(
 
     return metrics, best_model_state, best_model_epoch
 
+
 def compute_loss(
     misfit_score: torch.Tensor,
     pred: torch.Tensor,
@@ -651,21 +722,57 @@ def compute_loss(
 
 def get_prediction(
     prob_model: models.ProbIndModel,
-    site_obs_obs: torch.Tensor,
-    site_int_sims: torch.Tensor,
-    site_obs_sims: torch.Tensor,
+    site_obs_norm_obs_ims: torch.Tensor,
+    site_int_norm_sim_ims: torch.Tensor,
+    site_obs_norm_sim_ims: torch.Tensor,
+    site_obs_obs_ims: torch.Tensor,
+    site_int_sim_ims: torch.Tensor,
+    site_obs_sim_ims: torch.Tensor,
     scalar_features: torch.Tensor,
     run_config: RunParamsConfig,
+    hp_config: HyperParamsConfig,
 ):
-    # Need observed value (at observation site) per realisation
-    site_obs_obs = einops.repeat(
-        site_obs_obs[:, None, :],
-        "batch rel im -> batch (n_rels rel) im",
-        n_rels=run_config.n_rels,
-    )
+    im_data = []
+    if hp_config.use_im_obs_site_obs:
+        # Need observed value (at observation site) per realisation
+        site_obs_norm_obs_ims = einops.repeat(
+            site_obs_norm_obs_ims[:, None, :],
+            "batch rel im -> batch (n_rels rel) im",
+            n_rels=run_config.n_rels,
+        )
+        im_data.append(site_obs_norm_obs_ims)
+
+    if hp_config.use_im_sim_site_obs:
+        im_data.append(site_obs_norm_sim_ims)
+
+    if hp_config.use_im_sim_site_int:
+        im_data.append(site_int_norm_sim_ims)
+
+    if hp_config.use_res_site_obs:
+        res_site_obs = site_obs_obs_ims[:, None, :] - site_obs_sim_ims
+        im_data.append(res_site_obs)
+
+    if hp_config.use_res_sim_site_obs_sim_site_int:
+        res_sim_site_obs_sim_site_int = (
+            site_obs_sim_ims - site_int_sim_ims
+        )
+        im_data.append(res_sim_site_obs_sim_site_int)
+
+    if hp_config.use_res_obs_site_obs_sim_site_int:
+        res_obs_site_obs_sim_site_int = (
+            site_obs_obs_ims[:, None, :] - site_int_sim_ims
+        )
+        im_data.append(res_obs_site_obs_sim_site_int)
+
+
+    # im_tensor = einops.rearrange(
+    #     [site_int_norm_sim_ims, site_obs_norm_sim_ims, site_obs_norm_obs_ims],
+    #     "type batch rel im -> batch type rel im",
+    # ).to(run_config.device, dtype=torch.float32)
+
 
     im_tensor = einops.rearrange(
-        [site_int_sims, site_obs_sims, site_obs_obs],
+        im_data,
         "type batch rel im -> batch type rel im",
     ).to(run_config.device, dtype=torch.float32)
 
@@ -673,7 +780,14 @@ def get_prediction(
 
     return prob_model(im_tensor, scalar_features)
 
-def get_dataset_predictions(dataset: ProbDataset, prob_model: models.ProbIndModel, run_config: RunParamsConfig):
+
+def get_dataset_predictions(
+    dataset: ProbDataset,
+    prob_model: models.ProbIndModel,
+    run_config: RunParamsConfig,
+    dist_matrix: pd.DataFrame,
+    hp_config: HyperParamsConfig,
+):
     pred_dataloader = CustomTabularDataLoader(dataset, int(1e5), shuffle=False)
 
     results = []
@@ -681,42 +795,75 @@ def get_dataset_predictions(dataset: ProbDataset, prob_model: models.ProbIndMode
         prob_model.eval()
         for i, (
             batch_ind,
-            site_int_sims,
-            site_obs_sims,
-            site_obs_obs,
+            site_int_norm_sim_ims,
+            site_obs_norm_sim_ims,
+            site_obs_norm_obs_ims,
+            site_int_sim_ims,
+            site_obs_sim_ims,
+            site_obs_obs_ims,
             scalar_features,
             misfit_score,
             site_corr_weights,
         ) in enumerate(pred_dataloader):
             pred = get_prediction(
                 prob_model,
-                site_obs_obs,
-                site_int_sims,
-                site_obs_sims,
+                site_obs_norm_obs_ims,
+                site_int_norm_sim_ims,
+                site_obs_norm_sim_ims,
+                site_obs_obs_ims,
+                site_int_sim_ims,
+                site_obs_sim_ims,
                 scalar_features,
                 run_config,
+                hp_config
             )
 
             events, site_int, site_obs, rels, misfit = dataset.get_metadata(batch_ind)
 
             cur_df = pd.DataFrame(
                 {
-                    "event_id": pd.Categorical(einops.repeat(events, "batch -> (batch rel)", rel=pred.shape[1])),
-                    "site_int": pd.Categorical(einops.repeat(site_int, "batch -> (batch rel)", rel=pred.shape[1])),
-                    "site_obs": pd.Categorical(einops.repeat(site_obs, "batch -> (batch rel)", rel=pred.shape[1])),
-                    "rel_id": pd.Categorical(einops.rearrange(rels, "batch rel -> (batch rel)")),
-                    "prob": einops.rearrange(pred, "batch rel -> (batch rel)").numpy(force=True),
-                    "misfit_score": einops.rearrange(misfit_score, "batch rel -> (batch rel)"),
-                    "site_corr_weights": einops.repeat(site_corr_weights, "batch -> (batch rel)", rel=pred.shape[1]),
+                    "event_id": pd.Categorical(
+                        einops.repeat(events, "batch -> (batch rel)", rel=pred.shape[1])
+                    ),
+                    "site_int": pd.Categorical(
+                        einops.repeat(
+                            site_int, "batch -> (batch rel)", rel=pred.shape[1]
+                        )
+                    ),
+                    "site_obs": pd.Categorical(
+                        einops.repeat(
+                            site_obs, "batch -> (batch rel)", rel=pred.shape[1]
+                        )
+                    ),
+                    "rel_id": pd.Categorical(
+                        einops.rearrange(rels, "batch rel -> (batch rel)")
+                    ),
+                    "prob": einops.rearrange(pred, "batch rel -> (batch rel)").numpy(
+                        force=True
+                    ),
+                    "misfit_score": einops.rearrange(
+                        misfit_score, "batch rel -> (batch rel)"
+                    ),
+                    "site_corr_weights": einops.repeat(
+                        site_corr_weights, "batch -> (batch rel)", rel=pred.shape[1]
+                    ),
                 }
             )
-            cur_df.loc[:, run_config.ims] = einops.rearrange(misfit, "batch rel im -> (batch rel) im")
+            cur_df.loc[:, run_config.ims] = einops.rearrange(
+                misfit, "batch rel im -> (batch rel) im"
+            )
+
+            cur_df["s2s_distance"] = dist_matrix.values[
+                dist_matrix.index.get_indexer_for(cur_df.site_int.values),
+                dist_matrix.columns.get_indexer_for(cur_df.site_obs.values),
+            ]
 
             results.append(cur_df)
 
         results_df = pd.concat(results, axis=0)
 
     return results_df
+
 
 def post_processing(
     prob_model: models.ProbIndModel,
@@ -735,13 +882,28 @@ def post_processing(
         / f"{mlt.utils.create_run_id(False)}{id_suffix}"
     ).mkdir()
 
-    train_sample_results = get_dataset_predictions(train_dataset, prob_model, run_config)
-    val_sample_results = get_dataset_predictions(val_dataset, prob_model, run_config)
+    # Compute the distance matrix
+    station_df = DB(
+        Path(os.path.expandvars("$wdata")) / data_metadata["db"]
+    ).get_site_df()
+    all_sites = np.unique(np.concatenate((train_dataset.sites, val_dataset.sites)))
+    dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, station_df)
+
+    ### Sample
+    train_sample_results = get_dataset_predictions(
+        train_dataset, prob_model, run_config, dist_matrix, hp_config
+    )
+    val_sample_results = get_dataset_predictions(
+        val_dataset, prob_model, run_config, dist_matrix, hp_config
+    )
 
     train_sample_results.to_parquet(cur_out_dir / "train_sample_results.parquet")
     val_sample_results.to_parquet(cur_out_dir / "val_sample_results.parquet")
 
-    train_scenario_results = compute_scenario_distribution(train_sample_results, run_config)
+    ### Scenario
+    train_scenario_results = compute_scenario_distribution(
+        train_sample_results, run_config
+    )
     val_scenario_results = compute_scenario_distribution(val_sample_results, run_config)
 
     train_scenario_results.to_parquet(cur_out_dir / "train_scenario_results.parquet")
@@ -766,7 +928,12 @@ def post_processing(
     draw_graph(
         prob_model,
         input_size=[
-            (hp_config.batch_size, 3, run_config.n_rels, len(run_config.ims)),
+            (
+                hp_config.batch_size,
+                hp_config.n_im_features,
+                run_config.n_rels,
+                len(run_config.ims),
+            ),
             (hp_config.batch_size, scalar_features.n_scalar_features),
         ],
         expand_nested=True,
@@ -775,7 +942,10 @@ def post_processing(
         directory=str(cur_out_dir),
     )
 
-def compute_scenario_distribution(sample_results: pd.DataFrame, run_config: RunParamsConfig):
+
+def compute_scenario_distribution(
+    sample_results: pd.DataFrame, run_config: RunParamsConfig
+):
     """
     Computes the realisation distribution for each scenario
     """
@@ -784,11 +954,27 @@ def compute_scenario_distribution(sample_results: pd.DataFrame, run_config: RunP
     for (cur_event, cur_site_int), cur_group in groups:
         cur_rel_group = cur_group.groupby("rel_id", observed=True)
 
-        wm = lambda x: np.sum(x.prob.values * (x.site_corr_weights.values / x.site_corr_weights.values.sum()))
+        wm = lambda x: np.sum(
+            x.prob.values
+            * (x.site_corr_weights.values / x.site_corr_weights.values.sum())
+        )
         cur_result = cur_rel_group.apply(wm).to_frame("prob")
         cur_result["event_id"] = cur_event
         cur_result["site_int"] = cur_site_int
         cur_result["rel_id"] = cur_result.index
+
+        cur_result["n_obs_sites"] = cur_group.site_obs.nunique()
+        cur_result["min_distance"] = cur_group.s2s_distance.min()
+        cur_result["max_distance"] = cur_group.s2s_distance.max()
+
+        cur_site_obs_first = cur_group.groupby("site_obs", observed=True).first()
+        cur_result["weighted_mean_distance"] = (
+            np.sum(
+                cur_site_obs_first.s2s_distance.values
+                * cur_site_obs_first.site_corr_weights.values
+            )
+            / cur_site_obs_first.site_corr_weights.values.sum()
+        )
 
         cur_residuals = cur_rel_group.first().loc[:, run_config.ims]
         assert np.all(cur_residuals.index == cur_result.rel_id)
@@ -802,4 +988,3 @@ def compute_scenario_distribution(sample_results: pd.DataFrame, run_config: RunP
 
     scenario_df = pd.concat(scenario_results, axis=0)
     return scenario_df
-

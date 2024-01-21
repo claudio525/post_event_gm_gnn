@@ -108,43 +108,6 @@ def preprocess_site_features(
     return station_df
 
 
-def compute_weight_features(
-    station_df: pd.DataFrame,
-    event_df: pd.DataFrame,
-    events: Sequence[str],
-    event_sites: Dict[str, np.ndarray],
-    dist_matrix: pd.DataFrame,
-    max_dist: float,
-):
-    ### Site-to-site features
-    site_to_site_features = {}
-    event_site_to_site_features = {}
-
-
-    site_to_site_features["dist"] = dist_matrix.copy()
-    site_to_site_features["vs30_dist"] = compute_vs30_dist(station_df)
-
-    # Compute the site-to-site angle wrt. the epicentre
-    event_site_to_site_features["angular_dist"] = compute_angular_distance(
-        station_df, event_df, events, event_sites, pre_process=False
-    )
-
-    return site_to_site_features, event_site_to_site_features
-
-
-def compute_vs30_dist(
-        station_df: pd.DataFrame
-):
-    vs30_dist = np.abs(
-        station_df.vs30.values[:, np.newaxis] - station_df.vs30.values[np.newaxis, :]
-    )
-    return pd.DataFrame(
-        data=vs30_dist,
-        index=station_df.index,
-        columns=station_df.index,
-    )
-
-
 def compute_scalar_features(
     events: np.ndarray,
     event_sites: Dict[str, np.ndarray],

@@ -45,19 +45,21 @@ class ProbIndModel(nn.Module):
                  fc_units: Sequence[int],
                  n_scalar_inputs: int,
                  n_ims: int,
+                 n_im_features: int
                  ):
         super().__init__()
 
         self.fc_units = fc_units
         self.n_scalar_inputs = n_scalar_inputs
         self.n_ims = n_ims
+        self.n_im_features = n_im_features
 
-        input_size = n_ims * 3 + n_scalar_inputs
+        self.input_size = n_ims * self.n_im_features + self.n_scalar_inputs
 
         self.fc_layers = nn.Sequential()
         for i in range(len(fc_units)):
             if i == 0:
-                self.fc_layers.append(nn.Linear(input_size, fc_units[i]))
+                self.fc_layers.append(nn.Linear(self.input_size, fc_units[i]))
             else:
                 self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
 

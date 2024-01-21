@@ -1,8 +1,9 @@
 import os
 import time
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, List, Tuple, Any
 
+import einops
 import pandas as pd
 import numpy as np
 
@@ -17,15 +18,18 @@ import spatial_hazard as sh
 import sim_ranking as sr
 import ml_tools as mlt
 
+
 @st.cache_data
 def get_metadata(results_dir: Path):
     return sr.data.get_meta(results_dir)
+
 
 @st.cache_data
 def load_training_metrics(results_dir: Path):
     metrics = pd.read_pickle(results_dir / "metrics.pickle")
 
     return metrics
+
 
 @st.cache_data
 def get_site_df(results_dir: Path):
@@ -42,6 +46,7 @@ def get_dist_matrix(results_dir: Path):
     return sh.im_dist.calculate_distance_matrix(
         site_df.index.values.astype(str), site_df
     )
+
 
 @st.cache_data
 def get_event_df(results_dir: Path):
@@ -73,6 +78,7 @@ def get_event_angular_distances(results_dir: Path):
         pre_process=False,
     )
 
+
 @st.cache_data
 def get_obs_df(results_dir: Path):
     metadata = get_metadata(results_dir)
@@ -102,16 +108,16 @@ def load_sample_results(results_dir: Path):
     train_results_df = pd.read_parquet(results_dir / "train_sample_results.parquet")
     val_results_df = pd.read_parquet(results_dir / "val_sample_results.parquet")
 
-    dist_matrix = get_dist_matrix(results_dir)
-
-    train_results_df["s2s_distance"] = dist_matrix.values[
-        dist_matrix.index.get_indexer_for(train_results_df.site_int.values),
-        dist_matrix.columns.get_indexer_for(train_results_df.site_obs.values),
-    ]
-    val_results_df["s2s_distance"] = dist_matrix.values[
-        dist_matrix.index.get_indexer_for(val_results_df.site_int.values),
-        dist_matrix.columns.get_indexer_for(val_results_df.site_obs.values),
-    ]
+    # dist_matrix = get_dist_matrix(results_dir)
+    #
+    # train_results_df["s2s_distance"] = dist_matrix.values[
+    #     dist_matrix.index.get_indexer_for(train_results_df.site_int.values),
+    #     dist_matrix.columns.get_indexer_for(train_results_df.site_obs.values),
+    # ]
+    # val_results_df["s2s_distance"] = dist_matrix.values[
+    #     dist_matrix.index.get_indexer_for(val_results_df.site_int.values),
+    #     dist_matrix.columns.get_indexer_for(val_results_df.site_obs.values),
+    # ]
 
     angular_distances = get_event_angular_distances(results_dir)
     for cur_event in train_results_df.event_id.unique():
@@ -152,7 +158,6 @@ def load_sample_results(results_dir: Path):
     return train_results_df, val_results_df
 
 
-
 def run_general_tab(results_dir: Path):
     # Load the metadata
     meta = get_metadata(results_dir)
@@ -189,83 +194,140 @@ def run_general_tab(results_dir: Path):
         st.text(f"{'L2:':<{padding}} {meta['hp_config']['l2_reg']}")
 
         st.markdown("### Run Config")
-        st.text(f"{'Number of realisations:':<{padding}} {meta['run_config']['n_rels']}")
+        st.text(
+            f"{'Number of realisations:':<{padding}} {meta['run_config']['n_rels']}"
+        )
         st.text(f"{'Max distance:':<{padding}} {meta['run_config']['max_dist']}")
 
 
 def _create_event_map(
     event: str,
     site_df: pd.DataFrame,
-    results_df: pd.DataFrame,
+    all_site_int: np.ndarray,
+    all_site_obs: np.ndarray,
     event_df: pd.DataFrame,
     site_int: str,
-    site_obs: str = None,
+    site_obs: np.ndarray,
 ):
-    # Map
-    event_sites = np.unique(results_df[results_df.event_id == event].site_int.values)
+    cur_site_obs_obs = set(site_obs).intersection(set(all_site_obs)) - set(all_site_int)
+    cur_site_obs_both = (
+        set(site_obs).intersection(set(all_site_int)).intersection(set(all_site_obs))
+    )
+
+    pot_site_both = (
+        set(all_site_int).intersection(set(all_site_obs))
+        - set(site_obs)
+        - set([site_int])
+    )
+
+    pot_site_obs = set(all_site_obs) - set(site_obs) - set([site_int]) - pot_site_both
+    pot_site_int = set(all_site_int) - set(site_obs) - set([site_int]) - pot_site_both
+
+    all_sites = np.unique(np.concatenate([all_site_obs, all_site_int]))
+    assert cur_site_obs_obs.union(cur_site_obs_both).union(pot_site_obs).union(
+        pot_site_int
+    ).union(pot_site_both).union([site_int]).union(site_obs) == set(all_sites)
+
+    # Convert sets to list
+    cur_site_obs_obs = list(cur_site_obs_obs)
+    cur_site_obs_both = list(cur_site_obs_both)
+    pot_site_obs = list(pot_site_obs)
+    pot_site_int = list(pot_site_int)
+    pot_site_both = list(pot_site_both)
+
     fig = go.Figure(
         data=[
             go.Scattermapbox(
-                lat=site_df.loc[event_sites].lat,
-                lon=site_df.loc[event_sites].lon,
+                lat=site_df.loc[pot_site_both].lat,
+                lon=site_df.loc[pot_site_both].lon,
                 mode="markers",
-                marker=dict(size=10),
-                hovertext=event_sites,
+                marker=dict(size=10, color="darkblue"),
+                hovertext=pot_site_both,
                 hoverinfo="text",
-                name="Sites",
+                name="Potential site of interest & observation site",
             ),
             go.Scattermapbox(
-                lat=[event_df.loc[event, "lat"]],
-                lon=[event_df.loc[event, "lon"]],
+                lat=site_df.loc[pot_site_obs].lat,
+                lon=site_df.loc[pot_site_obs].lon,
                 mode="markers",
-                marker=dict(size=20, color="orange"),
-                hovertext=event,
+                marker=dict(size=10, color="gray"),
+                hovertext=pot_site_obs,
                 hoverinfo="text",
-                name="Event",
+                name="Potential observation sites",
+            ),
+            go.Scattermapbox(
+                lat=site_df.loc[pot_site_int].lat,
+                lon=site_df.loc[pot_site_int].lon,
+                mode="markers",
+                marker=dict(size=10, color="blue"),
+                hovertext=pot_site_int,
+                hoverinfo="text",
+                name="Potential site of interests",
+            ),
+            go.Scattermapbox(
+                lat=site_df.loc[cur_site_obs_both].lat,
+                lon=site_df.loc[cur_site_obs_both].lon,
+                mode="markers",
+                marker=dict(size=15, color="orange"),
+                hovertext=cur_site_obs_both,
+                hoverinfo="text",
+                name=f"Observation site for {site_int} & site of interest",
+            ),
+            go.Scattermapbox(
+                lat=site_df.loc[cur_site_obs_obs].lat,
+                lon=site_df.loc[cur_site_obs_obs].lon,
+                mode="markers",
+                marker=dict(size=15, color="yellow"),
+                hovertext=cur_site_obs_obs,
+                hoverinfo="text",
+                name=f"Observation site for {site_int} and other sites",
             ),
             go.Scattermapbox(
                 lat=[site_df.loc[site_int, "lat"]],
                 lon=[site_df.loc[site_int, "lon"]],
                 mode="markers",
-                marker=dict(size=10, color="red"),
+                marker=dict(size=20, color="red"),
                 hovertext=site_int,
                 hoverinfo="text",
-                name="Site of Interest",
+                name="Site of interest",
+            ),
+            go.Scattermapbox(
+                lat=[event_df.loc[event, "lat"]],
+                lon=[event_df.loc[event, "lon"]],
+                mode="markers",
+                marker=dict(size=25, color="black"),
+                hovertext=event,
+                hoverinfo="text",
+                name="Event",
             ),
         ]
     )
-    if site_obs is not None:
-        fig.add_trace(
-            go.Scattermapbox(
-                lat=[site_df.loc[site_obs, "lat"]],
-                lon=[site_df.loc[site_obs, "lon"]],
-                mode="markers",
-                marker=dict(size=10, color="maroon"),
-                hovertext=site_obs,
-                hoverinfo="text",
-                name="Observation Site",
-            ),
-        )
 
     fig.update_layout(height=600, margin=dict(l=0, r=0, t=0, b=0))
     fig.update_mapboxes(
         accesstoken="pk.eyJ1IjoiY3MyMyIsImEiOiJjbGtpeXIxNnkwbDQ3M25xbDFrZWFnNHo3In0.OD7TJ_1PegpGvCOCxfHsnA",
         center=dict(
-            lat=site_df.loc[event_sites].lat.mean(),
-            lon=site_df.loc[event_sites].lon.mean(),
+            lat=site_df.loc[all_sites].lat.mean(),
+            lon=site_df.loc[all_sites].lon.mean(),
         ),
         zoom=8,
     )
 
     return fig
 
-def _scenario_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str):
+
+def _scenario_viewer(
+    results_dir: Path,
+    scenario_results: pd.DataFrame,
+    sample_results: pd.DataFrame,
+    tab_type: str,
+):
     site_df = get_site_df(results_dir)
     event_df = get_event_df(results_dir)
     obs_df = get_obs_df(results_dir)
     sim_df = get_sim_df(results_dir)
 
-    events = results_df.event_id.unique().astype("str")
+    events = scenario_results.event_id.unique().astype("str")
 
     col1, col2 = st.columns([1, 6])
 
@@ -274,7 +336,7 @@ def _scenario_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str)
 
         site_int = st.selectbox(
             "Site of Interest",
-            results_df.loc[(results_df.event_id == event)]
+            scenario_results.loc[(scenario_results.event_id == event)]
             .site_int.unique()
             .astype("str"),
             key=f"{tab_type}_site_int",
@@ -295,19 +357,35 @@ def _scenario_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str)
         st.markdown(f"Magnitude: {event_df.loc[event].mag}")
 
     with col2:
-        fig = _create_event_map(event, site_df, results_df, event_df, site_int)
+        fig = _create_event_map(
+            event,
+            site_df,
+            np.unique(
+                scenario_results.loc[
+                    scenario_results.event_id == event
+                ].site_int.values.astype(str)
+            ),
+            np.unique(
+                sample_results.loc[
+                    (sample_results.event_id == event)
+                ].site_obs.values.astype(str)
+            ),
+            event_df,
+            site_int,
+            sample_results.loc[
+                (sample_results.event_id == event)
+                & (sample_results.site_int == site_int)
+            ].site_obs.values.astype(str),
+        )
         st.plotly_chart(fig, use_container_width=True)
 
     # Get the relevant data
-    cur_event_rels = results_df.loc[
-        (results_df.event_id == event)].rel_id.unique().astype(str)
-
-    cur_scenario_df = (
-        results_df.loc[
-            (results_df.event_id == event)
-            & (results_df.site_int == site_int)
-        ]
+    cur_event_rels = (
+        scenario_results.loc[(scenario_results.event_id == event)]
+        .rel_id.unique()
+        .astype(str)
     )
+
     site_int_obs = (
         obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_int)]
         .iloc[0][sr.constants.PSA_KEYS]
@@ -319,16 +397,15 @@ def _scenario_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str)
         & np.isin(sim_df.rel_id, cur_event_rels)
     ]
 
-    cur_results_df = results_df.loc[
-        (results_df.event_id == event)
-        & (results_df.site_int == site_int)
-        ].set_index("rel_id")
+    cur_scenario_df = scenario_results.loc[
+        (scenario_results.event_id == event) & (scenario_results.site_int == site_int)
+    ].set_index("rel_id")
 
-    fig = create_dist_plot(site_int_sims, site_int_obs, cur_results_df, tab_type)
+    fig = create_dist_plot(site_int_sims, site_int_obs, cur_scenario_df, tab_type)
     st.pyplot(fig, use_container_width=False)
 
 
-def _sample_viewer(results_dir: Path, results_df: pd.DataFrame , type: str):
+def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, type: str):
     site_df = get_site_df(results_dir)
     event_df = get_event_df(results_dir)
     obs_df = get_obs_df(results_dir)
@@ -373,12 +450,24 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame , type: str):
 
     with col2:
         fig = _create_event_map(
-            event, site_df, results_df, event_df, site_int, site_obs
+            event,
+            site_df,
+            np.unique(
+                results_df.loc[results_df.event_id == event].site_int.values.astype(str)
+            ),
+            np.unique(
+                results_df.loc[results_df.event_id == event].site_obs.values.astype(str)
+            ),
+            event_df,
+            site_int,
+            np.asarray([site_obs]),
         )
 
         st.plotly_chart(fig, use_container_width=True)
 
-    cur_event_rels = results_df.loc[(results_df.event_id == event)].rel_id.unique().astype(str)
+    cur_event_rels = (
+        results_df.loc[(results_df.event_id == event)].rel_id.unique().astype(str)
+    )
 
     site_int_obs = (
         obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_int)]
@@ -405,10 +494,11 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame , type: str):
         (results_df.event_id == event)
         & (results_df.site_int == site_int)
         & (results_df.site_obs == site_obs)
-        ].set_index("rel_id")
+    ].set_index("rel_id")
 
     fig = create_dist_plot(site_int_sims, site_int_obs, cur_results_df, type)
     st.pyplot(fig, use_container_width=False)
+
 
 def create_dist_plot(
     site_int_sims: pd.DataFrame,
@@ -448,6 +538,7 @@ def create_dist_plot(
     fig.tight_layout()
     return fig
 
+
 def run_ind_samples(results_dir: Path, emp_gm_params_ffp: Path = None):
     train_sample_results, val_sample_results = load_sample_results(results_dir)
 
@@ -467,7 +558,9 @@ def run_ind_samples(results_dir: Path, emp_gm_params_ffp: Path = None):
             "val_sample",
         )
 
+
 def run_ind_scenario(results_dir: Path, emp_gm_params_ffp: Path = None):
+    train_sample_results, val_sample_results = load_sample_results(results_dir)
     train_scenario_results, val_scenario_results = load_scenario_results(results_dir)
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
@@ -476,6 +569,7 @@ def run_ind_scenario(results_dir: Path, emp_gm_params_ffp: Path = None):
         _scenario_viewer(
             results_dir,
             train_scenario_results,
+            train_sample_results,
             "train_scenario",
         )
 
@@ -483,7 +577,143 @@ def run_ind_scenario(results_dir: Path, emp_gm_params_ffp: Path = None):
         _scenario_viewer(
             results_dir,
             val_scenario_results,
+            val_sample_results,
             "val_scenario",
+        )
+
+
+def agg_residuals(
+    result_dir: Path,
+    results_df: pd.DataFrame,
+    tab_type: str,
+    filters: List[Tuple[str, str, Any, Any, Any, Any]],
+):
+    slider_vals = []
+    for ix, filter in enumerate(filters):
+        slider_vals.append(
+            st.slider(
+                filter[0],
+                filter[2],
+                filter[3],
+                filter[4],
+                step=filter[5],
+                key=f"{tab_type}_{ix}",
+            )
+        )
+
+    for filter, val in zip(filters, slider_vals):
+        results_df = results_df.loc[results_df[filter[1]] <= val]
+
+    st.text(f"Number of samples/scenarios: {int(np.ceil(results_df.prob.sum()))}")
+
+    im_residuals = results_df.loc[:, sr.constants.PSA_KEYS].values
+    weights = results_df.loc[:, "prob"].values
+
+    weighted_residual_mean = (
+        einops.einsum(im_residuals, weights, "i j, i -> j") / results_df.prob.sum()
+    )
+    weighted_residual_std = np.sqrt(
+        np.sum(
+            weights[:, None] * (im_residuals - weighted_residual_mean[None, :]) ** 2,
+            axis=0,
+        )
+        / results_df.prob.sum()
+    )
+
+    fig = plt.figure(figsize=(12, 6))
+
+    plt.semilogx(
+        sr.constants.PERIODS,
+        weighted_residual_mean,
+        label="Weighted Residual Mean",
+        c="b",
+    )
+    plt.semilogx(
+        sr.constants.PERIODS,
+        weighted_residual_mean + weighted_residual_std,
+        label="Weighted Residual Std",
+        c="b",
+        linestyle="--",
+    )
+    plt.semilogx(
+        sr.constants.PERIODS,
+        weighted_residual_mean - weighted_residual_std,
+        c="b",
+        linestyle="--",
+    )
+
+    plt.xlabel(f"Period (s)")
+    plt.ylabel(f"pSA")
+    plt.xlim([0.01, 10])
+    plt.ylim([-1.5, 1.5])
+    plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    plt.legend()
+    plt.tight_layout()
+
+    st.pyplot(fig, use_container_width=False)
+
+
+def run_agg_single(cur_results_dir: Path):
+    train_sample_results, val_sample_results = load_sample_results(cur_results_dir)
+
+    train_tab, val_tab = st.tabs(["Training", "Validation"])
+
+    with train_tab:
+        agg_residuals(
+            cur_results_dir,
+            train_sample_results,
+            "train_sample",
+            [("Max Distance", "s2s_distance", 0.0, 50.0, 50.0, 5.0)],
+        )
+
+    with val_tab:
+        agg_residuals(
+            cur_results_dir,
+            val_sample_results,
+            "val_sample",
+            [("Max Distance", "s2s_distance", 0.0, 50.0, 50.0, 5.0)],
+        )
+
+
+def run_agg_scenario(cur_results_dir: Path):
+    train_scenario_results, val_scenario_results = load_scenario_results(
+        cur_results_dir
+    )
+
+    train_tab, val_tab = st.tabs(["Training", "Validation"])
+
+    with train_tab:
+        agg_residuals(
+            cur_results_dir,
+            train_scenario_results,
+            "train_scenario",
+            [
+                (
+                    "Max Distance",
+                    "max_distance",
+                    train_scenario_results.min_distance.min(),
+                    train_scenario_results.min_distance.max(),
+                    train_scenario_results.min_distance.max(),
+                    5.0,
+                ),
+            ],
+        )
+
+    with val_tab:
+        agg_residuals(
+            cur_results_dir,
+            val_scenario_results,
+            "val_scenario",
+            [
+                (
+                    "Min Distance",
+                    "min_distance",
+                    train_scenario_results.min_distance.min(),
+                    train_scenario_results.min_distance.max(),
+                    train_scenario_results.min_distance.max(),
+                    5.0,
+                ),
+            ],
         )
 
 
@@ -536,12 +766,11 @@ def main(
         run_ind_scenario(cur_results_dir)
 
     with agg_single_tab:
-        pass
-        # run_agg_single(cur_results_dir)
+        # pass
+        run_agg_single(cur_results_dir)
 
     with agg_scenario_tab:
-        pass
-        # run_agg_scenario(cur_results_dir)
+        run_agg_scenario(cur_results_dir)
 
 
 if __name__ == "__main__":

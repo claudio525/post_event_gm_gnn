@@ -116,8 +116,6 @@ def train_model(
         id_suffix=id_suffix,
     )
 
-    print(f"wtf")
-
 
 if __name__ == "__main__":
     app()
