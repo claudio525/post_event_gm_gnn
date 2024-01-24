@@ -66,9 +66,12 @@ def gen_emp_realisations(
         gm_params, site_df, n_rels=n_rels
     )
 
-    for cur_event_rel, cur_df in results.items():
-        cur_df["component"] = "rotd50"
-        cur_df.to_csv(output_dir / f"{cur_event_rel}.csv")
+    pd.to_pickle(results, output_dir / "emp_realisations.pickle", compression=None)
+
+    # for cur_event_rel, cur_df in results.items():
+    #     cur_df["component"] = "rotd50"
+    #     cur_df.to_csv(output_dir / f"{cur_event_rel}.csv")
+        # cur_df.to_parquet(output_dir / f"{cur_event_rel}.parquet")
 
 
 @app.command("gen-emp-synthetic-observed")

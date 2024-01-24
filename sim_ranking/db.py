@@ -32,15 +32,22 @@ class DB:
         event_df = pd.read_csv(source_ffp, index_col=0)
         obs_df = data.load_obs_data(obs_ffp)
 
-        events, sites = set(), set()
+        # Load the data
         im_csvs = list(sim_im_dir.rglob("*.csv"))
-        for ix, cur_ffp in enumerate(im_csvs):
-            print(f"Processing {ix+1}/{len(im_csvs)}")
+        if len(im_csvs) == 0:
+            im_data = pd.read_pickle(sim_im_dir / "emp_realisations.pickle")
+        else:
+            im_data = {cur_ffp.stem: pd.read_csv(cur_ffp, index_col=0) for cur_ffp in im_csvs}
 
-            if "REL" in cur_ffp.stem:
-                cur_event_id, cur_rel_id = cur_ffp.stem.split("_")
+        # Process the data
+        events, sites = set(), set()
+        for ix, (cur_id, cur_im_df) in enumerate(im_data.items()):
+            print(f"Processing {ix+1}/{len(im_data)}")
+
+            if "REL" in cur_id:
+                cur_event_id, cur_rel_id = cur_id.split("_")
             else:
-                cur_event_id, cur_rel_id = cur_ffp.stem, "NA"
+                cur_event_id, cur_rel_id = cur_id, "NA"
 
             # Only interested in events with observation data
             if cur_event_id not in event_df.index:
@@ -49,8 +56,12 @@ class DB:
 
             ### Add the simulation IM data
             # Read simulation IM data
-            cur_im_df = pd.read_csv(cur_ffp, index_col=0)
-            cur_im_df = cur_im_df.loc[cur_im_df["component"] == "rotd50"]
+            # cur_im_df = pd.read_csv(cur_ffp, index_col=0)
+            if "component" in cur_im_df.columns:
+                cur_im_df = cur_im_df.loc[cur_im_df["component"] == "rotd50"]
+            else:
+                if ix == 0:
+                    print(f"No component column, assuming data is rotd50")
             cur_df = cur_im_df.loc[:, ims]
 
             # Add extra columns and update index
@@ -267,7 +278,8 @@ class DB:
         # Create the simulation table
         cur.execute(
             "CREATE TABLE sim_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, rel_id TEXT,"
-            "site_id TEXT, data_source TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
+            "site_id TEXT, data_source TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id)),"
+            "INDEX sim_im_data_event_idx (event_id), INDEX sim_im_data_site_idx (site_id)"
         )
         for cur_im in ims:
             cur.execute(f"ALTER TABLE sim_im_data ADD COLUMN [{cur_im}] REAL")
@@ -275,7 +287,8 @@ class DB:
         # Create the observed table
         cur.execute(
             "CREATE TABLE obs_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, "
-            "site_id TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
+            "site_id TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id)),"
+            "INDEX obs_im_data_event_idx (event_id), INDEX obs_im_data_site_idx (site_id)"
         )
         for cur_im in ims:
             cur.execute(f"ALTER TABLE obs_im_data ADD COLUMN [{cur_im}] REAL")

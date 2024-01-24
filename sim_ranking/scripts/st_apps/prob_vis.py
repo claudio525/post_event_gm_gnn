@@ -6,7 +6,7 @@ from typing import Sequence, List, Tuple, Any
 import einops
 import pandas as pd
 import numpy as np
-
+import seaborn as sns
 import streamlit as st
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
@@ -14,6 +14,7 @@ import torch
 import typer
 import scipy.stats as stats
 
+import sha_calc as sha
 import spatial_hazard as sh
 import sim_ranking as sr
 import ml_tools as mlt
@@ -37,15 +38,6 @@ def get_site_df(results_dir: Path):
     db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
 
     return sr.db.DB(db_ffp).get_site_df()
-
-
-@st.cache_data
-def get_dist_matrix(results_dir: Path):
-    site_df = get_site_df(results_dir)
-
-    return sh.im_dist.calculate_distance_matrix(
-        site_df.index.values.astype(str), site_df
-    )
 
 
 @st.cache_data
@@ -401,11 +393,18 @@ def _scenario_viewer(
         (scenario_results.event_id == event) & (scenario_results.site_int == site_int)
     ].set_index("rel_id")
 
-    fig = create_dist_plot(site_int_sims, site_int_obs, cur_scenario_df, tab_type)
-    st.pyplot(fig, use_container_width=False)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        ims = st.multiselect("IMs", sr.constants.PSA_KEYS, key=f"{tab_type}_ims")
+    with col2:
+        n_bins = st.slider("Number of Bins", 5, 50, 10, key=f"{tab_type}_n_bins")
+    with col3:
+        cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
+
+    create_dist_plot(site_int_sims, site_int_obs, cur_scenario_df, n_bins, ims, cdf)
 
 
-def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, type: str):
+def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str):
     site_df = get_site_df(results_dir)
     event_df = get_event_df(results_dir)
     obs_df = get_obs_df(results_dir)
@@ -416,14 +415,20 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, type: str):
     col1, col2 = st.columns([1, 6])
 
     with col1:
-        event = st.selectbox("Event", events, key=f"{type}_event")
+        event = st.selectbox(
+            "Event",
+            event_df.loc[events]
+            .sort_values("mag", ascending=False)
+            .index.values.astype(str),
+            key=f"{tab_type}_event",
+        )
 
         site_int = st.selectbox(
             "Site of Interest",
             results_df.loc[(results_df.event_id == event)]
             .site_int.unique()
             .astype("str"),
-            key=f"{type}_site_int",
+            key=f"{tab_type}_site_int",
         )
 
         site_obs = st.selectbox(
@@ -433,20 +438,33 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, type: str):
             ]
             .site_obs.unique()
             .astype(str),
-            key=f"{type}_site_obs",
+            key=f"{tab_type}_site_obs",
         )
 
-        high_rel = st.selectbox(
-            "Highlighted Realisation",
-            ["---"]
-            + sorted(
+        high_rels = st.multiselect(
+            "Highlighted Realisations",
+            sorted(
                 sim_df.loc[(sim_df.event_id == event)]
                 .rel_id.unique()
                 .astype(str)
                 .tolist()
             ),
-            key=f"{type}_high_rel",
+            key=f"{tab_type}_high_rels",
         )
+
+        # high_rel = st.selectbox(
+        #     "Highlighted Realisation",
+        #     ["---"]
+        #     + sorted(
+        #         sim_df.loc[(sim_df.event_id == event)]
+        #         .rel_id.unique()
+        #         .astype(str)
+        #         .tolist()
+        #     ),
+        #     key=f"{tab_type}_high_rel",
+        # )
+
+        st.markdown(f"Magnitude: {event_df.loc[event].mag}")
 
     with col2:
         fig = _create_event_map(
@@ -478,65 +496,215 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, type: str):
         (sim_df.event_id == event)
         & (sim_df.site_id == site_int)
         & np.isin(sim_df.rel_id, cur_event_rels)
-    ]
-    site_obs_obs = (
-        obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_obs)]
-        .iloc[0][sr.constants.PSA_KEYS]
-        .astype(float)
-    )
+    ].set_index("rel_id").sort_index()
+    site_obs_obs = obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_obs)]
     site_obs_sims = sim_df.loc[
         (sim_df.event_id == event)
         & (sim_df.site_id == site_obs)
         & np.isin(sim_df.rel_id, cur_event_rels)
     ]
 
+    # Site of interest distribution
     cur_results_df = results_df.loc[
         (results_df.event_id == event)
         & (results_df.site_int == site_int)
         & (results_df.site_obs == site_obs)
-    ].set_index("rel_id")
+    ].set_index("rel_id").sort_index()
 
-    fig = create_dist_plot(site_int_sims, site_int_obs, cur_results_df, type)
+    assert np.all(site_int_sims.index == cur_results_df.index)
+
+    cdf_x, cdf_y = [], []
+    for cur_im in sr.constants.PSA_KEYS:
+        cur_sort_ind = np.argsort(site_int_sims[cur_im].values)
+        cdf_x.append(site_int_sims[cur_im].values[cur_sort_ind])
+        cdf_y.append(np.cumsum(cur_results_df.prob.values[cur_sort_ind]))
+
+    cdf_x = pd.DataFrame(np.asarray(cdf_x).T, columns=sr.constants.PSA_KEYS)
+    cdf_y = pd.DataFrame(np.asarray(cdf_y).T, columns=sr.constants.PSA_KEYS)
+
+    qt_2, qt_16, qt_50, qt_84, qt_98 = sha.query_non_parametric_multi_cdf_invs(np.asarray([0.02, 0.16, 0.5, 0.84, 0.98]), cdf_x.T.values, cdf_y.T.values)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    plt.semilogx(sr.constants.PERIODS, site_int_obs, label="Observed - Site of Interest", c="r")
+
+    plt.semilogx(sr.constants.PERIODS, qt_50, label="Model - Median", c="blue")
+
+    plt.fill_between(sr.constants.PERIODS, qt_2, qt_98, alpha=0.4, label="Model - 2/98th", color="lightgreen")
+    plt.semilogx(sr.constants.PERIODS, qt_2, c="lightgreen", linestyle="--", linewidth=1.0)
+    plt.semilogx(sr.constants.PERIODS, qt_98, c="lightgreen", linestyle="--", linewidth=1.0)
+
+    plt.fill_between(sr.constants.PERIODS, qt_16, qt_84, alpha=0.4, label="Model - 16/84th", color="lightblue")
+    plt.semilogx(sr.constants.PERIODS, qt_16, c="lightblue", linestyle="--", linewidth=1.0)
+    plt.semilogx(sr.constants.PERIODS, qt_84, c="lightblue", linestyle="--", linewidth=1.0)
+
+
+    if len(high_rels) > 0:
+        colors = sns.color_palette("dark", len(high_rels))
+        for ix, cur_rel in enumerate(high_rels):
+            plt.semilogx(
+                sr.constants.PERIODS,
+                site_int_sims.loc[cur_rel, sr.constants.PSA_KEYS].values,
+                label=f"{cur_rel}",
+                c=colors[ix],
+                linestyle="dashdot"
+            )
+
+    plt.xlabel(f"Period (s)")
+    plt.ylabel(f"pSA")
+    plt.xlim([0.01, 10])
+    plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    plt.legend()
+    plt.tight_layout()
+
     st.pyplot(fig, use_container_width=False)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.dataframe(cur_results_df[["prob", "misfit_score"]].sort_values("prob", ascending=False).head(10))
+    with col2:
+        st.dataframe(cur_results_df[["prob", "misfit_score"]].sort_values("misfit_score", ascending=True).head(10))
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        ims = st.multiselect("IMs", sr.constants.PSA_KEYS, key=f"{tab_type}_im")
+    with col2:
+        n_bins = st.slider("Number of Bins", 5, 50, 10, key=f"{tab_type}_n_bins")
+    with col3:
+        cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
+
+    create_dist_plot(
+        site_int_sims, site_int_obs, cur_results_df, n_bins, ims, cdf, site_obs_obs
+    )
 
 
 def create_dist_plot(
     site_int_sims: pd.DataFrame,
     site_int_obs: pd.DataFrame,
     result_df: pd.DataFrame,
-    type: str,
+    n_bins: int,
+    ims: Sequence[str],
+    cdf: bool = False,
+    site_obs_obs: pd.DataFrame = None,
     emp_gm_params: pd.DataFrame = None,
 ):
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        im = st.selectbox("IM", sr.constants.PSA_KEYS, key=f"{type}_im")
-    with col2:
-        n_bins = st.slider("Number of Bins", 5, 50, 10, key=f"{type}_n_bins")
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    for im in ims:
+        col1, col2 = st.columns(2)
 
-    ax.hist(
-        np.log(site_int_sims[im]),
-        weights=result_df.loc[site_int_sims.rel_id, "prob"].values,
-        bins=n_bins,
-        density=True,
-        label="Model distribution",
-    )
+        with col1:
+            if cdf:
+                fig, ax = plt.subplots(figsize=(6, 4))
 
-    if emp_gm_params is not None:
-        mean = emp_gm_params[f"{im}_mean"]
-        std = emp_gm_params[f"{im}_std_Total"]
+                sort_inds = np.argsort(site_int_sims[im])
 
-        x = np.linspace(mean - 3 * std, mean + 3 * std, 1000)
-        rv = stats.norm(mean, std)
-        t = rv.pdf(x)
+                plt.step(
+                    site_int_sims[im][sort_inds],
+                    np.cumsum(
+                        result_df.loc[site_int_sims.rel_id, "prob"].values[sort_inds]
+                    ),
+                    label="Model distribution",
+                    c="b",
+                    where="post",
+                )
+                sns.rugplot(x=site_int_sims[im], ax=ax, color="k")
+                ax.axvline(site_int_obs[im], c="r", label="Observed - Site of Interest")
 
-        ax.plot(x, t, c="g", label="Empirical GMM distribution")
+                if site_obs_obs is not None:
+                    if site_obs_obs.shape[0] < 5:
+                        for ix, cur_obs_row in site_obs_obs.iterrows():
+                            ax.axvline(
+                                cur_obs_row[im],
+                                linestyle="--",
+                                label=f"Observed - {cur_obs_row.site_id}",
+                            )
 
-    ax.axvline(np.log(site_int_obs[im]), c="r", label="Observed")
-    ax.legend()
-    fig.tight_layout()
-    return fig
+                ax.legend()
+                ax.set_title(f"P({im} < x)")
+                ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+                fig.tight_layout()
+
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
+            else:
+                fig, ax = plt.subplots(figsize=(6, 4))
+
+                ax.hist(
+                    # np.log(site_int_sims[im]),
+                    site_int_sims[im],
+                    weights=result_df.loc[site_int_sims.rel_id, "prob"].values,
+                    bins=n_bins,
+                    # density=True,
+                    label="Model distribution",
+                )
+                sns.rugplot(x=site_int_sims[im], ax=ax, color="k")
+
+                # ax.axvline(np.log(site_int_obs[im]), c="r", label="Observed")
+                ax.axvline(site_int_obs[im], c="r", label="Observed - Site of Interest")
+                if site_obs_obs is not None:
+                    if site_obs_obs.shape[0] < 5:
+                        for ix, cur_obs_row in site_obs_obs.iterrows():
+                            ax.axvline(
+                                cur_obs_row[im],
+                                linestyle="--",
+                                label=f"Observed - {cur_obs_row.site_id}",
+                            )
+
+                if site_obs_obs is not None:
+                    print(f"wtf")
+
+                ax.legend()
+                ax.set_title(f"{im} Distribution")
+                ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+                fig.tight_layout()
+
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
+
+        with col2:
+            if cdf:
+                fig, ax = plt.subplots(figsize=(6, 4))
+
+                sort_inds = np.argsort(result_df.loc[:, im].values)
+
+                plt.step(
+                    result_df.loc[:, im].values[sort_inds],
+                    np.cumsum(
+                        result_df.loc[site_int_sims.rel_id, "prob"].values[sort_inds]
+                    ),
+                    label="Model distribution",
+                    c="b",
+                    where="post",
+                )
+                sns.rugplot(x=result_df.loc[:, im], ax=ax, color="k")
+                ax.axvline(0.0, c="r", label="Observed - Site of Interest")
+                ax.set_title(f"P({im} < x)")
+                ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+                ax.set_xlim(-2, 2)
+                fig.tight_layout()
+
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
+
+            else:
+                fig, ax = plt.subplots(figsize=(6, 4))
+
+                ax.hist(
+                    result_df.loc[:, im],
+                    weights=result_df.loc[site_int_sims.rel_id, "prob"].values,
+                    bins=n_bins,
+                    label="Model distribution",
+                )
+                sns.rugplot(x=result_df.loc[:, im], ax=ax, color="k")
+
+                ax.set_title(f"{im} Residual Distribution")
+                ax.set_xlim(-2.0, 2.0)
+                ax.axvline(0.0, c="r")
+                ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+                fig.tight_layout()
+
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
 
 
 def run_ind_samples(results_dir: Path, emp_gm_params_ffp: Path = None):
@@ -588,37 +756,42 @@ def agg_residuals(
     tab_type: str,
     filters: List[Tuple[str, str, Any, Any, Any, Any]],
 ):
-    slider_vals = []
-    for ix, filter in enumerate(filters):
-        slider_vals.append(
-            st.slider(
-                filter[0],
-                filter[2],
-                filter[3],
-                filter[4],
-                step=filter[5],
-                key=f"{tab_type}_{ix}",
-            )
-        )
+    # slider_vals = []
+    # for ix, filter in enumerate(filters):
+    #     slider_vals.append(
+    #         st.slider(
+    #             filter[0],
+    #             filter[2],
+    #             filter[3],
+    #             filter[4],
+    #             step=filter[5],
+    #             key=f"{tab_type}_{ix}",
+    #         )
+    #     )
+    #
+    # for filter, val in zip(filters, slider_vals):
+    #     filtered_results_df = results_df.loc[filtered_results_df[filter[1]] <= val]
+    #
+    # st.text(f"Number of (filtered) samples/scenarios: {int(np.ceil(filtered_results_df.prob.sum()))}")
 
-    for filter, val in zip(filters, slider_vals):
-        results_df = results_df.loc[results_df[filter[1]] <= val]
+    filtered_results_df = results_df
 
-    st.text(f"Number of samples/scenarios: {int(np.ceil(results_df.prob.sum()))}")
-
-    im_residuals = results_df.loc[:, sr.constants.PSA_KEYS].values
-    weights = results_df.loc[:, "prob"].values
+    im_residuals = filtered_results_df.loc[:, sr.constants.PSA_KEYS].values
+    weights = filtered_results_df.loc[:, "prob"].values
 
     weighted_residual_mean = (
-        einops.einsum(im_residuals, weights, "i j, i -> j") / results_df.prob.sum()
+        einops.einsum(im_residuals, weights, "i j, i -> j")
+        / filtered_results_df.prob.sum()
     )
     weighted_residual_std = np.sqrt(
         np.sum(
             weights[:, None] * (im_residuals - weighted_residual_mean[None, :]) ** 2,
             axis=0,
         )
-        / results_df.prob.sum()
+        / filtered_results_df.prob.sum()
     )
+    mean = np.mean(im_residuals, axis=0)
+    std = np.std(im_residuals, axis=0)
 
     fig = plt.figure(figsize=(12, 6))
 
@@ -639,6 +812,25 @@ def agg_residuals(
         sr.constants.PERIODS,
         weighted_residual_mean - weighted_residual_std,
         c="b",
+        linestyle="--",
+    )
+    plt.semilogx(
+        sr.constants.PERIODS,
+        mean,
+        label="Residual Mean",
+        c="r",
+    )
+    plt.semilogx(
+        sr.constants.PERIODS,
+        mean + std,
+        label="Residual Std",
+        c="r",
+        linestyle="--",
+    )
+    plt.semilogx(
+        sr.constants.PERIODS,
+        mean - std,
+        c="r",
         linestyle="--",
     )
 
@@ -691,9 +883,9 @@ def run_agg_scenario(cur_results_dir: Path):
                 (
                     "Max Distance",
                     "max_distance",
-                    train_scenario_results.min_distance.min(),
-                    train_scenario_results.min_distance.max(),
-                    train_scenario_results.min_distance.max(),
+                    float(train_scenario_results.min_distance.min()),
+                    float(train_scenario_results.min_distance.max()),
+                    float(train_scenario_results.min_distance.max()),
                     5.0,
                 ),
             ],
@@ -708,9 +900,9 @@ def run_agg_scenario(cur_results_dir: Path):
                 (
                     "Min Distance",
                     "min_distance",
-                    train_scenario_results.min_distance.min(),
-                    train_scenario_results.min_distance.max(),
-                    train_scenario_results.min_distance.max(),
+                    float(train_scenario_results.min_distance.min()),
+                    float(train_scenario_results.min_distance.max()),
+                    float(train_scenario_results.min_distance.max()),
                     5.0,
                 ),
             ],
@@ -770,6 +962,7 @@ def main(
         run_agg_single(cur_results_dir)
 
     with agg_scenario_tab:
+        # pass
         run_agg_scenario(cur_results_dir)
 
 

@@ -2,7 +2,7 @@
 #batch_size: 512
 batch_size: 64
 #lr: 0.001
-lr: 0.0005
+lr: 0.001
 l2_reg: 0.0005
 
 # Model Params

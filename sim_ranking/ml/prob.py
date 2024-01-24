@@ -618,6 +618,11 @@ def train(
     val_dataloader = CustomTabularDataLoader(val_dataset, hp_config.batch_size, True)
 
     for epoch_ix in range(hp_config.n_epochs):
+        if epoch_ix == 50:
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = hp_config.lr / 10
+            print(f"Reduced learning rate to {hp_config.lr / 10}")
+
         prob_model.train()
         iter_loop = tqdm(train_dataloader, disable=quiet)
         iter_loop.set_description(f"Epoch {epoch_ix}/{hp_config.n_epochs}")
