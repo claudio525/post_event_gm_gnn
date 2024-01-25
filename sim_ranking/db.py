@@ -37,7 +37,9 @@ class DB:
         if len(im_csvs) == 0:
             im_data = pd.read_pickle(sim_im_dir / "emp_realisations.pickle")
         else:
-            im_data = {cur_ffp.stem: pd.read_csv(cur_ffp, index_col=0) for cur_ffp in im_csvs}
+            im_data = {
+                cur_ffp.stem: pd.read_csv(cur_ffp, index_col=0) for cur_ffp in im_csvs
+            }
 
         # Process the data
         events, sites = set(), set()
@@ -169,12 +171,13 @@ class DB:
 
     def get_obs_df(self):
         """Gets the observation IM data"""
-        result_df = pd.read_sql("SELECT * FROM obs_im_data", self.con, index_col="record_id")
+        result_df = pd.read_sql(
+            "SELECT * FROM obs_im_data", self.con, index_col="record_id"
+        )
         # if custom_record_id:
         #     result_df.index = mlt.array_utils.numpy_str_join("_", result_df.event_id.values.astype(str), result_df.site_id.values.astype(str))
 
         return result_df
-
 
     def get_full_obs_df(self):
         """Gets the observation IM data, event and site information"""
@@ -249,7 +252,11 @@ class DB:
         """Retrieves the simulation data for the given event and sites"""
         query = f"SELECT * FROM sim_im_data WHERE event_id = (?) AND site_id IN ({','.join(['?']*len(sites))})"
         return pd.read_sql(
-            query, self.con, params=(event, *sites), index_col="record_id"
+            query,
+            self.con,
+            params=(event, *sites),
+            index_col="record_id",
+            # dtype={"rel_id": "category", "data_source": "category", "site_id": "category", "event_id": "category"}
         ).drop(columns=["event_id"])
 
     def get_obs_data(self, event: str, sites: Sequence[str]):
@@ -277,26 +284,31 @@ class DB:
 
         # Create the simulation table
         cur.execute(
-            "CREATE TABLE sim_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, rel_id TEXT,"
-            "site_id TEXT, data_source TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id)),"
-            "INDEX sim_im_data_event_idx (event_id), INDEX sim_im_data_site_idx (site_id)"
+            "CREATE TABLE sim_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, rel_id TEXT, site_id TEXT, data_source TEXT, "
+            "FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
         )
         for cur_im in ims:
             cur.execute(f"ALTER TABLE sim_im_data ADD COLUMN [{cur_im}] REAL")
+        # Create indices
+        cur.execute(f"CREATE INDEX sim_im_data_event_idx ON sim_im_data (event_id)")
+        cur.execute(f"CREATE INDEX sim_im_data_site_idx ON sim_im_data (site_id)")
 
         # Create the observed table
         cur.execute(
-            "CREATE TABLE obs_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, "
-            "site_id TEXT, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id)),"
-            "INDEX obs_im_data_event_idx (event_id), INDEX obs_im_data_site_idx (site_id)"
+            "CREATE TABLE obs_im_data (record_id TEXT PRIMARY KEY, event_id TEXT, site_id TEXT, "
+            "FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
         )
         for cur_im in ims:
             cur.execute(f"ALTER TABLE obs_im_data ADD COLUMN [{cur_im}] REAL")
+        # Create indices
+        cur.execute(f"CREATE INDEX obs_im_data_event_idx ON obs_im_data (event_id)")
+        cur.execute(f"CREATE INDEX obs_im_data_site_idx ON obs_im_data (site_id)")
 
         # Create the records table
         cur.execute(
             "CREATE TABLE records (record_id TEXT PRIMARY KEY, event_id TEXT, "
-            "site_id TEXT, r_rup REAL, r_x REAL, FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
+            "site_id TEXT, r_rup REAL, r_x REAL, "
+            "FOREIGN KEY(event_id) REFERENCES events(event_id), FOREIGN KEY(site_id) REFERENCES sites(site_id))"
         )
 
         return cls(db_ffp)

@@ -170,6 +170,7 @@ def run_general_tab(results_dir: Path):
     )
     # mlt.plotting.plot_metrics(load_training_metrics(results_dir), ax=ax)
     st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
 
     # Model visualization
     col_1, col_2 = st.columns(2)
@@ -324,7 +325,13 @@ def _scenario_viewer(
     col1, col2 = st.columns([1, 6])
 
     with col1:
-        event = st.selectbox("Event", events, key=f"{tab_type}_event")
+        event = st.selectbox(
+            "Event",
+            event_df.loc[events]
+            .sort_values("mag", ascending=False)
+            .index.values.astype(str),
+            key=f"{tab_type}_event",
+        )
 
         site_int = st.selectbox(
             "Site of Interest",
@@ -334,16 +341,15 @@ def _scenario_viewer(
             key=f"{tab_type}_site_int",
         )
 
-        high_rel = st.selectbox(
-            "Highlighted Realisation",
-            ["---"]
-            + sorted(
+        high_rels = st.multiselect(
+            "Highlighted Realisations",
+            sorted(
                 sim_df.loc[(sim_df.event_id == event)]
                 .rel_id.unique()
                 .astype(str)
                 .tolist()
             ),
-            key=f"{tab_type}_high_rel",
+            key=f"{tab_type}_high_rels",
         )
 
         st.markdown(f"Magnitude: {event_df.loc[event].mag}")
@@ -383,21 +389,116 @@ def _scenario_viewer(
         .iloc[0][sr.constants.PSA_KEYS]
         .astype(float)
     )
-    site_int_sims = sim_df.loc[
-        (sim_df.event_id == event)
-        & (sim_df.site_id == site_int)
-        & np.isin(sim_df.rel_id, cur_event_rels)
+    site_int_sims = (
+        sim_df.loc[
+            (sim_df.event_id == event)
+            & (sim_df.site_id == site_int)
+            & np.isin(sim_df.rel_id, cur_event_rels)
+        ]
+        .set_index("rel_id")
+        .sort_index()
+    )
+
+    cur_scenario_df = (
+        scenario_results.loc[
+            (scenario_results.event_id == event)
+            & (scenario_results.site_int == site_int)
+        ]
+        .set_index("rel_id")
+        .sort_index()
+    )
+
+    cur_sample_results = sample_results.loc[
+        (sample_results.event_id == event) & (sample_results.site_int == site_int)
     ]
 
-    cur_scenario_df = scenario_results.loc[
-        (scenario_results.event_id == event) & (scenario_results.site_int == site_int)
-    ].set_index("rel_id")
+    assert np.all(site_int_sims.index == cur_scenario_df.index)
+
+    create_pSA_dist_plot(
+        cur_scenario_df,
+        site_int_sims,
+        site_int_obs,
+        high_rels if len(high_rels) > 0 else None,
+    )
+
+    col1, col2, col3 = st.columns([0.2, 0.6, 0.2])
+    with col1:
+        st.dataframe(
+            cur_scenario_df[["prob", "misfit_score"]]
+            .sort_values("prob", ascending=False)
+            .head(10)
+        )
+
+    with col2:
+        tmp_df = cur_sample_results[["site_obs", "rel_id", "prob"]].pivot(
+            columns="site_obs", index="rel_id", values="prob"
+        )
+        assert np.all(tmp_df.index == cur_scenario_df.index)
+        tmp_df["scenario_prop"] = cur_scenario_df["prob"]
+        tmp_df["misfit_score"] = cur_scenario_df["misfit_score"]
+        tmp_df = tmp_df.sort_values("scenario_prop", ascending=False)
+        st.dataframe(tmp_df)
+
+    with col3:
+        st.dataframe(
+            cur_scenario_df[["prob", "misfit_score"]]
+            .sort_values("misfit_score", ascending=True)
+            .head(10)
+        )
+
+    st.dataframe(
+        cur_sample_results.groupby("site_obs", observed=True)
+        .first()[["site_corr_weights", "s2s_distance", "angular_distance"]]
+        .sort_values("site_corr_weights", ascending=False)
+        .T
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        misfit_n_bins = st.number_input(
+            "Number of Bins", 5, 50, 10, key=f"{tab_type}_misfit_n_bins"
+        )
+    with col2:
+        misfit_cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_misfit_cdf")
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    if misfit_cdf:
+        sort_inds = np.argsort(cur_scenario_df.misfit_score)
+        ax.step(
+            cur_scenario_df.misfit_score.values[sort_inds],
+            np.cumsum(cur_scenario_df.prob.values[sort_inds]),
+            label="Model distribution",
+            c="b",
+            where="post",
+        )
+        # sns.rugplot(x=cur_scenario_df.misfit_score, ax=ax, color="k")
+        ax.axvline(
+            x=cur_scenario_df.misfit_score.min(),
+            c="r",
+            label=f"Lowest misfit - {cur_scenario_df.misfit_score.idxmin()}",
+        )
+        ax.set_title(f"P(Misfit Score < x)")
+        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        ax.legend()
+        fig.tight_layout()
+    else:
+        ax.hist(
+            cur_scenario_df.misfit_score,
+            weights=cur_scenario_df.prob,
+            bins=misfit_n_bins,
+        )
+
+        ax.set_xlabel("Misfit Score")
+        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        fig.tight_layout()
+
+    st.pyplot(fig, use_container_width=False)
 
     col1, col2, col3 = st.columns(3)
     with col1:
         ims = st.multiselect("IMs", sr.constants.PSA_KEYS, key=f"{tab_type}_ims")
     with col2:
-        n_bins = st.slider("Number of Bins", 5, 50, 10, key=f"{tab_type}_n_bins")
+        n_bins = st.slider("Number of Bins", 5, 100, 10, key=f"{tab_type}_n_bins")
     with col3:
         cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
 
@@ -452,18 +553,6 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str):
             key=f"{tab_type}_high_rels",
         )
 
-        # high_rel = st.selectbox(
-        #     "Highlighted Realisation",
-        #     ["---"]
-        #     + sorted(
-        #         sim_df.loc[(sim_df.event_id == event)]
-        #         .rel_id.unique()
-        #         .astype(str)
-        #         .tolist()
-        #     ),
-        #     key=f"{tab_type}_high_rel",
-        # )
-
         st.markdown(f"Magnitude: {event_df.loc[event].mag}")
 
     with col2:
@@ -492,78 +581,51 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str):
         .iloc[0][sr.constants.PSA_KEYS]
         .astype(float)
     )
-    site_int_sims = sim_df.loc[
-        (sim_df.event_id == event)
-        & (sim_df.site_id == site_int)
-        & np.isin(sim_df.rel_id, cur_event_rels)
-    ].set_index("rel_id").sort_index()
+    site_int_sims = (
+        sim_df.loc[
+            (sim_df.event_id == event)
+            & (sim_df.site_id == site_int)
+            & np.isin(sim_df.rel_id, cur_event_rels)
+        ]
+        .set_index("rel_id")
+        .sort_index()
+    )
     site_obs_obs = obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_obs)]
-    site_obs_sims = sim_df.loc[
-        (sim_df.event_id == event)
-        & (sim_df.site_id == site_obs)
-        & np.isin(sim_df.rel_id, cur_event_rels)
-    ]
+
 
     # Site of interest distribution
-    cur_results_df = results_df.loc[
-        (results_df.event_id == event)
-        & (results_df.site_int == site_int)
-        & (results_df.site_obs == site_obs)
-    ].set_index("rel_id").sort_index()
+    cur_results_df = (
+        results_df.loc[
+            (results_df.event_id == event)
+            & (results_df.site_int == site_int)
+            & (results_df.site_obs == site_obs)
+        ]
+        .set_index("rel_id")
+        .sort_index()
+    )
 
     assert np.all(site_int_sims.index == cur_results_df.index)
 
-    cdf_x, cdf_y = [], []
-    for cur_im in sr.constants.PSA_KEYS:
-        cur_sort_ind = np.argsort(site_int_sims[cur_im].values)
-        cdf_x.append(site_int_sims[cur_im].values[cur_sort_ind])
-        cdf_y.append(np.cumsum(cur_results_df.prob.values[cur_sort_ind]))
-
-    cdf_x = pd.DataFrame(np.asarray(cdf_x).T, columns=sr.constants.PSA_KEYS)
-    cdf_y = pd.DataFrame(np.asarray(cdf_y).T, columns=sr.constants.PSA_KEYS)
-
-    qt_2, qt_16, qt_50, qt_84, qt_98 = sha.query_non_parametric_multi_cdf_invs(np.asarray([0.02, 0.16, 0.5, 0.84, 0.98]), cdf_x.T.values, cdf_y.T.values)
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    plt.semilogx(sr.constants.PERIODS, site_int_obs, label="Observed - Site of Interest", c="r")
-
-    plt.semilogx(sr.constants.PERIODS, qt_50, label="Model - Median", c="blue")
-
-    plt.fill_between(sr.constants.PERIODS, qt_2, qt_98, alpha=0.4, label="Model - 2/98th", color="lightgreen")
-    plt.semilogx(sr.constants.PERIODS, qt_2, c="lightgreen", linestyle="--", linewidth=1.0)
-    plt.semilogx(sr.constants.PERIODS, qt_98, c="lightgreen", linestyle="--", linewidth=1.0)
-
-    plt.fill_between(sr.constants.PERIODS, qt_16, qt_84, alpha=0.4, label="Model - 16/84th", color="lightblue")
-    plt.semilogx(sr.constants.PERIODS, qt_16, c="lightblue", linestyle="--", linewidth=1.0)
-    plt.semilogx(sr.constants.PERIODS, qt_84, c="lightblue", linestyle="--", linewidth=1.0)
-
-
-    if len(high_rels) > 0:
-        colors = sns.color_palette("dark", len(high_rels))
-        for ix, cur_rel in enumerate(high_rels):
-            plt.semilogx(
-                sr.constants.PERIODS,
-                site_int_sims.loc[cur_rel, sr.constants.PSA_KEYS].values,
-                label=f"{cur_rel}",
-                c=colors[ix],
-                linestyle="dashdot"
-            )
-
-    plt.xlabel(f"Period (s)")
-    plt.ylabel(f"pSA")
-    plt.xlim([0.01, 10])
-    plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    plt.legend()
-    plt.tight_layout()
-
-    st.pyplot(fig, use_container_width=False)
+    create_pSA_dist_plot(
+        cur_results_df,
+        site_int_sims,
+        site_int_obs,
+        high_rels if len(high_rels) > 0 else None,
+    )
 
     col1, col2 = st.columns(2)
     with col1:
-        st.dataframe(cur_results_df[["prob", "misfit_score"]].sort_values("prob", ascending=False).head(10))
+        st.dataframe(
+            cur_results_df[["prob", "misfit_score"]]
+            .sort_values("prob", ascending=False)
+            .head(10)
+        )
     with col2:
-        st.dataframe(cur_results_df[["prob", "misfit_score"]].sort_values("misfit_score", ascending=True).head(10))
+        st.dataframe(
+            cur_results_df[["prob", "misfit_score"]]
+            .sort_values("misfit_score", ascending=True)
+            .head(10)
+        )
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -576,6 +638,85 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str):
     create_dist_plot(
         site_int_sims, site_int_obs, cur_results_df, n_bins, ims, cdf, site_obs_obs
     )
+
+
+def create_pSA_dist_plot(
+    results_df: pd.DataFrame,
+    site_int_sims: pd.DataFrame,
+    site_int_obs: pd.DataFrame,
+    high_rels: List[str] = None,
+):
+    cdf_x, cdf_y = [], []
+    for cur_im in sr.constants.PSA_KEYS:
+        cur_sort_ind = np.argsort(site_int_sims[cur_im].values)
+        cdf_x.append(site_int_sims[cur_im].values[cur_sort_ind])
+        cdf_y.append(np.cumsum(results_df.prob.values[cur_sort_ind]))
+
+    cdf_x = pd.DataFrame(np.asarray(cdf_x).T, columns=sr.constants.PSA_KEYS)
+    cdf_y = pd.DataFrame(np.asarray(cdf_y).T, columns=sr.constants.PSA_KEYS)
+
+    qt_2, qt_16, qt_50, qt_84, qt_98 = sha.query_non_parametric_multi_cdf_invs(
+        np.asarray([0.02, 0.16, 0.5, 0.84, 0.98]), cdf_x.T.values, cdf_y.T.values
+    )
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    plt.semilogx(
+        sr.constants.PERIODS, site_int_obs, label="Observed - Site of Interest", c="r"
+    )
+
+    plt.semilogx(sr.constants.PERIODS, qt_50, label="Model - Median", c="blue")
+
+    plt.fill_between(
+        sr.constants.PERIODS,
+        qt_2,
+        qt_98,
+        alpha=0.4,
+        label="Model - 2/98th",
+        color="lightgreen",
+    )
+    plt.semilogx(
+        sr.constants.PERIODS, qt_2, c="lightgreen", linestyle="--", linewidth=1.0
+    )
+    plt.semilogx(
+        sr.constants.PERIODS, qt_98, c="lightgreen", linestyle="--", linewidth=1.0
+    )
+
+    plt.fill_between(
+        sr.constants.PERIODS,
+        qt_16,
+        qt_84,
+        alpha=0.4,
+        label="Model - 16/84th",
+        color="lightblue",
+    )
+    plt.semilogx(
+        sr.constants.PERIODS, qt_16, c="lightblue", linestyle="--", linewidth=1.0
+    )
+    plt.semilogx(
+        sr.constants.PERIODS, qt_84, c="lightblue", linestyle="--", linewidth=1.0
+    )
+
+    if high_rels is not None:
+        colors = sns.color_palette("dark", len(high_rels))
+        for ix, cur_rel in enumerate(high_rels):
+            plt.semilogx(
+                sr.constants.PERIODS,
+                site_int_sims.loc[cur_rel, sr.constants.PSA_KEYS].values,
+                label=f"{cur_rel}",
+                c=colors[ix],
+                linestyle="dashdot",
+            )
+
+    plt.xlabel(f"Period (s)")
+    plt.ylabel(f"pSA")
+    plt.xlim([0.01, 10])
+    plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    plt.legend()
+    plt.tight_layout()
+
+    st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
 
 
 def create_dist_plot(
@@ -632,7 +773,7 @@ def create_dist_plot(
                 ax.hist(
                     # np.log(site_int_sims[im]),
                     site_int_sims[im],
-                    weights=result_df.loc[site_int_sims.rel_id, "prob"].values,
+                    weights=result_df.loc[site_int_sims.index, "prob"].values,
                     bins=n_bins,
                     # density=True,
                     label="Model distribution",
@@ -691,7 +832,7 @@ def create_dist_plot(
 
                 ax.hist(
                     result_df.loc[:, im],
-                    weights=result_df.loc[site_int_sims.rel_id, "prob"].values,
+                    weights=result_df.loc[site_int_sims.index, "prob"].values,
                     bins=n_bins,
                     label="Model distribution",
                 )
@@ -843,6 +984,7 @@ def agg_residuals(
     plt.tight_layout()
 
     st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
 
 
 def run_agg_single(cur_results_dir: Path):

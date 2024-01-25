@@ -99,6 +99,7 @@ def train_model(
         f"\tLoss: {metrics['loss_hist_val'][best_model_epoch]:.4f}\n"
     )
 
+    print(f"Run post-processing")
     data_metadata["db"] = str(rel_db_ffp)
     data_metadata["sim_corr_dir"] = (
         sim_corr_dir if sim_corr_dir is None else str(sim_corr_dir)
