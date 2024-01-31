@@ -80,6 +80,7 @@ def train_model(
         val_int_sites,
         events,
         run_config,
+        hp_config,
         db,
         sim_corr_dir=sim_corr_dir,
     )

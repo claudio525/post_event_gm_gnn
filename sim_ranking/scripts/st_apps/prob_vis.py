@@ -49,6 +49,11 @@ def get_event_df(results_dir: Path):
 
 
 @st.cache_data
+def load_gm_params(gm_params_ffp: Path):
+    return pd.read_csv(gm_params_ffp, index_col=0)
+
+
+@st.cache_data
 def get_event_sites(results_dir: Path):
     metadata = get_metadata(results_dir)
     db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
@@ -80,11 +85,13 @@ def get_obs_df(results_dir: Path):
 
 
 @st.cache_data
-def get_sim_df(results_dir: Path):
+def get_sim_data(results_dir: Path, event: str):
     metadata = get_metadata(results_dir)
     db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
 
-    return sr.db.DB(db_ffp).get_sim_df()
+    sites = get_event_sites(results_dir)[event]
+
+    return sr.db.DB(db_ffp).get_sim_data(event, sites)
 
 
 @st.cache_data
@@ -99,17 +106,6 @@ def load_scenario_results(results_dir: Path):
 def load_sample_results(results_dir: Path):
     train_results_df = pd.read_parquet(results_dir / "train_sample_results.parquet")
     val_results_df = pd.read_parquet(results_dir / "val_sample_results.parquet")
-
-    # dist_matrix = get_dist_matrix(results_dir)
-    #
-    # train_results_df["s2s_distance"] = dist_matrix.values[
-    #     dist_matrix.index.get_indexer_for(train_results_df.site_int.values),
-    #     dist_matrix.columns.get_indexer_for(train_results_df.site_obs.values),
-    # ]
-    # val_results_df["s2s_distance"] = dist_matrix.values[
-    #     dist_matrix.index.get_indexer_for(val_results_df.site_int.values),
-    #     dist_matrix.columns.get_indexer_for(val_results_df.site_obs.values),
-    # ]
 
     angular_distances = get_event_angular_distances(results_dir)
     for cur_event in train_results_df.event_id.unique():
@@ -150,6 +146,13 @@ def load_sample_results(results_dir: Path):
     return train_results_df, val_results_df
 
 
+@st.cache_data
+def get_results_group(
+    results_df: pd.DataFrame,
+    group_cols: List[str],
+):
+    return results_df.groupby(group_cols, observed=True)
+
 def run_general_tab(results_dir: Path):
     # Load the metadata
     meta = get_metadata(results_dir)
@@ -185,6 +188,15 @@ def run_general_tab(results_dir: Path):
         st.text(f"{'Learning rate:':<{padding}} {meta['hp_config']['lr']}")
         st.text(f"{'FC Units:':<{padding}} {str(meta['hp_config']['fc_units'])}")
         st.text(f"{'L2:':<{padding}} {meta['hp_config']['l2_reg']}")
+        st.divider()
+
+        st.text(f"{'Use IM Sim Site Obs:':<{padding}} {meta['hp_config']['im_sim_site_obs']}")
+        st.text(f"{'Use IM Sim Site Int:':<{padding}} {meta['hp_config']['im_sim_site_int']}")
+        st.text(f"{'Use IM Obs Site Obs:':<{padding}} {meta['hp_config']['im_obs_site_obs']}")
+
+        st.text(f"{'Use Residual sim_site_obs obs_site_obs:':<{padding}} {meta['hp_config']['res_site_obs']}")
+        st.text(f"{'Use Residual sim_site_obs sim_site_int:':<{padding}} {meta['hp_config']['res_sim_site_obs_sim_site_int']}")
+        st.text(f"{'Use Residual obs_site_obs sim_site_int:':<{padding}} {meta['hp_config']['res_obs_site_obs_sim_site_int']}")
 
         st.markdown("### Run Config")
         st.text(
@@ -314,11 +326,12 @@ def _scenario_viewer(
     scenario_results: pd.DataFrame,
     sample_results: pd.DataFrame,
     tab_type: str,
+    gen_gm_params: pd.DataFrame = None,
+    syn_obs_gm_params: pd.DataFrame = None,
 ):
     site_df = get_site_df(results_dir)
     event_df = get_event_df(results_dir)
     obs_df = get_obs_df(results_dir)
-    sim_df = get_sim_df(results_dir)
 
     events = scenario_results.event_id.unique().astype("str")
 
@@ -341,14 +354,11 @@ def _scenario_viewer(
             key=f"{tab_type}_site_int",
         )
 
+        sim_df = get_sim_data(results_dir, event)
+
         high_rels = st.multiselect(
             "Highlighted Realisations",
-            sorted(
-                sim_df.loc[(sim_df.event_id == event)]
-                .rel_id.unique()
-                .astype(str)
-                .tolist()
-            ),
+            sorted(sim_df.rel_id.unique().astype(str).tolist()),
             key=f"{tab_type}_high_rels",
         )
 
@@ -391,9 +401,7 @@ def _scenario_viewer(
     )
     site_int_sims = (
         sim_df.loc[
-            (sim_df.event_id == event)
-            & (sim_df.site_id == site_int)
-            & np.isin(sim_df.rel_id, cur_event_rels)
+            (sim_df.site_id == site_int) & np.isin(sim_df.rel_id, cur_event_rels)
         ]
         .set_index("rel_id")
         .sort_index()
@@ -414,11 +422,35 @@ def _scenario_viewer(
 
     assert np.all(site_int_sims.index == cur_scenario_df.index)
 
+    cur_gen_gm_params = (
+        gen_gm_params.loc[
+            (gen_gm_params.event == event) & (gen_gm_params.site == site_int)
+        ].squeeze()
+        if gen_gm_params is not None
+        else None
+    )
+
+    cur_syn_obs_gm_params = (
+        syn_obs_gm_params.loc[
+            (syn_obs_gm_params.event == event) & (syn_obs_gm_params.site == site_int)
+        ].squeeze()
+        if syn_obs_gm_params is not None
+        else None
+    )
+
+    # st.text(f"Probabilities Standard Deviation: {cur_scenario_df.prob.std():.2f}")
+    # sort_ind = np.argsort(cur_scenario_df.prob.values)
+    # x = cur_scenario_df.prob.values[sort_ind]
+    # y = np.cumsum(cur_scenario_df.prob.values[sort_ind])
+    # sha.query_non_parametric_cdf(np.asarray([0.16, 0.84]), x, y)
+
     create_pSA_dist_plot(
         cur_scenario_df,
         site_int_sims,
         site_int_obs,
         high_rels if len(high_rels) > 0 else None,
+        cur_gen_gm_params,
+        cur_syn_obs_gm_params,
     )
 
     col1, col2, col3 = st.columns([0.2, 0.6, 0.2])
@@ -453,6 +485,42 @@ def _scenario_viewer(
         .T
     )
 
+    create_misfit_dist_plot(cur_scenario_df, tab_type)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        ims = st.multiselect(
+            "IMs",
+            sr.constants.PSA_KEYS,
+            key=f"{tab_type}_ims",
+            default=[
+                "pSA_0.01",
+                "pSA_0.1",
+                "pSA_0.5",
+                "pSA_1.0",
+                "pSA_2.5",
+                "pSA_5.0",
+                "pSA_10.0",
+            ],
+        )
+    with col2:
+        n_bins = st.number_input("Number of Bins", 5, 100, 10, key=f"{tab_type}_n_bins")
+    with col3:
+        cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
+
+    create_dist_plot(
+        site_int_sims,
+        site_int_obs,
+        cur_scenario_df,
+        n_bins,
+        ims,
+        cdf,
+        gen_gm_params=cur_gen_gm_params,
+        syn_obs_gm_params=cur_syn_obs_gm_params,
+    )
+
+
+def create_misfit_dist_plot(results_df: pd.DataFrame, tab_type: str):
     col1, col2 = st.columns(2)
     with col1:
         misfit_n_bins = st.number_input(
@@ -463,53 +531,52 @@ def _scenario_viewer(
 
     fig, ax = plt.subplots(figsize=(12, 6))
     if misfit_cdf:
-        sort_inds = np.argsort(cur_scenario_df.misfit_score)
+        sort_inds = np.argsort(results_df.misfit_score)
         ax.step(
-            cur_scenario_df.misfit_score.values[sort_inds],
-            np.cumsum(cur_scenario_df.prob.values[sort_inds]),
+            results_df.misfit_score.values[sort_inds],
+            np.cumsum(results_df.prob.values[sort_inds]),
             label="Model distribution",
             c="b",
             where="post",
         )
         # sns.rugplot(x=cur_scenario_df.misfit_score, ax=ax, color="k")
         ax.axvline(
-            x=cur_scenario_df.misfit_score.min(),
+            x=results_df.misfit_score.min(),
             c="r",
-            label=f"Lowest misfit - {cur_scenario_df.misfit_score.idxmin()}",
+            label=f"Lowest misfit - {results_df.misfit_score.idxmin()}",
         )
         ax.set_title(f"P(Misfit Score < x)")
         ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
         ax.legend()
-        fig.tight_layout()
+        # fig.tight_layout()
     else:
         ax.hist(
-            cur_scenario_df.misfit_score,
-            weights=cur_scenario_df.prob,
+            results_df.misfit_score,
+            weights=results_df.prob,
             bins=misfit_n_bins,
         )
-
+        ax.axvline(
+            x=results_df.misfit_score.min(),
+            c="r",
+            label=f"Lowest misfit - {results_df.misfit_score.idxmin()}",
+        )
         ax.set_xlabel("Misfit Score")
         ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-        fig.tight_layout()
+        # fig.tight_layout()
 
     st.pyplot(fig, use_container_width=False)
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        ims = st.multiselect("IMs", sr.constants.PSA_KEYS, key=f"{tab_type}_ims")
-    with col2:
-        n_bins = st.slider("Number of Bins", 5, 100, 10, key=f"{tab_type}_n_bins")
-    with col3:
-        cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
 
-    create_dist_plot(site_int_sims, site_int_obs, cur_scenario_df, n_bins, ims, cdf)
-
-
-def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str):
+def _sample_viewer(
+    results_dir: Path,
+    results_df: pd.DataFrame,
+    tab_type: str,
+    gen_gm_params: pd.DataFrame = None,
+    syn_obs_gm_params: pd.DataFrame = None,
+):
     site_df = get_site_df(results_dir)
     event_df = get_event_df(results_dir)
     obs_df = get_obs_df(results_dir)
-    sim_df = get_sim_df(results_dir)
 
     events = results_df.event_id.unique().astype("str")
 
@@ -542,14 +609,10 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str):
             key=f"{tab_type}_site_obs",
         )
 
+        sim_df = get_sim_data(results_dir, event)
         high_rels = st.multiselect(
             "Highlighted Realisations",
-            sorted(
-                sim_df.loc[(sim_df.event_id == event)]
-                .rel_id.unique()
-                .astype(str)
-                .tolist()
-            ),
+            sorted(sim_df.rel_id.unique().astype(str).tolist()),
             key=f"{tab_type}_high_rels",
         )
 
@@ -583,15 +646,12 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str):
     )
     site_int_sims = (
         sim_df.loc[
-            (sim_df.event_id == event)
-            & (sim_df.site_id == site_int)
-            & np.isin(sim_df.rel_id, cur_event_rels)
+            (sim_df.site_id == site_int) & np.isin(sim_df.rel_id, cur_event_rels)
         ]
         .set_index("rel_id")
         .sort_index()
     )
     site_obs_obs = obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_obs)]
-
 
     # Site of interest distribution
     cur_results_df = (
@@ -606,11 +666,31 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str):
 
     assert np.all(site_int_sims.index == cur_results_df.index)
 
+    cur_gen_gm_params = (
+        gen_gm_params.loc[
+            (gen_gm_params.event == event) & (gen_gm_params.site == site_int)
+        ].squeeze()
+        if gen_gm_params is not None
+        else None
+    )
+
+    cur_syn_obs_gm_params = (
+        syn_obs_gm_params.loc[
+            (syn_obs_gm_params.event == event) & (syn_obs_gm_params.site == site_int)
+        ].squeeze()
+        if syn_obs_gm_params is not None
+        else None
+    )
+
+    st.text(f"Probabilities Standard Deviation: {cur_results_df.prob.std():.2f}")
+
     create_pSA_dist_plot(
         cur_results_df,
         site_int_sims,
         site_int_obs,
         high_rels if len(high_rels) > 0 else None,
+        cur_gen_gm_params,
+        cur_syn_obs_gm_params,
     )
 
     col1, col2 = st.columns(2)
@@ -627,16 +707,39 @@ def _sample_viewer(results_dir: Path, results_df: pd.DataFrame, tab_type: str):
             .head(10)
         )
 
+    create_misfit_dist_plot(cur_results_df, tab_type)
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        ims = st.multiselect("IMs", sr.constants.PSA_KEYS, key=f"{tab_type}_im")
+        ims = st.multiselect(
+            "IMs",
+            sr.constants.PSA_KEYS,
+            key=f"{tab_type}_im",
+            default=[
+                "pSA_0.01",
+                "pSA_0.1",
+                "pSA_0.5",
+                "pSA_1.0",
+                "pSA_2.5",
+                "pSA_5.0",
+                "pSA_10.0",
+            ],
+        )
     with col2:
         n_bins = st.slider("Number of Bins", 5, 50, 10, key=f"{tab_type}_n_bins")
     with col3:
         cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
 
     create_dist_plot(
-        site_int_sims, site_int_obs, cur_results_df, n_bins, ims, cdf, site_obs_obs
+        site_int_sims,
+        site_int_obs,
+        cur_results_df,
+        n_bins,
+        ims,
+        cdf,
+        site_obs_obs,
+        cur_gen_gm_params,
+        cur_syn_obs_gm_params,
     )
 
 
@@ -645,6 +748,8 @@ def create_pSA_dist_plot(
     site_int_sims: pd.DataFrame,
     site_int_obs: pd.DataFrame,
     high_rels: List[str] = None,
+    gen_gm_params: pd.DataFrame = None,
+    syn_obs_gm_params: pd.DataFrame = None,
 ):
     cdf_x, cdf_y = [], []
     for cur_im in sr.constants.PSA_KEYS:
@@ -661,28 +766,99 @@ def create_pSA_dist_plot(
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
-    plt.semilogx(
-        sr.constants.PERIODS, site_int_obs, label="Observed - Site of Interest", c="r"
+    mean_cols = [f"{cur_key}_mean" for cur_key in sr.constants.PSA_KEYS]
+    std_cols = [f"{cur_key}_std_Total" for cur_key in sr.constants.PSA_KEYS]
+
+    if syn_obs_gm_params is not None:
+        ax.semilogx(
+            sr.constants.PERIODS,
+            np.exp(syn_obs_gm_params.loc[mean_cols].values.astype(float)),
+            label="Synthetic observations distribution",
+            c="purple",
+            linewidth=1.0,
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            np.exp(
+                syn_obs_gm_params.loc[mean_cols].values.astype(float)
+                + syn_obs_gm_params.loc[std_cols].values.astype(float)
+            ),
+            c="purple",
+            linestyle="--",
+            linewidth=1.0,
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            np.exp(
+                syn_obs_gm_params.loc[mean_cols].values.astype(float)
+                - syn_obs_gm_params.loc[std_cols].values.astype(float)
+            ),
+            c="purple",
+            linestyle="--",
+            linewidth=1.0,
+        )
+
+        if gen_gm_params is not None:
+            ax.semilogx(
+                sr.constants.PERIODS,
+                np.exp(gen_gm_params.loc[mean_cols].values.astype(float)),
+                label="Generation distribution",
+                c="k",
+                linewidth=1.0,
+            )
+            ax.semilogx(
+                sr.constants.PERIODS,
+                np.exp(
+                    gen_gm_params.loc[mean_cols].values.astype(float)
+                    + gen_gm_params.loc[std_cols].values.astype(float)
+                ),
+                c="k",
+                linestyle="--",
+                linewidth=1.0,
+            )
+            ax.semilogx(
+                sr.constants.PERIODS,
+                np.exp(
+                    gen_gm_params.loc[mean_cols].values.astype(float)
+                    - gen_gm_params.loc[std_cols].values.astype(float)
+                ),
+                c="k",
+                linestyle="--",
+                linewidth=1.0,
+            )
+
+
+
+    ax.semilogx(sr.constants.PERIODS, qt_50, label="Model - Median", c="blue")
+
+    weighted_avg = einops.einsum(
+        results_df.prob.values,
+        np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
+        "i, i j -> j",
     )
-
-    plt.semilogx(sr.constants.PERIODS, qt_50, label="Model - Median", c="blue")
-
-    plt.fill_between(
+    ax.semilogx(
         sr.constants.PERIODS,
-        qt_2,
-        qt_98,
-        alpha=0.4,
-        label="Model - 2/98th",
-        color="lightgreen",
-    )
-    plt.semilogx(
-        sr.constants.PERIODS, qt_2, c="lightgreen", linestyle="--", linewidth=1.0
-    )
-    plt.semilogx(
-        sr.constants.PERIODS, qt_98, c="lightgreen", linestyle="--", linewidth=1.0
+        np.exp(weighted_avg),
+        label="Model - Mean",
+        c="darkblue",
     )
 
-    plt.fill_between(
+    # plt.fill_between(
+    #     sr.constants.PERIODS,
+    #     qt_2,
+    #     qt_98,
+    #     alpha=0.4,
+    #     label="Model - 2/98th",
+    #     color="lightgreen",
+    # )
+    # plt.semilogx(
+    #     sr.constants.PERIODS, qt_2, c="lightgreen", linestyle="--", linewidth=1.0
+    # )
+    # plt.semilogx(
+    #     sr.constants.PERIODS, qt_98, c="lightgreen", linestyle="--", linewidth=1.0
+    # )
+
+    ax.fill_between(
         sr.constants.PERIODS,
         qt_16,
         qt_84,
@@ -690,17 +866,17 @@ def create_pSA_dist_plot(
         label="Model - 16/84th",
         color="lightblue",
     )
-    plt.semilogx(
+    ax.semilogx(
         sr.constants.PERIODS, qt_16, c="lightblue", linestyle="--", linewidth=1.0
     )
-    plt.semilogx(
+    ax.semilogx(
         sr.constants.PERIODS, qt_84, c="lightblue", linestyle="--", linewidth=1.0
     )
 
     if high_rels is not None:
         colors = sns.color_palette("dark", len(high_rels))
         for ix, cur_rel in enumerate(high_rels):
-            plt.semilogx(
+            ax.semilogx(
                 sr.constants.PERIODS,
                 site_int_sims.loc[cur_rel, sr.constants.PSA_KEYS].values,
                 label=f"{cur_rel}",
@@ -708,12 +884,16 @@ def create_pSA_dist_plot(
                 linestyle="dashdot",
             )
 
-    plt.xlabel(f"Period (s)")
-    plt.ylabel(f"pSA")
-    plt.xlim([0.01, 10])
-    plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    plt.legend()
-    plt.tight_layout()
+    ax.semilogx(
+        sr.constants.PERIODS, site_int_obs, label="Observed - Site of Interest", c="r"
+    )
+
+    ax.set_xlabel(f"Period (s)")
+    ax.set_ylabel(f"pSA")
+    ax.set_xlim([0.01, 10])
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.legend()
+    # fig.tight_layout()
 
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
@@ -727,24 +907,52 @@ def create_dist_plot(
     ims: Sequence[str],
     cdf: bool = False,
     site_obs_obs: pd.DataFrame = None,
-    emp_gm_params: pd.DataFrame = None,
+    gen_gm_params: pd.DataFrame = None,
+    syn_obs_gm_params: pd.DataFrame = None,
 ):
 
     for im in ims:
         col1, col2 = st.columns(2)
 
+        if syn_obs_gm_params is not None:
+            syn_obs_mean = syn_obs_gm_params.loc[f"{im}_mean"]
+            syn_obs_std = syn_obs_gm_params.loc[f"{im}_std_Total"]
+            syn_obs_dist = stats.lognorm(s=syn_obs_std, scale=np.exp(syn_obs_mean))
+            syn_obs_x = np.linspace(
+                syn_obs_dist.ppf(0.0001), syn_obs_dist.ppf(0.98), 1000
+            )
+
+            if gen_gm_params is not None:
+                gen_mean = gen_gm_params.loc[f"{im}_mean"]
+                gen_std = gen_gm_params.loc[f"{im}_std_Total"]
+                gen_dist = stats.lognorm(s=gen_std, scale=np.exp(gen_mean))
+                gen_x = np.linspace(gen_dist.ppf(0.0001), gen_dist.ppf(0.98), 1000)
+
+        # IMs
         with col1:
             if cdf:
                 fig, ax = plt.subplots(figsize=(6, 4))
 
                 sort_inds = np.argsort(site_int_sims[im])
 
-                plt.step(
+                # Prior (Sample)
+                ax.step(
+                    site_int_sims[im][sort_inds],
+                    np.linspace(0, 1, site_int_sims.shape[0] + 1)[1:],
+                    label="Sampled Prior Dist",
+                    c="k",
+                    where="post",
+                    linestyle="--",
+                    linewidth=1.0,
+                )
+
+                # Posterior (Model)
+                ax.step(
                     site_int_sims[im][sort_inds],
                     np.cumsum(
-                        result_df.loc[site_int_sims.rel_id, "prob"].values[sort_inds]
+                        result_df.loc[site_int_sims.index, "prob"].values[sort_inds]
                     ),
-                    label="Model distribution",
+                    label="Model (Posterior) Dist",
                     c="b",
                     where="post",
                 )
@@ -758,12 +966,37 @@ def create_dist_plot(
                                 cur_obs_row[im],
                                 linestyle="--",
                                 label=f"Observed - {cur_obs_row.site_id}",
+                                c="g",
+                                linewidth=1.0,
                             )
 
-                ax.legend()
+
+
+                if syn_obs_gm_params is not None:
+                    syn_obs_y = syn_obs_dist.cdf(syn_obs_x)
+                    ax.plot(
+                        syn_obs_x,
+                        syn_obs_y,
+                        label="Synthetic Observations Dist",
+                        c="purple",
+                        linewidth=1.0,
+                    )
+
+                    if gen_gm_params is not None:
+                        gen_y = gen_dist.cdf(gen_x)
+                        ax.plot(
+                            gen_x,
+                            gen_y,
+                            label="Generation (Prior) Dist",
+                            c="k",
+                            linewidth=1.0,
+                        )
+
+                ax.legend(fontsize="small")
                 ax.set_title(f"P({im} < x)")
                 ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-                fig.tight_layout()
+                ax.set_ylim([-0.05, 1.05])
+                # fig.tight_layout()
 
                 st.pyplot(fig, use_container_width=True)
                 plt.close(fig)
@@ -775,12 +1008,11 @@ def create_dist_plot(
                     site_int_sims[im],
                     weights=result_df.loc[site_int_sims.index, "prob"].values,
                     bins=n_bins,
-                    # density=True,
+                    density=True,
                     label="Model distribution",
                 )
                 sns.rugplot(x=site_int_sims[im], ax=ax, color="k")
 
-                # ax.axvline(np.log(site_int_obs[im]), c="r", label="Observed")
                 ax.axvline(site_int_obs[im], c="r", label="Observed - Site of Interest")
                 if site_obs_obs is not None:
                     if site_obs_obs.shape[0] < 5:
@@ -789,15 +1021,37 @@ def create_dist_plot(
                                 cur_obs_row[im],
                                 linestyle="--",
                                 label=f"Observed - {cur_obs_row.site_id}",
+                                c="g",
+                                linewidth=1.0,
                             )
 
-                if site_obs_obs is not None:
-                    print(f"wtf")
 
-                ax.legend()
+                # Synthetic observations distribution
+                if syn_obs_gm_params is not None:
+                    syn_obs_y = syn_obs_dist.pdf(syn_obs_x)
+                    ax.plot(
+                        syn_obs_x,
+                        syn_obs_y,
+                        label="Synthetic Observations Distribution",
+                        c="purple",
+                        linewidth=1.0,
+                    )
+
+                    # Generation distribution
+                    if gen_gm_params is not None:
+                        gen_y = gen_dist.pdf(gen_x)
+                        ax.plot(
+                            gen_x,
+                            gen_y,
+                            label="Generation Distribution (Prior)",
+                            c="k",
+                            linewidth=1.0,
+                        )
+
+                ax.legend(fontsize="small")
                 ax.set_title(f"{im} Distribution")
                 ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-                fig.tight_layout()
+                # fig.tight_layout()
 
                 st.pyplot(fig, use_container_width=True)
                 plt.close(fig)
@@ -808,10 +1062,21 @@ def create_dist_plot(
 
                 sort_inds = np.argsort(result_df.loc[:, im].values)
 
-                plt.step(
+                # Prior (Sample)
+                ax.step(
+                    result_df.loc[:, im].values[sort_inds],
+                    np.linspace(0, 1, site_int_sims.shape[0] + 1)[1:],
+                    label="Sampled Prior Dist",
+                    c="k",
+                    where="post",
+                    linestyle="--",
+                    linewidth=1.0,
+                )
+
+                ax.step(
                     result_df.loc[:, im].values[sort_inds],
                     np.cumsum(
-                        result_df.loc[site_int_sims.rel_id, "prob"].values[sort_inds]
+                        result_df.loc[site_int_sims.index, "prob"].values[sort_inds]
                     ),
                     label="Model distribution",
                     c="b",
@@ -821,8 +1086,9 @@ def create_dist_plot(
                 ax.axvline(0.0, c="r", label="Observed - Site of Interest")
                 ax.set_title(f"P({im} < x)")
                 ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+                ax.set_ylim([-0.05, 1.05])
                 ax.set_xlim(-2, 2)
-                fig.tight_layout()
+                # fig.tight_layout()
 
                 st.pyplot(fig, use_container_width=True)
                 plt.close(fig)
@@ -842,22 +1108,37 @@ def create_dist_plot(
                 ax.set_xlim(-2.0, 2.0)
                 ax.axvline(0.0, c="r")
                 ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-                fig.tight_layout()
+                # fig.tight_layout()
 
                 st.pyplot(fig, use_container_width=True)
                 plt.close(fig)
 
 
-def run_ind_samples(results_dir: Path, emp_gm_params_ffp: Path = None):
+def run_ind_samples(
+    results_dir: Path,
+    gen_gm_params_ffp: Path = None,
+    syn_obs_gm_params_ffp: Path = None,
+):
     train_sample_results, val_sample_results = load_sample_results(results_dir)
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
+
+    gen_gm_params = (
+        load_gm_params(gen_gm_params_ffp) if gen_gm_params_ffp is not None else None
+    )
+    syn_obs_gm_params = (
+        load_gm_params(syn_obs_gm_params_ffp)
+        if syn_obs_gm_params_ffp is not None
+        else None
+    )
 
     with train_tab:
         _sample_viewer(
             results_dir,
             train_sample_results,
             "train_sample",
+            gen_gm_params,
+            syn_obs_gm_params,
         )
 
     with val_tab:
@@ -865,14 +1146,29 @@ def run_ind_samples(results_dir: Path, emp_gm_params_ffp: Path = None):
             results_dir,
             val_sample_results,
             "val_sample",
+            gen_gm_params,
+            syn_obs_gm_params,
         )
 
 
-def run_ind_scenario(results_dir: Path, emp_gm_params_ffp: Path = None):
+def run_ind_scenario(
+    results_dir: Path,
+    gen_gm_params_ffp: Path = None,
+    syn_obs_gm_params_ffp: Path = None,
+):
     train_sample_results, val_sample_results = load_sample_results(results_dir)
     train_scenario_results, val_scenario_results = load_scenario_results(results_dir)
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
+
+    gen_gm_params = (
+        load_gm_params(gen_gm_params_ffp) if gen_gm_params_ffp is not None else None
+    )
+    syn_obs_gm_params = (
+        load_gm_params(syn_obs_gm_params_ffp)
+        if syn_obs_gm_params_ffp is not None
+        else None
+    )
 
     with train_tab:
         _scenario_viewer(
@@ -880,6 +1176,8 @@ def run_ind_scenario(results_dir: Path, emp_gm_params_ffp: Path = None):
             train_scenario_results,
             train_sample_results,
             "train_scenario",
+            gen_gm_params,
+            syn_obs_gm_params,
         )
 
     with val_tab:
@@ -888,6 +1186,8 @@ def run_ind_scenario(results_dir: Path, emp_gm_params_ffp: Path = None):
             val_scenario_results,
             val_sample_results,
             "val_scenario",
+            gen_gm_params,
+            syn_obs_gm_params,
         )
 
 
@@ -895,93 +1195,128 @@ def agg_residuals(
     result_dir: Path,
     results_df: pd.DataFrame,
     tab_type: str,
-    filters: List[Tuple[str, str, Any, Any, Any, Any]],
 ):
-    # slider_vals = []
-    # for ix, filter in enumerate(filters):
-    #     slider_vals.append(
-    #         st.slider(
-    #             filter[0],
-    #             filter[2],
-    #             filter[3],
-    #             filter[4],
-    #             step=filter[5],
-    #             key=f"{tab_type}_{ix}",
-    #         )
-    #     )
-    #
-    # for filter, val in zip(filters, slider_vals):
-    #     filtered_results_df = results_df.loc[filtered_results_df[filter[1]] <= val]
-    #
-    # st.text(f"Number of (filtered) samples/scenarios: {int(np.ceil(filtered_results_df.prob.sum()))}")
-
-    filtered_results_df = results_df
-
-    im_residuals = filtered_results_df.loc[:, sr.constants.PSA_KEYS].values
-    weights = filtered_results_df.loc[:, "prob"].values
+    im_residuals = results_df.loc[:, sr.constants.PSA_KEYS].values
+    weights = results_df.loc[:, "prob"].values
 
     weighted_residual_mean = (
-        einops.einsum(im_residuals, weights, "i j, i -> j")
-        / filtered_results_df.prob.sum()
+        einops.einsum(im_residuals, weights, "i j, i -> j") / results_df.prob.sum()
     )
     weighted_residual_std = np.sqrt(
         np.sum(
             weights[:, None] * (im_residuals - weighted_residual_mean[None, :]) ** 2,
             axis=0,
         )
-        / filtered_results_df.prob.sum()
+        / results_df.prob.sum()
     )
     mean = np.mean(im_residuals, axis=0)
     std = np.std(im_residuals, axis=0)
 
-    fig = plt.figure(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(12, 6))
 
-    plt.semilogx(
+    ax.semilogx(
         sr.constants.PERIODS,
         weighted_residual_mean,
-        label="Weighted Residual Mean",
+        label=f"Weighted (Posterior) Residual Mean, {np.mean(weighted_residual_mean):.2f}",
         c="b",
     )
-    plt.semilogx(
+    ax.semilogx(
         sr.constants.PERIODS,
         weighted_residual_mean + weighted_residual_std,
-        label="Weighted Residual Std",
+        label=f"Weighted (Posterior) Residual Std, {np.mean(weighted_residual_std):.2f}",
         c="b",
         linestyle="--",
     )
-    plt.semilogx(
+    ax.semilogx(
         sr.constants.PERIODS,
         weighted_residual_mean - weighted_residual_std,
         c="b",
         linestyle="--",
     )
-    plt.semilogx(
+    ax.semilogx(
         sr.constants.PERIODS,
         mean,
-        label="Residual Mean",
+        label=f"Uniform (Prior) Residual Mean, {np.mean(mean):.2f}",
         c="r",
     )
-    plt.semilogx(
+    ax.semilogx(
         sr.constants.PERIODS,
         mean + std,
-        label="Residual Std",
+        label=f"Uniform (Prior) Residual Std, {np.mean(std):.2f}",
         c="r",
         linestyle="--",
     )
-    plt.semilogx(
+    ax.semilogx(
         sr.constants.PERIODS,
         mean - std,
         c="r",
         linestyle="--",
     )
 
-    plt.xlabel(f"Period (s)")
-    plt.ylabel(f"pSA")
-    plt.xlim([0.01, 10])
-    plt.ylim([-1.5, 1.5])
-    plt.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    plt.legend()
-    plt.tight_layout()
+    ax.set_xlabel(f"Period (s)")
+    ax.set_ylabel(f"pSA")
+    ax.set_xlim([0.01, 10])
+    ax.set_ylim([-1.5, 1.5])
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.legend()
+    # fig.tight_layout()
+
+    st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
+
+
+
+
+
+def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_type: str):
+    n_probs = st.number_input(
+        "Number of Probabilities", 1, 100, 2, key=f"{tab_type}_n_probs"
+    )
+
+    group_cols = (
+        ["event_id", "site_int", "site_obs"]
+        if "site_obs" in results_df.columns
+        else ["event_id", "site_int"]
+    )
+    groups = get_results_group(results_df, group_cols)
+    top_k_probs = groups["prob"].apply(
+        lambda x: x.nlargest(n_probs).sum()
+    )
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    ax.hist(top_k_probs, bins=20)
+
+    ax.set_xlabel(f"Top {n_probs} (summed) probabilities")
+    ax.set_ylabel(f"Count")
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    # fig.tight_layout()
+
+    st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
+
+def loss_dist(results_df: pd.DataFrame):
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    group_cols = (
+        ["event_id", "site_int", "site_obs"]
+        if "site_obs" in results_df.columns
+        else ["event_id", "site_int"]
+    )
+    groups = get_results_group(results_df, group_cols)
+
+    if "site_corr_weights" not in results_df.columns:
+        loss = groups.apply(lambda x: np.sum(x.misfit_score * x.prob))
+    else:
+        loss = groups.apply(lambda x: np.sum(x.misfit_score * x.prob * x.site_corr_weights))
+
+    ax.hist(loss.values, bins=100)
+
+    ax.set_xlabel(f"Loss")
+    ax.set_ylabel(f"Count")
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.set_title(f"Loss Distribution")
+    # fig.tight_layout()
 
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
@@ -993,19 +1328,29 @@ def run_agg_single(cur_results_dir: Path):
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
+        posterior_probs_inv(cur_results_dir, train_sample_results, "train_sample")
+        st.divider()
+
+        loss_dist(train_sample_results)
+        st.divider()
+
         agg_residuals(
             cur_results_dir,
             train_sample_results,
             "train_sample",
-            [("Max Distance", "s2s_distance", 0.0, 50.0, 50.0, 5.0)],
         )
 
     with val_tab:
+        posterior_probs_inv(cur_results_dir, val_sample_results, "val_sample")
+        st.divider()
+
+        loss_dist(val_sample_results)
+        st.divider()
+
         agg_residuals(
             cur_results_dir,
             val_sample_results,
             "val_sample",
-            [("Max Distance", "s2s_distance", 0.0, 50.0, 50.0, 5.0)],
         )
 
 
@@ -1017,45 +1362,37 @@ def run_agg_scenario(cur_results_dir: Path):
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
+        posterior_probs_inv(cur_results_dir, train_scenario_results, "train_scenario")
+        st.divider()
+
+        loss_dist(train_scenario_results)
+        st.divider()
+
         agg_residuals(
             cur_results_dir,
             train_scenario_results,
             "train_scenario",
-            [
-                (
-                    "Max Distance",
-                    "max_distance",
-                    float(train_scenario_results.min_distance.min()),
-                    float(train_scenario_results.min_distance.max()),
-                    float(train_scenario_results.min_distance.max()),
-                    5.0,
-                ),
-            ],
         )
 
     with val_tab:
+        posterior_probs_inv(cur_results_dir, val_scenario_results, "val_scenario")
+        st.divider()
+
+        loss_dist(val_scenario_results)
+        st.divider()
+
         agg_residuals(
             cur_results_dir,
             val_scenario_results,
             "val_scenario",
-            [
-                (
-                    "Min Distance",
-                    "min_distance",
-                    float(train_scenario_results.min_distance.min()),
-                    float(train_scenario_results.min_distance.max()),
-                    float(train_scenario_results.min_distance.max()),
-                    5.0,
-                ),
-            ],
         )
 
 
 def main(
     results_dir: Path,
-    # emp_gm_params_ffp: Path = typer.Option(
-    #     None, help="Only provide when using realisations from empirical GMMs"
-    # ),
+    gen_gm_params_ffp: Path = typer.Option(
+        None, help="Only provide when using realisations from empirical GMMs"
+    ),
 ):
     st.set_page_config(layout="wide")
 
@@ -1087,17 +1424,35 @@ def main(
         ]
     )
 
+    meta = get_metadata(cur_results_dir)
+    syn_obs_gm_params_ffp = (
+        fp
+        if (
+            fp := (Path(os.path.expandvars("$wdata")) / meta["data"]["db"]).parent
+            / "syn_gm_params.csv"
+        ).exists()
+        else None
+    )
+
     with general_tab:
         # pass
         run_general_tab(cur_results_dir)
 
     with ind_sample_tab:
         # pass
-        run_ind_samples(cur_results_dir)
+        run_ind_samples(
+            cur_results_dir,
+            gen_gm_params_ffp=gen_gm_params_ffp,
+            syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
+        )
 
     with ind_scenario_tab:
         # pass
-        run_ind_scenario(cur_results_dir)
+        run_ind_scenario(
+            cur_results_dir,
+            gen_gm_params_ffp=gen_gm_params_ffp,
+            syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
+        )
 
     with agg_single_tab:
         # pass

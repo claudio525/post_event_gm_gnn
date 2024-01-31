@@ -256,7 +256,6 @@ class DB:
             self.con,
             params=(event, *sites),
             index_col="record_id",
-            # dtype={"rel_id": "category", "data_source": "category", "site_id": "category", "event_id": "category"}
         ).drop(columns=["event_id"])
 
     def get_obs_data(self, event: str, sites: Sequence[str]):

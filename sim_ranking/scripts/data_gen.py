@@ -62,23 +62,30 @@ def gen_emp_realisations(
     gm_params = pd.read_csv(emp_gm_params_ffp, index_col=0)
     site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")
 
-    results = sr.data.gen_emp_realisations(
-        gm_params, site_df, n_rels=n_rels
-    )
+    results = sr.data.gen_emp_realisations(gm_params, site_df, n_rels=n_rels)
 
     pd.to_pickle(results, output_dir / "emp_realisations.pickle", compression=None)
 
     # for cur_event_rel, cur_df in results.items():
     #     cur_df["component"] = "rotd50"
     #     cur_df.to_csv(output_dir / f"{cur_event_rel}.csv")
-        # cur_df.to_parquet(output_dir / f"{cur_event_rel}.parquet")
+    # cur_df.to_parquet(output_dir / f"{cur_event_rel}.parquet")
 
 
 @app.command("gen-emp-synthetic-observed")
-def gen_emp_synthetic_observed(emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path, nzgmdb_flat_file: Path, output_ffp: Path):
-    syn_obs_df = sr.data.gen_emp_synthetic_observed(emp_gm_params_ffp, nzgmdb_site_ffp, nzgmdb_flat_file)
+def gen_emp_synthetic_observed(
+    emp_gm_params_ffp: Path,
+    nzgmdb_site_ffp: Path,
+    nzgmdb_flat_file: Path,
+    syn_obs_ffp: Path,
+    syn_gm_params_ffp: Path,
+):
+    syn_obs_df, mod_gm_params_df = sr.data.gen_emp_synthetic_observed(
+        emp_gm_params_ffp, nzgmdb_site_ffp, nzgmdb_flat_file
+    )
 
-    syn_obs_df.to_csv(output_ffp)
+    syn_obs_df.to_csv(syn_obs_ffp)
+    mod_gm_params_df.to_csv(syn_gm_params_ffp)
 
 
 @app.command("compute-sim-gm-params-mera")
@@ -112,7 +119,9 @@ def get_sim_gm_params_total(output_dir: Path, simulation_imdb_ffp: Path):
 
 
 @app.command("compute-emp-event-site-correlations")
-def compute_emp_event_site_correlations(output_dir: Path, emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path):
+def compute_emp_event_site_correlations(
+    output_dir: Path, emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path
+):
     """
     Uses the Loth & Baker model to compute the site correlations
 
@@ -141,18 +150,18 @@ def compute_emp_event_site_correlations(output_dir: Path, emp_gm_params_ffp: Pat
         corrs[:, :, i][upper_mask] = corrs[:, :, i].T[upper_mask] = t
         np.fill_diagonal(corrs[:, :, i], 1.0)
 
-
     # Write the results
     print(f"Writing results")
     for cur_event in gm_params_df.event.unique().astype(str):
-        cur_sites = np.sort(gm_params_df.loc[gm_params_df.event == cur_event, "site"].values.astype(str))
+        cur_sites = np.sort(
+            gm_params_df.loc[gm_params_df.event == cur_event, "site"].values.astype(str)
+        )
         site_mask = np.isin(sites, cur_sites)
 
         assert np.all(sites[site_mask] == cur_sites)
 
         cur_site_corr = sr.data.SiteCorrelations(
-            corrs[site_mask, :, :][:, site_mask, :],
-            cur_sites, ims, cur_event
+            corrs[site_mask, :, :][:, site_mask, :], cur_sites, ims, cur_event
         )
         cur_site_corr.write(output_dir / f"{cur_event}.pickle")
 

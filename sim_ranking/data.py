@@ -47,7 +47,8 @@ def gen_emp_synthetic_observed(
     std_total_cols = [f"{cur_im}_std_Total" for cur_im in constants.PSA_KEYS]
     gm_params.loc[:, mean_cols] = (
         gm_params.loc[:, mean_cols].values
-        + 0.5 * gm_params.loc[:, std_total_cols].values
+        # + 0.5 * gm_params.loc[:, std_total_cols].values
+        + 0.5 * 0.6
     )
 
     # Generate the realisation
@@ -69,7 +70,7 @@ def gen_emp_synthetic_observed(
     df["r_x"] = nzgmdb_df.loc[df.index, "r_x"].values
     df = df.rename(columns={"event": "evid", "site": "sta"})
 
-    return df
+    return df, gm_params
 
 
 def gen_emp_realisations(
