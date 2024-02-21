@@ -39,21 +39,41 @@ class PairWiseModel(nn.Module):
 
         return self.fc_layers(x)
 
-class ProbIndModel(nn.Module):
 
-    def __init__(self,
-                 fc_units: Sequence[int],
-                 n_scalar_inputs: int,
-                 n_ims: int,
-                 n_im_features: int
-                 ):
-        super().__init__()
+class ProbModel(nn.Module):
+    """Base class, don't use directly"""
 
-        self.fc_units = fc_units
+    def __init__(
+        self,
+        n_scalar_inputs: int,
+        n_ims: int,
+        n_im_features: int,
+    ):
+
         self.n_scalar_inputs = n_scalar_inputs
         self.n_ims = n_ims
         self.n_im_features = n_im_features
 
+        super().__init__()
+
+
+class ProbIndModel(ProbModel):
+    def __init__(
+        self,
+        fc_units: Sequence[int],
+        n_scalar_inputs: int,
+        n_ims: int,
+        n_im_features: int,
+        is_sub_model: bool,
+    ):
+        super().__init__(
+            n_scalar_inputs=n_scalar_inputs,
+            n_ims=n_ims,
+            n_im_features=n_im_features,
+        )
+
+        self.fc_units = fc_units
+        self.is_sub_model = is_sub_model
         self.input_size = n_ims * self.n_im_features + self.n_scalar_inputs
 
         self.fc_layers = nn.Sequential()
@@ -63,101 +83,121 @@ class ProbIndModel(nn.Module):
             else:
                 self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
 
-            if i == len(fc_units) - 1:
-                self.fc_layers.append(nn.Linear(fc_units[i], 1))
-            else:
-                self.fc_layers.append(nn.BatchNorm1d(self.fc_units[i]))
-                self.fc_layers.append(nn.LeakyReLU())
+            self.fc_layers.append(nn.BatchNorm1d(self.fc_units[i]))
+            self.fc_layers.append(nn.LeakyReLU())
+
+
+        if self.is_sub_model:
+            # If the model is a sub-model the last number in fc_units
+            # is the number of outputs
+            pass
+        else:
+            self.fc_layers.append(nn.Linear(fc_units[-1], 1))
+
+    @property
+    def n_outputs(self):
+        if self.is_sub_model:
+            return self.fc_units[-1]
+        return 1
 
     def forward(self, im_values: torch.Tensor, scalar_values: torch.Tensor):
         X_im = einops.rearrange(im_values, "batch type rel im -> batch rel (type im)")
-        X_ss = einops.repeat(scalar_values, "batch ss -> batch rel ss", rel=im_values.shape[2])
+        X_ss = einops.repeat(
+            scalar_values, "batch ss -> batch rel ss", rel=im_values.shape[2]
+        )
 
         X = torch.cat((X_im, X_ss), axis=2)
         X = einops.rearrange(X, "batch rel feature -> (batch rel) feature")
 
         X = self.fc_layers(X)
-        X = einops.rearrange(X, "(batch rel) 1 -> batch rel", batch=im_values.shape[0], rel=im_values.shape[2])
+        X = einops.rearrange(
+            X,
+            "(batch rel) n_outs -> batch rel n_outs",
+            batch=im_values.shape[0],
+            rel=im_values.shape[2],
+            n_outs=self.n_outputs,
+        )
 
-        X = custom_sigmoid(X, 0.5)
+        if not self.is_sub_model:
+            X = custom_sigmoid(X.squeeze(), 0.5)
+            pred = X / X.sum(axis=1, keepdims=True)
+        else:
+            pred = X
 
-        pred = X / X.sum(axis=1, keepdims=True)
         return pred
 
 
-class ProbCombModel(nn.Module):
+class ProbCombModel(ProbModel):
 
-    def __init__(self,
-                 fc_im_units: Sequence[int],
-                 n_ims: int,
-                 fc_ss_units: Sequence[int],
-                 fc_comb_units: Sequence[int],
-                 n_ss_inputs: int,
-                 n_rels: int,
-                 ):
-        super().__init__()
-
-        self.n_rels = n_rels
-
-        self.fc_im_units = fc_im_units
-        self.fc_ss_units = fc_ss_units
-        self.fc_comb_units = fc_comb_units
-
-        self.im_input_size = n_ims * 3
-        self.n_ss_inputs = n_ss_inputs
-        self.comb_input_size = self.fc_im_units[-1] * self.n_rels + self.fc_ss_units[-1]
+    def __init__(
+        self,
+        ind_fc_units: Sequence[int],
+        comb_fc_units: Sequence[int],
+        n_scalar_inputs: int,
+        n_ims: int,
+        n_im_features: int,
+    ):
+        super().__init__(
+            n_scalar_inputs=n_scalar_inputs,
+            n_ims=n_ims,
+            n_im_features=n_im_features,
+        )
 
 
+        self.ind_model = ProbIndModel(
+            fc_units=ind_fc_units,
+            n_scalar_inputs=n_scalar_inputs,
+            n_ims=n_ims,
+            n_im_features=n_im_features,
+            is_sub_model=True
+        )
 
-        # IM layers
-        self.fc_im_layers = nn.Sequential()
-        for i in range(len(self.fc_im_units)):
-            if i == 0:
-                self.fc_im_layers.append(nn.Linear(self.im_input_size, self.fc_im_units[i]))
-            else:
-                self.fc_im_layers.append(nn.Linear(self.fc_im_units[i - 1], self.fc_im_units[i]))
+        self.fc_comb_units = comb_fc_units
 
-            self.fc_im_layers.append(nn.ELU())
-
-        # Site-to-site layers
-        self.fc_ss_layers = nn.Sequential()
-        for i in range(len(self.fc_ss_units)):
-            if i == 0:
-                self.fc_ss_layers.append(nn.Linear(self.n_ss_inputs, self.fc_ss_units[i]))
-            else:
-                self.fc_ss_layers.append(nn.Linear(self.fc_ss_units[i - 1], self.fc_ss_units[i]))
-
-            self.fc_ss_layers.append(nn.ELU())
+        self.n_inputs = self.ind_model.n_outputs
 
         # Combined layers
-        self.fc_comb_layers = nn.Sequential()
+        # self.fc_comb_layers = nn.Sequential()
+        self.fc_comb_layers = nn.ModuleList()
         for i in range(len(self.fc_comb_units)):
             if i == 0:
-                self.fc_comb_layers.append(nn.Linear(self.comb_input_size, self.fc_comb_units[i]))
+                self.fc_comb_layers.append(
+                    nn.Linear(self.n_inputs, self.fc_comb_units[i])
+                )
             else:
-                self.fc_comb_layers.append(nn.Linear(self.fc_comb_units[i - 1], self.fc_comb_units[i]))
+                self.fc_comb_layers.append(
+                    nn.Linear(self.fc_comb_units[i - 1], self.fc_comb_units[i])
+                )
 
-            self.fc_comb_layers.append(nn.ELU())
+            # if i < len(self.fc_comb_units) - 1:
+            self.fc_comb_layers.append(nn.BatchNorm1d(self.fc_comb_units[i]))
+            self.fc_comb_layers.append(nn.LeakyReLU())
 
-        self.fc_comb_layers.append(nn.Linear(self.fc_comb_units[-1], self.n_rels))
+            # self.fc_comb_layers.append(nn.ELU())
 
-    def forward(self, im_values: torch.Tensor, ss_values: torch.Tensor):
-        X_im = []
-        for i in range(self.n_rels):
-            cur_im_values = einops.rearrange(im_values[:, :, i, :], "batch type im -> batch (type im)")
-            X_im.append(self.fc_im_layers(cur_im_values))
+        # self.fc_comb_layers.append(nn.Linear(self.fc_comb_units[-1], self.n_rels))
+        self.fc_comb_layers.append(nn.Linear(self.fc_comb_units[-1], 1))
 
-        X_im = torch.cat(X_im, axis=1)
-        X_ss = self.fc_ss_layers(ss_values)
+    def forward(self, im_values: torch.Tensor, scalar_values: torch.Tensor):
+        X = self.ind_model(im_values, scalar_values)
 
-        X_comb = torch.cat((X_im, X_ss), axis=1)
-        X_comb = self.fc_comb_layers(X_comb)
+        X = einops.rearrange(X, "batch rel feature -> (batch rel) feature")
+        for cur_layer in self.fc_comb_layers:
+            X = cur_layer(X)
+        X = einops.rearrange(X, "(batch rel) 1 -> batch rel", batch=im_values.shape[0], rel=im_values.shape[2])
 
-        # X_comb = F.sigmoid(X_comb)
-        X_comb = custom_sigmoid(X_comb, 1.0)
+        X = custom_sigmoid(X.squeeze(), 0.5)
+        pred = X / X.sum(axis=1, keepdims=True)
 
-        # Normalise
-        return X_comb / X_comb.sum(axis=1, keepdims=True)
+        #
+        # if len(X.shape) == 3:
+        #     X = einops.rearrange(X, "batch rel n_outs -> batch (rel n_outs)")
+        #
+        # X = self.fc_comb_layers(X)
+        #
+        # # X = custom_sigmoid(X.squeeze(), 0.5)
+
+        return pred
 
 
 class ExpWeightModel(nn.Module):

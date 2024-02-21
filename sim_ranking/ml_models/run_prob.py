@@ -32,6 +32,7 @@ def train_model(
     data_source: str = None,
     im_set: str = "all",
     quiet: bool = False,
+    seed: int = None,
 ):
     """Trains a single model"""
     run_config = prob.RunParamsConfig(
@@ -65,7 +66,9 @@ def train_model(
     event_sites = db.get_event_sites()
 
     # Split into training and validation
-    np.random.seed(30)
+    if seed is not None:
+        print(f"Using numpy random seed: {seed}")
+        np.random.seed(seed)
     val_int_sites = np.random.choice(all_sites, 100, replace=False)
     train_sites = np.setdiff1d(all_sites, val_int_sites)
 

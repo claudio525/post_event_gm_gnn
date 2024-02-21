@@ -186,7 +186,11 @@ def run_general_tab(results_dir: Path):
         st.markdown("### Hyperparams")
         st.text(f"{'Batch size:':<{padding}} {meta['hp_config']['batch_size']}")
         st.text(f"{'Learning rate:':<{padding}} {meta['hp_config']['lr']}")
-        st.text(f"{'FC Units:':<{padding}} {str(meta['hp_config']['fc_units'])}")
+        if "fc_units" in meta["hp_config"]:
+            st.text(f"{'FC Units:':<{padding}} {str(meta['hp_config']['fc_units'])}")
+        else:
+            st.text(f"{'Ind FC Units:':<{padding}} {str(meta['hp_config']['ind_fc_units'])}")
+            st.text(f"{'Comb FC Units:':<{padding}} {str(meta['hp_config']['comb_fc_units'])}")
         st.text(f"{'L2:':<{padding}} {meta['hp_config']['l2_reg']}")
         st.divider()
 

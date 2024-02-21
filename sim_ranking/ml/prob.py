@@ -66,11 +66,11 @@ class HyperParamsConfig:
     use_res_sim_site_obs_sim_site_int: bool
     use_res_obs_site_obs_sim_site_int: bool
 
-    fc_units: Sequence[int]
+    ind_fc_units: Sequence[int]
 
-    fc_im_units: Sequence[int]
-    fc_ss_units: Sequence[int]
-    fc_comb_units: Sequence[int]
+    combined_model: bool
+    comb_fc_units: Sequence[int]
+
 
     def __post_init__(self):
         self.n_im_features = sum(
@@ -101,10 +101,9 @@ class HyperParamsConfig:
             params["res_site_obs"],
             params["res_sim_site_obs_sim_site_int"],
             params["res_obs_site_obs_sim_site_int"],
-            params["fc_units"],
-            params["fc_im_units"],
-            params["fc_ss_units"],
-            params["fc_comb_units"],
+            params["ind_fc_units"],
+            params["use_combined_model"],
+            params["comb_fc_units"],
         )
 
     def to_dict(self):
@@ -122,10 +121,9 @@ class HyperParamsConfig:
             "res_sim_site_obs_sim_site_int": self.use_res_sim_site_obs_sim_site_int,
             "res_obs_site_obs_sim_site_int": self.use_res_obs_site_obs_sim_site_int,
             "n_im_features": self.n_im_features,
-            "fc_units": self.fc_units,
-            "fc_im_units": self.fc_im_units,
-            "fc_ss_units": self.fc_ss_units,
-            "fc_comb_units": self.fc_comb_units,
+            "ind_fc_units": self.ind_fc_units,
+            "use_combined_model": self.combined_model,
+            "comb_fc_units": self.comb_fc_units,
         }
 
 
@@ -567,43 +565,51 @@ def create_model(
     scalar_features: ml_data.ScalarFeatures,
     run_config: RunParamsConfig,
 ):
-    # prob_model = models.ProbCombModel(
-    #     hp_config.fc_im_units,
-    #     len(run_config.ims),
-    #     hp_config.fc_ss_units,
-    #     hp_config.fc_comb_units,
-    #     scalar_features.n_scalar_features,
-    #     run_config.n_rels,
-    # )
+    if hp_config.combined_model:
+        prob_model = models.ProbCombModel(
+            hp_config.ind_fc_units,
+            hp_config.comb_fc_units,
+            scalar_features.n_scalar_features,
+            len(run_config.ims),
+            hp_config.n_im_features,
+        )
 
-    prob_model = models.ProbIndModel(
-        hp_config.fc_units,
-        scalar_features.n_scalar_features,
-        len(run_config.ims),
-        hp_config.n_im_features,
-    )
+        print(f"Model summary")
+        summary(
+            prob_model,
+            input_size=[
+                (
+                    hp_config.batch_size,
+                    hp_config.n_im_features,
+                    run_config.n_rels,
+                    len(run_config.ims),
+                ),
+                (hp_config.batch_size, scalar_features.n_scalar_features),
+            ],
+        )
 
-    print(f"Model summary")
-    summary(
-        prob_model,
-        input_size=[
-            (
-                hp_config.batch_size,
-                hp_config.n_im_features,
-                run_config.n_rels,
-                len(run_config.ims),
-            ),
-            (hp_config.batch_size, scalar_features.n_scalar_features),
-        ],
-    )
+    else:
+        prob_model = models.ProbIndModel(
+            hp_config.ind_fc_units,
+            scalar_features.n_scalar_features,
+            len(run_config.ims),
+            hp_config.n_im_features,
+            is_sub_model=False
+        )
 
-    # summary(
-    #     prob_model,
-    #     input_size=[
-    #         (hp_config.batch_size, 3, run_config.n_rels, len(run_config.ims)),
-    #         (hp_config.batch_size, scalar_features.n_scalar_features),
-    #     ],
-    # )
+        print(f"Model summary")
+        summary(
+            prob_model,
+            input_size=[
+                (
+                    hp_config.batch_size,
+                    hp_config.n_im_features,
+                    run_config.n_rels,
+                    len(run_config.ims),
+                ),
+                (hp_config.batch_size, scalar_features.n_scalar_features),
+            ],
+        )
 
     return prob_model
 

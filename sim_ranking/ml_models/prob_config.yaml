@@ -1,10 +1,11 @@
 # Training Params
-#batch_size: 512
 batch_size: 64
+#batch_size: 64
 #lr: 0.001
 lr: [0.001, 0.0005, 0.0001]
 lr_epochs: [33, 66]
 l2_reg: 0.001
+#l2_reg: 0.0005
 
 misfit_fn: "mse"
 #misfit_fn: "mae"
@@ -12,8 +13,13 @@ misfit_fn: "mse"
 
 # Model Params
 # Independent Model
-#fc_units: [64]
-fc_units: [16, 16]
+
+#ind_fc_units: [16, 16, 16]
+ind_fc_units: [16, 16]
+
+use_combined_model: False
+#use_combined_model: True
+comb_fc_units: [16, 16]
 
 # IM features
 im_sim_site_obs: False
@@ -29,13 +35,6 @@ res_site_obs: True
 res_sim_site_obs_sim_site_int: True
 #res_obs_site_obs_sim_site_int: False
 res_obs_site_obs_sim_site_int: True
-
-
-# Combined Model
-fc_im_units: [32, 16, 8]
-fc_ss_units: [32, 32]
-fc_comb_units: [32]
-
 
 
 
