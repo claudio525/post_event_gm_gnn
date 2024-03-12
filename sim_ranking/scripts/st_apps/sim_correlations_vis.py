@@ -91,7 +91,7 @@ def create_corr_plot(dist_matrix: pd.DataFrame, corr_df: pd.DataFrame, mask: np.
     return fig
 
 
-def main(sim_corr_dir: Path, obs_corr_ffp: Path, db_ffp: Path):
+def main(sim_corr_dir: Path, db_ffp: Path):
     st.set_page_config(layout="wide")
 
     st.title("Correlations")

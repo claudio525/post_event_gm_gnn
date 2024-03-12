@@ -1,8 +1,14 @@
-from typing import Sequence
+from typing import Sequence, NamedTuple, Tuple
+
 
 import numpy as np
 import pandas as pd
 
+
+class SourceInfo(NamedTuple):
+
+    rupture_name: str
+    hypo_loc: Tuple[float, float]
 
 def reverse_im_filename(im: str):
     if im.startswith("pSA"):
@@ -23,3 +29,4 @@ def get_nice_im_name(im: str):
     if im.startswith("pSA"):
         return f"pSA({im.split('_')[-1]}s)"
     return im
+

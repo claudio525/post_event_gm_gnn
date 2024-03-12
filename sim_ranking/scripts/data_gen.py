@@ -59,6 +59,7 @@ def get_emp_gmm_params(
 def gen_emp_realisations(
     emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path, output_dir: Path, n_rels: int = 25
 ):
+    """Generates synthetic realisations using empirical models"""
     gm_params = pd.read_csv(emp_gm_params_ffp, index_col=0)
     site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")
 
@@ -80,6 +81,7 @@ def gen_emp_synthetic_observed(
     syn_obs_ffp: Path,
     syn_gm_params_ffp: Path,
 ):
+    """Generates synthetic observed data using empirical models"""
     syn_obs_df, mod_gm_params_df = sr.data.gen_emp_synthetic_observed(
         emp_gm_params_ffp, nzgmdb_site_ffp, nzgmdb_flat_file
     )
@@ -90,14 +92,20 @@ def gen_emp_synthetic_observed(
 
 @app.command("compute-sim-gm-params-mera")
 def get_sim_gm_params_mera(
-    output_dir: Path, db_ffp: Path, data_source: str = None, n_procs: int = 1
+    output_dir: Path,
+    db_ffp: Path,
+    data_source: str = None,
+    n_procs: int = 1,
+    im_set: str = "all",
 ):
     """
     Computes the GM parameters from the simulation data
     directly using MERA
     """
+    ims = sr.constants.IM_SETS[im_set]
+
     sim_gm_params = sr.data.compute_sim_gm_params_mera(
-        db_ffp, data_source=data_source, n_procs=n_procs
+        db_ffp, ims, data_source=data_source, n_procs=n_procs
     )
 
     for cur_params in sim_gm_params:
@@ -106,12 +114,13 @@ def get_sim_gm_params_mera(
 
 
 @app.command("compute-sim-gm-params-total")
-def get_sim_gm_params_total(output_dir: Path, simulation_imdb_ffp: Path):
+def get_sim_gm_params_total(output_dir: Path, db_ffp: Path, im_set: str = "all"):
     """
     Computes the GM parameters from the simulation data
     directly, assumes between event term is 0, i.e. just uses total residual
     """
-    sim_gm_params = sr.data.compute_sim_gm_params_total(simulation_imdb_ffp)
+    ims = sr.constants.IM_SETS[im_set]
+    sim_gm_params = sr.data.compute_sim_gm_params_total(db_ffp, ims)
 
     for cur_params in sim_gm_params:
         (cur_out_dir := output_dir / cur_params.event).mkdir(exist_ok=True)
@@ -123,6 +132,8 @@ def compute_emp_event_site_correlations(
     output_dir: Path, emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path
 ):
     """
+    NOTE: I DON'T THINK THIS IS USED ANYMORE, DELETE??
+
     Uses the Loth & Baker model to compute the site correlations
 
     Note: As correlations only depend on the distance between sites
@@ -144,10 +155,11 @@ def compute_emp_event_site_correlations(
     corrs = np.full((sites.size, sites.size, len(ims)), fill_value=np.nan)
     upper_mask = np.triu(np.ones_like(corrs[:, :, 0], dtype=bool), k=1)
     for i, cur_im in enumerate(ims):
-        t = sha.loth_baker_corr_model.get_correlations(
+        corrs[:, :, i][upper_mask] = corrs[:, :, i].T[
+            upper_mask
+        ] = sha.loth_baker_corr_model.get_correlations(
             cur_im, cur_im, dist_matrix.values[upper_mask]
         )
-        corrs[:, :, i][upper_mask] = corrs[:, :, i].T[upper_mask] = t
         np.fill_diagonal(corrs[:, :, i], 1.0)
 
     # Write the results
@@ -170,15 +182,14 @@ def compute_emp_event_site_correlations(
 def compute_sim_event_site_correlations(
     output_dir: Path,
     sim_params_dir: Path,
-    smooth: bool = False,
 ):
     """
     Computes the site correlations for each simulated event
     I.e. Produces site-correlations per event using the simulation realisations
+
+
     """
-    correlation_results = sr.data.compute_sim_event_site_corrs(
-        sim_params_dir, smooth=smooth
-    )
+    correlation_results = sr.data.compute_sim_event_site_corrs(sim_params_dir)
 
     for cur_result in correlation_results:
         cur_result.write(output_dir / f"{cur_result.event}.pickle")
@@ -200,6 +211,7 @@ def compute_sim_site_correlations(output_dir: Path, sim_params_dir: Path):
 def compute_obs_site_correlations(
     output_dir: Path, db_ffp: Path, site_count_th: int = 20
 ):
+    """Computes the observed correlation between sites for each IM"""
     db = sr.db.DB(db_ffp)
     obs_df = db.get_obs_df()
 
@@ -212,11 +224,6 @@ def compute_obs_site_correlations(
 
         # Compute the correlations
         cur_corrs = cur_df.corr(min_periods=site_count_th)
-
-        # Drop any sites for which we don't have any correlations
-        # cur_corrs = cur_corrs.dropna(axis=0, how="all")
-        # cur_corrs = cur_corrs.dropna(axis=1, how="all")
-        # assert cur_corrs.shape[0] == cur_corrs.shape[1]
 
         # Sanity checking
         cur_n_site_pairs = (

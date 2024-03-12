@@ -1,4 +1,4 @@
-import os
+import os.path
 import time
 from typing import List, Sequence
 from pathlib import Path
@@ -24,35 +24,34 @@ def _get_meta(results_dir: Path):
 
 
 @st.cache_data
-def _load_cmvn_result(results_dir: Path):
-    ffp = results_dir / "cMVN_distributions.pickle"
-    if ffp.exists():
-        return sr.cmvn.ConditionalMVNDistribution.load(ffp)
-    return None
+def _get_db_ffp(results_dir: Path):
+    return Path(os.path.expandvars("$wdata")) / _get_meta(results_dir)["db_ffp"]
 
 
+@st.cache_data
 def _get_obs_data(results_dir: Path):
-    meta = _get_meta(results_dir)
-    return _load_obs_data(meta["obs_data_ffp"], meta["rupture"])
+    db = sr.db.DB(_get_db_ffp(results_dir))
+    obs_df = db.get_obs_df()
+    obs_df = obs_df.loc[obs_df.event_id == _get_meta(results_dir)["rupture"]].set_index(
+        "site_id"
+    )
+    return obs_df
 
 
 @st.cache_data
-def _load_obs_data(obs_data_ffp: Path, rupture: str):
-    return sr.data.load_obs_rupture_data(obs_data_ffp, rupture)
-
-
 def _get_sim_data(results_dir: Path, sites: np.ndarray):
-    meta = _get_meta(results_dir)
-    return _load_sim_data(meta["sim_imdb_ffp"], sites, meta["rupture"])
-
-
-@st.cache_data
-def _load_sim_data(sim_imdb_ffp: Path, sites: np.ndarray, event: str):
-    return sr.data.load_site_sim_data(sim_imdb_ffp, sites=sites, event=event)
+    db = sr.db.DB(_get_db_ffp(results_dir))
+    event = _get_meta(results_dir)["rupture"]
+    sim_data = db.get_sim_data(event, sites)
+    sim_data = {
+        cur_site: cur_g.set_index(np.char.replace(cur_g.index.values.astype(str), f"_{cur_site}", ""))
+        for cur_site, cur_g in sim_data.groupby("site_id")
+    }
+    return sim_data
 
 
 def _get_sites(results_dir: Path):
-    sites = _load_cmvn_result(results_dir).stations
+    sites = sr.st_utils.cim_load_cmvn_result(results_dir).stations
     method_type = sr.data.get_method_type(results_dir)
 
     if method_type is sr.constants.RankingMethod.emp_cMVN:
@@ -103,8 +102,10 @@ def _load_emp_gm_params(gm_params_ffp: Path, event: str):
 def _get_gm_params(results_dir: Path):
     method_type = sr.data.get_method_type(results_dir)
     meta = _get_meta(results_dir)
+
     if method_type is sr.constants.RankingMethod.emp_cMVN:
-        return _load_emp_gm_params(meta["gm_params_ffp"], meta["rupture"])
+        gm_params_ffp = Path(os.path.expandvars("$wdata")) / meta["gm_params_ffp"]
+        return _load_emp_gm_params(gm_params_ffp, meta["rupture"])
     else:
         sim_gm_params = _load_sim_gm_params(Path(meta["sim_gm_params_dir"]))
         return sim_gm_params.gm_params
@@ -117,13 +118,15 @@ def _load_station_df(results_dir: Path):
 
 @st.cache_data
 def _load_dist_matrix(results_dir: Path, sites: Sequence[str]):
-    station_df = _load_station_df(results_dir)
+    db = sr.db.DB(_get_db_ffp(results_dir))
+    station_df = db.get_site_df()
 
     return sh.im_dist.calculate_distance_matrix(sites, station_df)
 
 
 def main(
-    results_dir: Path, multi_result_types: bool = False,
+    results_dir: Path,
+    multi_result_types: bool = False,
 ):
     if not multi_result_types:
         cur_results_dir = results_dir

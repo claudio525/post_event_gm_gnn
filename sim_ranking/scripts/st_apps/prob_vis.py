@@ -19,11 +19,7 @@ import spatial_hazard as sh
 import sim_ranking as sr
 import ml_tools as mlt
 
-
-@st.cache_data
-def get_metadata(results_dir: Path):
-    return sr.data.get_meta(results_dir)
-
+import st_utils
 
 @st.cache_data
 def load_training_metrics(results_dir: Path):
@@ -33,129 +29,16 @@ def load_training_metrics(results_dir: Path):
 
 
 @st.cache_data
-def get_site_df(results_dir: Path):
-    metadata = get_metadata(results_dir)
-    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
-
-    return sr.db.DB(db_ffp).get_site_df()
-
-
-@st.cache_data
-def get_event_df(results_dir: Path):
-    metadata = get_metadata(results_dir)
-    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
-
-    return sr.db.DB(db_ffp).get_event_df()
-
-
-@st.cache_data
-def load_gm_params(gm_params_ffp: Path):
-    return pd.read_csv(gm_params_ffp, index_col=0)
-
-
-@st.cache_data
-def get_event_sites(results_dir: Path):
-    metadata = get_metadata(results_dir)
-    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
-
-    return sr.db.DB(db_ffp).get_event_sites()
-
-
-@st.cache_data
-def get_event_angular_distances(results_dir: Path):
-    station_df = get_site_df(results_dir)
-    event_df = get_event_df(results_dir)
-    event_sites = get_event_sites(results_dir)
-
-    return sr.ml.features.compute_angular_distance(
-        station_df,
-        event_df,
-        event_df.index.values.astype(str),
-        event_sites,
-        pre_process=False,
-    )
-
-
-@st.cache_data
-def get_obs_df(results_dir: Path):
-    metadata = get_metadata(results_dir)
-    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
-
-    return sr.db.DB(db_ffp).get_obs_df()
-
-
-@st.cache_data
-def get_sim_data(results_dir: Path, event: str):
-    metadata = get_metadata(results_dir)
-    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
-
-    sites = get_event_sites(results_dir)[event]
-
-    return sr.db.DB(db_ffp).get_sim_data(event, sites)
-
-
-@st.cache_data
-def load_scenario_results(results_dir: Path):
-    train_results = pd.read_parquet(results_dir / "train_scenario_results.parquet")
-    val_results = pd.read_parquet(results_dir / "val_scenario_results.parquet")
-
-    return train_results, val_results
-
-
-@st.cache_data
-def load_sample_results(results_dir: Path):
-    train_results_df = pd.read_parquet(results_dir / "train_sample_results.parquet")
-    val_results_df = pd.read_parquet(results_dir / "val_sample_results.parquet")
-
-    angular_distances = get_event_angular_distances(results_dir)
-    for cur_event in train_results_df.event_id.unique():
-        train_results_df.loc[
-            train_results_df.event_id == cur_event, "angular_distance"
-        ] = np.rad2deg(
-            angular_distances[cur_event].values[
-                angular_distances[cur_event].index.get_indexer_for(
-                    train_results_df.loc[
-                        train_results_df.event_id == cur_event
-                    ].site_int.values
-                ),
-                angular_distances[cur_event].columns.get_indexer_for(
-                    train_results_df.loc[
-                        train_results_df.event_id == cur_event
-                    ].site_obs.values
-                ),
-            ]
-        )
-    for cur_event in val_results_df.event_id.unique():
-        val_results_df.loc[
-            val_results_df.event_id == cur_event, "angular_distance"
-        ] = np.rad2deg(
-            angular_distances[cur_event].values[
-                angular_distances[cur_event].index.get_indexer_for(
-                    val_results_df.loc[
-                        val_results_df.event_id == cur_event
-                    ].site_int.values
-                ),
-                angular_distances[cur_event].columns.get_indexer_for(
-                    val_results_df.loc[
-                        val_results_df.event_id == cur_event
-                    ].site_obs.values
-                ),
-            ]
-        )
-
-    return train_results_df, val_results_df
-
-
-@st.cache_data
 def get_results_group(
     results_df: pd.DataFrame,
     group_cols: List[str],
 ):
     return results_df.groupby(group_cols, observed=True)
 
+
 def run_general_tab(results_dir: Path):
     # Load the metadata
-    meta = get_metadata(results_dir)
+    meta = st_utils.ml_get_metadata(results_dir)
 
     # Loss plot
     metrics = load_training_metrics(results_dir)
@@ -175,6 +58,18 @@ def run_general_tab(results_dir: Path):
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
 
+    ### Scenario loss
+    train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(results_dir)
+    train_scenario_loss = sr.ml.prob.compute_scenario_loss(train_scenario_results)
+    val_scenario_loss = sr.ml.prob.compute_scenario_loss(val_scenario_results)
+
+    st.markdown(
+        f"#### Mean train scenario loss: {train_scenario_loss.scenario_loss.mean():.4f}"
+    )
+    st.write(
+        f"#### Mean val scenario loss: {val_scenario_loss.scenario_loss.mean():.4f}"
+    )
+
     # Model visualization
     col_1, col_2 = st.columns(2)
     with col_1:
@@ -189,18 +84,34 @@ def run_general_tab(results_dir: Path):
         if "fc_units" in meta["hp_config"]:
             st.text(f"{'FC Units:':<{padding}} {str(meta['hp_config']['fc_units'])}")
         else:
-            st.text(f"{'Ind FC Units:':<{padding}} {str(meta['hp_config']['ind_fc_units'])}")
-            st.text(f"{'Comb FC Units:':<{padding}} {str(meta['hp_config']['comb_fc_units'])}")
+            st.text(
+                f"{'Ind FC Units:':<{padding}} {str(meta['hp_config']['ind_fc_units'])}"
+            )
+            st.text(
+                f"{'Comb FC Units:':<{padding}} {str(meta['hp_config']['comb_fc_units'])}"
+            )
         st.text(f"{'L2:':<{padding}} {meta['hp_config']['l2_reg']}")
         st.divider()
 
-        st.text(f"{'Use IM Sim Site Obs:':<{padding}} {meta['hp_config']['im_sim_site_obs']}")
-        st.text(f"{'Use IM Sim Site Int:':<{padding}} {meta['hp_config']['im_sim_site_int']}")
-        st.text(f"{'Use IM Obs Site Obs:':<{padding}} {meta['hp_config']['im_obs_site_obs']}")
+        st.text(
+            f"{'Use IM Sim Site Obs:':<{padding}} {meta['hp_config']['im_sim_site_obs']}"
+        )
+        st.text(
+            f"{'Use IM Sim Site Int:':<{padding}} {meta['hp_config']['im_sim_site_int']}"
+        )
+        st.text(
+            f"{'Use IM Obs Site Obs:':<{padding}} {meta['hp_config']['im_obs_site_obs']}"
+        )
 
-        st.text(f"{'Use Residual sim_site_obs obs_site_obs:':<{padding}} {meta['hp_config']['res_site_obs']}")
-        st.text(f"{'Use Residual sim_site_obs sim_site_int:':<{padding}} {meta['hp_config']['res_sim_site_obs_sim_site_int']}")
-        st.text(f"{'Use Residual obs_site_obs sim_site_int:':<{padding}} {meta['hp_config']['res_obs_site_obs_sim_site_int']}")
+        st.text(
+            f"{'Use Residual sim_site_obs obs_site_obs:':<{padding}} {meta['hp_config']['res_site_obs']}"
+        )
+        st.text(
+            f"{'Use Residual sim_site_obs sim_site_int:':<{padding}} {meta['hp_config']['res_sim_site_obs_sim_site_int']}"
+        )
+        st.text(
+            f"{'Use Residual obs_site_obs sim_site_int:':<{padding}} {meta['hp_config']['res_obs_site_obs_sim_site_int']}"
+        )
 
         st.markdown("### Run Config")
         st.text(
@@ -333,9 +244,9 @@ def _scenario_viewer(
     gen_gm_params: pd.DataFrame = None,
     syn_obs_gm_params: pd.DataFrame = None,
 ):
-    site_df = get_site_df(results_dir)
-    event_df = get_event_df(results_dir)
-    obs_df = get_obs_df(results_dir)
+    site_df = st_utils.ml_get_site_df(results_dir)
+    event_df = st_utils.ml_get_event_df(results_dir)
+    obs_df = st_utils.ml_get_obs_df(results_dir)
 
     events = scenario_results.event_id.unique().astype("str")
 
@@ -358,7 +269,7 @@ def _scenario_viewer(
             key=f"{tab_type}_site_int",
         )
 
-        sim_df = get_sim_data(results_dir, event)
+        sim_df = st_utils.ml_get_sim_data(results_dir, event)
 
         high_rels = st.multiselect(
             "Highlighted Realisations",
@@ -392,12 +303,18 @@ def _scenario_viewer(
         st.plotly_chart(fig, use_container_width=True)
 
     # Get the relevant data
+    cur_scenario_df = (
+        scenario_results.loc[
+            (scenario_results.event_id == event)
+            & (scenario_results.site_int == site_int)
+        ]
+        .set_index("rel_id")
+        .sort_index()
+    )
     cur_event_rels = (
-        scenario_results.loc[(scenario_results.event_id == event)]
-        .rel_id.unique()
+        cur_scenario_df.index.unique()
         .astype(str)
     )
-
     site_int_obs = (
         obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_int)]
         .iloc[0][sr.constants.PSA_KEYS]
@@ -411,18 +328,13 @@ def _scenario_viewer(
         .sort_index()
     )
 
-    cur_scenario_df = (
-        scenario_results.loc[
-            (scenario_results.event_id == event)
-            & (scenario_results.site_int == site_int)
-        ]
-        .set_index("rel_id")
-        .sort_index()
-    )
-
     cur_sample_results = sample_results.loc[
         (sample_results.event_id == event) & (sample_results.site_int == site_int)
     ]
+
+    st.markdown(
+        f"**Scenario loss: {sr.ml.prob.compute_scenario_loss(cur_scenario_df).scenario_loss.iloc[0]:.4f}**"
+    )
 
     assert np.all(site_int_sims.index == cur_scenario_df.index)
 
@@ -578,9 +490,9 @@ def _sample_viewer(
     gen_gm_params: pd.DataFrame = None,
     syn_obs_gm_params: pd.DataFrame = None,
 ):
-    site_df = get_site_df(results_dir)
-    event_df = get_event_df(results_dir)
-    obs_df = get_obs_df(results_dir)
+    site_df = st_utils.ml_get_site_df(results_dir)
+    event_df = st_utils.ml_get_event_df(results_dir)
+    obs_df = st_utils.ml_get_obs_df(results_dir)
 
     events = results_df.event_id.unique().astype("str")
 
@@ -613,7 +525,7 @@ def _sample_viewer(
             key=f"{tab_type}_site_obs",
         )
 
-        sim_df = get_sim_data(results_dir, event)
+        sim_df = st_utils.ml_get_sim_data(results_dir, event)
         high_rels = st.multiselect(
             "Highlighted Realisations",
             sorted(sim_df.rel_id.unique().astype(str).tolist()),
@@ -677,7 +589,6 @@ def _sample_viewer(
         if gen_gm_params is not None
         else None
     )
-
     cur_syn_obs_gm_params = (
         syn_obs_gm_params.loc[
             (syn_obs_gm_params.event == event) & (syn_obs_gm_params.site == site_int)
@@ -831,8 +742,6 @@ def create_pSA_dist_plot(
                 linewidth=1.0,
             )
 
-
-
     ax.semilogx(sr.constants.PERIODS, qt_50, label="Model - Median", c="blue")
 
     weighted_avg = einops.einsum(
@@ -974,8 +883,6 @@ def create_dist_plot(
                                 linewidth=1.0,
                             )
 
-
-
                 if syn_obs_gm_params is not None:
                     syn_obs_y = syn_obs_dist.cdf(syn_obs_x)
                     ax.plot(
@@ -1028,7 +935,6 @@ def create_dist_plot(
                                 c="g",
                                 linewidth=1.0,
                             )
-
 
                 # Synthetic observations distribution
                 if syn_obs_gm_params is not None:
@@ -1123,15 +1029,17 @@ def run_ind_samples(
     gen_gm_params_ffp: Path = None,
     syn_obs_gm_params_ffp: Path = None,
 ):
-    train_sample_results, val_sample_results = load_sample_results(results_dir)
+    train_sample_results, val_sample_results = st_utils.ml_load_sample_results(
+        results_dir
+    )
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     gen_gm_params = (
-        load_gm_params(gen_gm_params_ffp) if gen_gm_params_ffp is not None else None
+        st_utils.load_gm_params(gen_gm_params_ffp) if gen_gm_params_ffp is not None else None
     )
     syn_obs_gm_params = (
-        load_gm_params(syn_obs_gm_params_ffp)
+        st_utils.load_gm_params(syn_obs_gm_params_ffp)
         if syn_obs_gm_params_ffp is not None
         else None
     )
@@ -1160,8 +1068,10 @@ def run_ind_scenario(
     gen_gm_params_ffp: Path = None,
     syn_obs_gm_params_ffp: Path = None,
 ):
-    train_sample_results, val_sample_results = load_sample_results(results_dir)
-    train_scenario_results, val_scenario_results = load_scenario_results(results_dir)
+    train_sample_results, val_sample_results = st_utils.ml_load_sample_results(
+        results_dir
+    )
+    train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(results_dir)
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
@@ -1269,9 +1179,6 @@ def agg_residuals(
     plt.close(fig)
 
 
-
-
-
 def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_type: str):
     n_probs = st.number_input(
         "Number of Probabilities", 1, 100, 2, key=f"{tab_type}_n_probs"
@@ -1283,9 +1190,7 @@ def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_typ
         else ["event_id", "site_int"]
     )
     groups = get_results_group(results_df, group_cols)
-    top_k_probs = groups["prob"].apply(
-        lambda x: x.nlargest(n_probs).sum()
-    )
+    top_k_probs = groups["prob"].apply(lambda x: x.nlargest(n_probs).sum())
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -1299,7 +1204,8 @@ def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_typ
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
 
-def loss_dist(results_df: pd.DataFrame):
+
+def loss_dist(results_df: pd.DataFrame, title: str = "Loss Distribution"):
     fig, ax = plt.subplots(figsize=(12, 6))
 
     group_cols = (
@@ -1312,22 +1218,26 @@ def loss_dist(results_df: pd.DataFrame):
     if "site_corr_weights" not in results_df.columns:
         loss = groups.apply(lambda x: np.sum(x.misfit_score * x.prob))
     else:
-        loss = groups.apply(lambda x: np.sum(x.misfit_score * x.prob * x.site_corr_weights))
+        loss = groups.apply(
+            lambda x: np.sum(x.misfit_score * x.prob * x.site_corr_weights)
+        )
 
     ax.hist(loss.values, bins=100)
 
     ax.set_xlabel(f"Loss")
     ax.set_ylabel(f"Count")
     ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    ax.set_title(f"Loss Distribution")
-    # fig.tight_layout()
+    # ax.set_title(f"Loss Distribution")
+    fig.tight_layout()
 
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
 
 
 def run_agg_single(cur_results_dir: Path):
-    train_sample_results, val_sample_results = load_sample_results(cur_results_dir)
+    train_sample_results, val_sample_results = st_utils.ml_load_sample_results(
+        cur_results_dir
+    )
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
@@ -1358,38 +1268,59 @@ def run_agg_single(cur_results_dir: Path):
         )
 
 
+def agg_scenario_vis(cur_results_dir: Path, results_df: pd.DataFrame, tab_type: str):
+    with st.expander("Posterior Probabilities"):
+        posterior_probs_inv(cur_results_dir, results_df, tab_type)
+    st.divider()
+
+    with st.expander(
+        "Scenario Loss Distribution"
+        if "scenario" in tab_type
+        else "Sample Loss Distribution"
+    ):
+        loss_dist(results_df)
+    st.divider()
+
+    with st.expander("Weighted Residuals"):
+        agg_residuals(cur_results_dir, results_df, tab_type)
+
+
 def run_agg_scenario(cur_results_dir: Path):
-    train_scenario_results, val_scenario_results = load_scenario_results(
+    train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(
         cur_results_dir
     )
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
-        posterior_probs_inv(cur_results_dir, train_scenario_results, "train_scenario")
-        st.divider()
-
-        loss_dist(train_scenario_results)
-        st.divider()
-
-        agg_residuals(
-            cur_results_dir,
-            train_scenario_results,
-            "train_scenario",
-        )
+        agg_scenario_vis(cur_results_dir, train_scenario_results, "train_scenario")
+        # with st.expander("Posterior Probabilities"):
+        #     posterior_probs_inv(cur_results_dir, train_scenario_results, "train_scenario")
+        #     st.divider()
+        #
+        # loss_dist(train_scenario_results)
+        # st.divider()
+        #
+        # agg_residuals(
+        #     cur_results_dir,
+        #     train_scenario_results,
+        #     "train_scenario",
+        # )
 
     with val_tab:
-        posterior_probs_inv(cur_results_dir, val_scenario_results, "val_scenario")
-        st.divider()
-
-        loss_dist(val_scenario_results)
-        st.divider()
-
-        agg_residuals(
-            cur_results_dir,
-            val_scenario_results,
-            "val_scenario",
-        )
+        agg_scenario_vis(cur_results_dir, val_scenario_results, "val_scenario")
+        # with st.expander("Posterior Probabilities"):
+        #     posterior_probs_inv(cur_results_dir, val_scenario_results, "val_scenario")
+        #     st.divider()
+        #
+        # loss_dist(val_scenario_results)
+        # st.divider()
+        #
+        # agg_residuals(
+        #     cur_results_dir,
+        #     val_scenario_results,
+        #     "val_scenario",
+        # )
 
 
 def main(
@@ -1428,7 +1359,7 @@ def main(
         ]
     )
 
-    meta = get_metadata(cur_results_dir)
+    meta = st_utils.ml_get_metadata(cur_results_dir)
     syn_obs_gm_params_ffp = (
         fp
         if (

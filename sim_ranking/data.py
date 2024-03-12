@@ -65,12 +65,12 @@ def gen_emp_synthetic_observed(
         )
         dfs.append(cur_df)
 
-    df = pd.concat(dfs, axis=0)
-    df["r_rup"] = nzgmdb_df.loc[df.index, "r_rup"].values
-    df["r_x"] = nzgmdb_df.loc[df.index, "r_x"].values
-    df = df.rename(columns={"event": "evid", "site": "sta"})
+    obs_df = pd.concat(dfs, axis=0)
+    obs_df["r_rup"] = nzgmdb_df.loc[obs_df.index, "r_rup"].values
+    obs_df["r_x"] = nzgmdb_df.loc[obs_df.index, "r_x"].values
+    obs_df = obs_df.rename(columns={"event": "evid", "site": "sta"})
 
-    return df, gm_params
+    return obs_df, gm_params
 
 
 def gen_emp_realisations(
@@ -466,7 +466,7 @@ def compute_sim_site_corrs(sim_params_dir: Path):
     return corr_dfs
 
 
-def compute_sim_event_site_corrs(sim_params_dir: Path, smooth: bool = False):
+def compute_sim_event_site_corrs(sim_params_dir: Path):
     """
     Computes the site correlations for each simulated event
     (i.e. across all the realisation)
@@ -500,35 +500,6 @@ def compute_sim_event_site_corrs(sim_params_dir: Path, smooth: bool = False):
             assert np.all(cur_corrs.index.values.astype(str) == cur_sites)
 
             cur_site_corrs[:, :, i] = cur_corrs.values
-
-        if smooth:
-            # If this is ever changed, ensure that the
-            # boundaries are handled correctly
-            smoothing_kernel = np.array([1 / 3, 1 / 3, 1 / 3])
-
-            # Get the indices of the pSA IMs
-            pSA_keys = cur_ims[np.char.startswith(cur_ims, "pSA")]
-            periods, pSA_keys = utils.get_periods(pSA_keys)
-            pSA_ind = [
-                np.flatnonzero(cur_pSA_key == cur_ims)[0] for cur_pSA_key in pSA_keys
-            ]
-
-            # This is sub-optimal
-            # Check https://stackoverflow.com/questions/62442341/vectorizing-2d-convolutions-in-numpy
-            # specifically the last answer
-            for i in range(len(cur_sites)):
-                for j in range(len(cur_sites)):
-                    # Run the convolution
-                    cur_corrs = np.convolve(
-                        cur_site_corrs[i, j, pSA_ind], smoothing_kernel, mode="same"
-                    )
-
-                    # Deal with incorrect boundaries values
-                    cur_corrs[0] = cur_site_corrs[i, j, pSA_ind[0]]
-                    cur_corrs[-1] = cur_site_corrs[i, j, pSA_ind[-1]]
-
-                    # Save
-                    cur_site_corrs[i, j, pSA_ind] = cur_corrs
 
         results.append(
             SiteCorrelations(
@@ -610,50 +581,39 @@ class SimGMParams(NamedTuple):
         )
 
 
-def compute_sim_gm_params_total(simulation_imdb_ffp: Path):
+def compute_sim_gm_params_total(db_ffp: Path, ims: List[str], data_source: str = None):
     """
     Computes the parametric IM distribution based
     on the simulation data.
     Does not use MERA, i.e. uses total residual only
     """
-    # Get the simulation data
-    sim_data = load_site_sim_data(simulation_imdb_ffp)
-
-    sites = list(sim_data.keys())
-    events = np.unique(sim_data[sites[0]].index.get_level_values(0))
-    ims = [str(cur_im) for cur_im in sim_data[sites[0]].columns.values.astype(str)]
+    db = DB(db_ffp)
+    events = db.get_avail_events(data_source)
+    sites = db.get_avail_sites().tolist()
 
     results = []
-    for cur_event in events:
-        print(f"Processing event {cur_event}")
+    for ix, cur_event in enumerate(events):
+        print(f"Processing event {cur_event}, {ix + 1}/{len(events)}")
+        # Get the simulation data
+        sim_data = db.get_sim_data(cur_event, sites)
+
         gm_params = {}
         residual_df = []
-        sites = []
-        for cur_site, cur_sim_data in sim_data.items():
-            # No simulation data for the current site
-            if cur_event not in cur_sim_data.index:
-                continue
-            sites.append(cur_site)
-
-            # Get the simulation IM data
-            cur_sim_data = cur_sim_data.loc[cur_event]
-
+        for cur_site, cur_sim_data in sim_data.groupby("site_id"):
             # Compute the log mean
             cur_mean = np.log(cur_sim_data[ims]).mean(axis=0)
 
             # Compute the residual
             cur_residual = np.log(cur_sim_data[ims].values) - cur_mean.values
             cur_residual = pd.DataFrame(
-                index=np.char.add(
-                    cur_sim_data.index.values.astype(str), f"_{cur_site}"
-                ),
+                index=cur_sim_data.index,
                 columns=ims,
                 data=cur_residual,
             )
             cur_sigma_total = cur_residual.std(axis=0)
 
             cur_residual["rel"] = [
-                cur_i.split("_")[1] for cur_i in cur_residual.index.values.astype(str)
+                cur_i.split("_")[-1] for cur_i in cur_residual.index.values.astype(str)
             ]
             cur_residual["site"] = cur_site
             residual_df.append(cur_residual)
@@ -686,7 +646,7 @@ def compute_sim_gm_params_total(simulation_imdb_ffp: Path):
             SimGMParams(
                 cur_event,
                 ims,
-                sites,
+                sim_data.site_id.unique().astype(str).tolist(),
                 gm_params,
                 residual_df,
                 None,
@@ -794,15 +754,13 @@ def _process_sim_gm_params_mera_event(event: str, db_ffp: Path, ims: List[str]):
     )
 
 
-def compute_sim_gm_params_mera(db_ffp: Path, data_source: str = None, n_procs: int = 1):
+def compute_sim_gm_params_mera(db_ffp: Path, ims: List[str], data_source: str = None, n_procs: int = 1):
     """
     Computes the parametric IM distributions based
     on the simulation data using mixed effects regression
     """
     db = DB(db_ffp)
     events = db.get_avail_events(data_source=data_source)
-    # ims = constants.PSA_KEYS
-    ims = constants.IMs
 
     if n_procs > 1:
         with mp.Pool(n_procs) as p:
@@ -816,6 +774,10 @@ def compute_sim_gm_params_mera(db_ffp: Path, data_source: str = None, n_procs: i
             results.append(_process_sim_gm_params_mera_event(cur_event, db_ffp, ims))
 
     return results
+
+
+
+
 
 
 def load_site_sim_data(
@@ -838,12 +800,6 @@ def load_site_sim_data(
                 sim_data[cur_site] = cur_im_df
 
     return sim_data
-
-
-def load_avail_sim_events(sim_imdb_ffp: Path):
-    """Loads the available simulations in the specified IMDB"""
-    with gc.dbs.IMDB.get_imdb(str(sim_imdb_ffp)) as db:
-        return db.rupture_names()
 
 
 def load_obs_data(obs_ffp: Path):

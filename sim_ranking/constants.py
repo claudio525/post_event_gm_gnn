@@ -7,9 +7,12 @@ import numpy as np
 class RankingMethod(Enum):
     emp_cMVN = 1
     sim_cMVN = 2
+
     # Same as sim_cMVN but uses correlation coefficients
     # from the empirical model
     sim_cMVN_emp_corr = 3
+
+    ml_prob = 4
 
 METHOD_RESULT_DIR_NAME_MAPPING = {
     RankingMethod.emp_cMVN: "empirical_cMVN",

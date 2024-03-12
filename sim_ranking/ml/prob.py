@@ -23,6 +23,7 @@ from . import data as ml_data
 from . import features
 from . import models
 from ..db import DB
+from .. import constants
 
 
 @dataclass
@@ -35,7 +36,11 @@ class RunParamsConfig:
     debug: bool
     device: str
 
-    results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
+    results_dir: Path = None
+
+    def __post_init__(self):
+        if self.results_dir is None:
+            self.results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
 
     def to_dict(self):
         return {
@@ -70,7 +75,6 @@ class HyperParamsConfig:
 
     combined_model: bool
     comb_fc_units: Sequence[int]
-
 
     def __post_init__(self):
         self.n_im_features = sum(
@@ -364,7 +368,9 @@ class ProbDataset(Dataset):
             if hp_config.misfit_fn == "mse":
                 cur_misfit_score = np.sum(self.im_weights * cur_residual ** 2, axis=2)
             elif hp_config.misfit_fn == "mae":
-                cur_misfit_score = np.sum(self.im_weights * np.abs(cur_residual), axis=2)
+                cur_misfit_score = np.sum(
+                    self.im_weights * np.abs(cur_residual), axis=2
+                )
             else:
                 raise ValueError(f"Unknown misfit function: {hp_config.misfit_fn}")
             self.misfit_score.append(cur_misfit_score)
@@ -594,7 +600,7 @@ def create_model(
             scalar_features.n_scalar_features,
             len(run_config.ims),
             hp_config.n_im_features,
-            is_sub_model=False
+            is_sub_model=False,
         )
 
         print(f"Model summary")
@@ -1009,6 +1015,7 @@ def post_processing(
 
     # Metadata
     metadata = {
+        "method_type": constants.RankingMethod.ml_prob.value,
         "hp_config": hp_config.to_dict(),
         "best_epoch": best_epoch,
         "data": data_metadata,
@@ -1083,3 +1090,27 @@ def compute_scenario_distribution(
 
     scenario_df = pd.concat(scenario_results, axis=0)
     return scenario_df
+
+
+def compute_scenario_loss(scenario_rel_results: pd.DataFrame):
+    """
+    Computes the scenario loss for each scenario
+    """
+    scenario_loss = (
+        scenario_rel_results.groupby(["event_id", "site_int"])
+        .apply(lambda g: np.sum(g.prob * g.misfit_score))
+        .to_frame("scenario_loss")
+    )
+    scenario_loss["event_id"] = scenario_loss.index.get_level_values(0).values.astype(
+        str
+    )
+    scenario_loss["site_int"] = scenario_loss.index.get_level_values(1).values.astype(
+        str
+    )
+    scenario_loss.index = mlt.array_utils.numpy_str_join(
+        "_",
+        scenario_loss.event_id.values.astype(str),
+        scenario_loss.site_int.values.astype(str),
+    )
+
+    return scenario_loss

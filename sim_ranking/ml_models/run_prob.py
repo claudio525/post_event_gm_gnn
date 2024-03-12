@@ -33,6 +33,7 @@ def train_model(
     im_set: str = "all",
     quiet: bool = False,
     seed: int = None,
+    out_dir: Path = None,
 ):
     """Trains a single model"""
     run_config = prob.RunParamsConfig(
@@ -42,6 +43,7 @@ def train_model(
         sr.constants.IM_WEIGTHS_SETS[im_set],
         debug,
         device,
+        results_dir=out_dir,
     )
     hp_config = prob.HyperParamsConfig.from_yaml(hyperparams_ffp, n_epochs)
 

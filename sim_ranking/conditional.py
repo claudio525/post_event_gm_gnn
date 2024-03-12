@@ -1,14 +1,16 @@
-import copy
-from typing import Sequence, Dict
+from typing import Sequence, Dict, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 import pickle
 
+import einops
 import numpy as np
 import pandas as pd
 
 import gmhazard_calc as gc
 import spatial_hazard as sh
+
+from . import utils
 
 
 @dataclass
@@ -39,12 +41,16 @@ def run_conditional_mvn_ranking(
     output_dir: Path,
     stations_df: pd.DataFrame,
     IMs: Sequence[str],
+    im_weights: np.ndarray,
     gm_params_df: pd.DataFrame,
     sim_data: Dict,
-    obs_df: pd.DataFrame,
+    obs_data: pd.DataFrame,
     int_stations: np.ndarray,
+    source_info: utils.SourceInfo,
     R: Dict[str, pd.DataFrame] = None,
-    n_stations: int = 20,
+    min_n_obs_stations: int = 5,
+    n_obs_stations: int = 20,
+    verbose: bool = True,
 ):
     """
     Computes the conditional IM distributions
@@ -54,6 +60,9 @@ def run_conditional_mvn_ranking(
     output_dir: Path
     stations_df: DataFrame
     IMs: sequence of strings
+        The IMs to compute the conditional MVN distributions
+    im_weights: array of floats
+        The weights for each IM
     gm_params_df: DataFrame
         The unconditional GM parameters, must have
         the columns for each IM:
@@ -61,17 +70,19 @@ def run_conditional_mvn_ranking(
     sim_data: dict
         The IM values for the simulation realisations
         Dictionary with site as key and dataframe as value
-    obs_df: DataFrame
+    obs_data: DataFrame
         Observed IM values at the GM recording stations
     int_stations: array of strings
         Sites for which to perform cMVN ranking
         Can include observation sites in which case
         the observation data of that station is ignored
         during calculation
+    source_info: SourceInfo
+        The rupture source information
     R: dict of DataFrames, optional
         The within-event spatial correlation matrices
         for each IM
-    n_stations: int, optional
+    n_obs_stations: int, optional
         The number of observation stations to use for
         the calculation of the conditional IM distributions
 
@@ -83,77 +94,96 @@ def run_conditional_mvn_ranking(
     IMs_str = IMs
     IMs = [gc.im.IM.from_str(cur_im) for cur_im in IMs]
 
-    cMVNs_result = compute_cond_MVN_distributions(
+    assert len(im_weights) == len(IMs_str)
+
+    cIMs_result = compute_cond_MVN_distributions(
         IMs,
-        obs_df,
+        obs_data,
         gm_params_df,
         stations_df,
         int_stations,
+        source_info,
         R=R,
-        n_stations=n_stations,
+        min_n_obs_stations=min_n_obs_stations,
+        n_obs_stations=n_obs_stations,
+        verbose=verbose,
     )
+    if cIMs_result is None:
+        return None
 
-    # Compute the misfit for each site of interest
-    site_misfits = []
+    # Compute the realisation misfit for each site of interest
+    rel_misfits = []
     for cur_site in int_stations:
         if (cur_sim_df := sim_data.get(cur_site)) is None:
-            print(f"No simulation data available for site: {cur_site}, skipping")
+            if verbose:
+                print(f"No simulation data available for site: {cur_site}, skipping")
             continue
 
+        # Fix the index
+        cur_sim_df.index = np.char.replace(
+            cur_sim_df.index.values.astype(str), f"_{cur_site}", ""
+        )
+        cur_sim_df = cur_sim_df.sort_index()
+
         # Compute misfit for each IM
-        cur_misfit = (
-            cMVNs_result.cond_lnIM_mean_df.loc[cur_site, IMs_str].values
-            - np.log(cur_sim_df[IMs_str].values)
-        ) ** 2
+        cur_rel_misfit = einops.einsum(
+            im_weights,
+            (
+                cIMs_result.cond_lnIM_mean_df.loc[cur_site, IMs_str].values
+                - np.log(cur_sim_df[IMs_str].values)
+            )
+            ** 2, "i, j i -> j",
+        )
 
         # Aggregate along IM axis
-        site_misfits.append(
+        rel_misfits.append(
             pd.Series(
-                index=cur_sim_df.index, data=cur_misfit.sum(axis=1), name=cur_site
+                index=cur_sim_df.index, data=cur_rel_misfit.sum(axis=1), name=cur_site
             )
         )
 
     # Combine
-    site_misfits_df = pd.concat(site_misfits, axis=1)
+    rel_misfits_df = pd.concat(rel_misfits, axis=1)
 
-    # Select the best realisation for each site
-    best_sim_id = pd.Series(
-        data=site_misfits_df.index[np.argmin(site_misfits_df.values, axis=0)],
-        index=site_misfits_df.columns,
-    )
+    # # Select the best realisation for each site
+    # best_sim_id = pd.Series(
+    #     data=rel_misfits_df.index[np.argmin(rel_misfits_df.values, axis=0)],
+    #     index=rel_misfits_df.columns,
+    # )
 
     # Save the results
-    cMVNs_result.save(output_dir / "cMVN_distributions.pickle")
-    site_misfits_df.to_csv(output_dir / "site_misfits.csv")
-    best_sim_id.to_csv(output_dir / "best_sim_ids.csv")
+    cIMs_result.save(output_dir / "cMVN_distributions.pickle")
+    rel_misfits_df.to_csv(output_dir / "rel_misfits.csv")
+    # best_sim_id.to_csv(output_dir / "best_sim_ids.csv")
 
 
 def compute_cond_MVN_distributions(
     IMs: Sequence[gc.im.IM],
-    obs_df: pd.DataFrame,
+    obs_data: pd.DataFrame,
     gmm_params_df: pd.DataFrame,
     stations_df: pd.DataFrame,
     int_stations: np.ndarray,
+    source_info: utils.SourceInfo,
     R: Dict[str, pd.DataFrame] = None,
-    n_stations: int = 20,
+    min_n_obs_stations: int = 5,
+    n_obs_stations: int = 20,
+    verbose: bool = True,
 ):
-    # Sanity checks
-    assert np.unique(obs_df["evid"]).size == 1
-
     IMs_str = [str(cur_im) for cur_im in IMs]
 
     # Get the hypocentre location & event id
-    hypo_loc = tuple(obs_df[["ev_lon", "ev_lat"]].iloc[0].values)
-    rutpure = obs_df["evid"].values[0]
+    # hypo_loc = tuple(obs_data[["ev_lon", "ev_lat"]].iloc[0].values)
+    # rutpure = obs_data["evid"].values[0]
 
     # Only need IMs from here
-    obs_df = obs_df.loc[:, IMs_str]
+    obs_data = obs_data.loc[:, IMs_str]
 
     # Compute the conditional distribution for all sites of interest
     # and all IMs
     cond_lnIM_results = {}
     for cur_im in IMs:
-        print(f"\nComputing conditional MVN for {cur_im}")
+        if verbose:
+            print(f"\nComputing conditional MVN for {cur_im}")
         im_columns = [
             f"{str(cur_im)}_mean",
             f"{str(cur_im)}_std_Total",
@@ -173,12 +203,19 @@ def compute_cond_MVN_distributions(
             int_stations,
             stations_df,
             cur_gmm_params_df,
-            np.log(obs_df[str(cur_im)]),
-            hypo_loc,
-            obs_site_filter_fn=sh.im_dist.get_nn_obs_site_filter_fn(n_stations),
+            np.log(obs_data[str(cur_im)]),
+            source_info.hypo_loc,
+            obs_site_filter_fn=sh.im_dist.get_nn_obs_site_filter_fn(
+                min_n_obs_stations, n_obs_stations
+            ),
             R=R[str(cur_im)] if R is not None else None,
             allow_obs_sites=True,
+            verbose=verbose,
         )
+        if cond_lnIM_results[cur_im] is None:
+            if verbose:
+                print(f"No results for {cur_im}, skipping")
+            return None
 
     # Check that results have the same stations
     assert np.all(
@@ -215,7 +252,7 @@ def compute_cond_MVN_distributions(
     return ConditionalMVNDistribution(
         IMs,
         int_stations,
-        rutpure,
+        source_info.rupture_name,
         cond_lnIM_mean_df,
         cond_lnIM_std_df,
         cond_lnIM_results,

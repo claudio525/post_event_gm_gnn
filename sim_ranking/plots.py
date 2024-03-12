@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from .conditional_MVN import ConditionalMVNDistribution
+from .conditional import ConditionalMVNDistribution
 from . import constants
 
 
@@ -16,6 +16,8 @@ def plot_response_spectrum(
     obs_data: pd.Series,
     site: str,
     best_sim_id: str,
+    rrup: float = None,
+    vs30: float = None,
     cMVN_result: ConditionalMVNDistribution = None,
     gm_params: pd.Series = None,
     output_dir: Path = None,
@@ -102,9 +104,10 @@ def plot_response_spectrum(
     plt.semilogx()
     plt.xlim(periods.min(), periods.max())
 
+    rrup_txt = f", {r'$R_{rup}$'} = {rrup} (km)" if rrup is not None else ""
+    vs30_txt = f", {r'$V_{S30}$'} = {vs30} (m/s)" if vs30 is not None else ""
     plt.title(
-        f"{site}, {r'$R_{rup}$'} = {obs_data.loc['r_rup']:.0f} (km), "
-        f"{'$V_{S30}$'} = {obs_data.loc['Vs30']:.0f} (m/s)"
+        f"{site}{rrup_txt}{vs30_txt}"
     )
     plt.xlabel(f"Period (s)")
     plt.ylabel(f"Pseudo-spectral acceleration, pSA (g)")
