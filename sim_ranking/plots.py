@@ -86,13 +86,14 @@ def plot_response_spectrum(
     )
 
     # Best Simulation
-    plt.plot(
-        periods,
-        sim_data.loc[best_sim_id, pSA_keys].values.astype(float),
-        c="k",
-        linewidth=1.5,
-        label="Simulation",
-    )
+    if best_sim_id is not None:
+        plt.plot(
+            periods,
+            sim_data.loc[best_sim_id, pSA_keys].values.astype(float),
+            c="k",
+            linewidth=1.5,
+            label="Simulation",
+        )
 
     # Conditional MVN
     if cMVN_result is not None:

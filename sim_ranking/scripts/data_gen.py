@@ -3,11 +3,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import typer
+import tqdm
 
 import sim_ranking as sr
 import ml_tools as mlt
-import spatial_hazard as sh
-import sha_calc as sha
 
 app = typer.Typer()
 
@@ -55,22 +54,19 @@ def get_emp_gmm_params(
     )
 
 
-@app.command("gen-emp-realisations")
-def gen_emp_realisations(
+@app.command("gen-emp-synthetic-realisations")
+def gen_emp_synthetic_realisations(
     emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path, output_dir: Path, n_rels: int = 25
 ):
-    """Generates synthetic realisations using empirical models"""
+    """
+    Generates synthetic realisations using empirical models
+    """
     gm_params = pd.read_csv(emp_gm_params_ffp, index_col=0)
     site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")
 
-    results = sr.data.gen_emp_realisations(gm_params, site_df, n_rels=n_rels)
+    results = sr.data.gen_emp_synthethic_realisations(gm_params, site_df, n_rels=n_rels)
 
     pd.to_pickle(results, output_dir / "emp_realisations.pickle", compression=None)
-
-    # for cur_event_rel, cur_df in results.items():
-    #     cur_df["component"] = "rotd50"
-    #     cur_df.to_csv(output_dir / f"{cur_event_rel}.csv")
-    # cur_df.to_parquet(output_dir / f"{cur_event_rel}.parquet")
 
 
 @app.command("gen-emp-synthetic-observed")
@@ -81,7 +77,9 @@ def gen_emp_synthetic_observed(
     syn_obs_ffp: Path,
     syn_gm_params_ffp: Path,
 ):
-    """Generates synthetic observed data using empirical models"""
+    """
+    Generates synthetic observed data using empirical models
+    """
     syn_obs_df, mod_gm_params_df = sr.data.gen_emp_synthetic_observed(
         emp_gm_params_ffp, nzgmdb_site_ffp, nzgmdb_flat_file
     )
@@ -90,8 +88,8 @@ def gen_emp_synthetic_observed(
     mod_gm_params_df.to_csv(syn_gm_params_ffp)
 
 
-@app.command("compute-sim-gm-params-mera")
-def get_sim_gm_params_mera(
+@app.command("compute-event-gm-params-rel-mera")
+def get_event_gm_params_rel_mera(
     output_dir: Path,
     db_ffp: Path,
     data_source: str = None,
@@ -99,12 +97,13 @@ def get_sim_gm_params_mera(
     im_set: str = "all",
 ):
     """
-    Computes the GM parameters from the simulation data
-    directly using MERA
+    Computes the GM parameters for each event from the
+    realisations using MERA with each realisation treated as
+    its own event during MERA
     """
     ims = sr.constants.IM_SETS[im_set]
 
-    sim_gm_params = sr.data.compute_sim_gm_params_mera(
+    sim_gm_params = sr.data.compute_event_gm_params_rel_mera(
         db_ffp, ims, data_source=data_source, n_procs=n_procs
     )
 
@@ -113,83 +112,30 @@ def get_sim_gm_params_mera(
         cur_params.write(cur_out_dir)
 
 
-@app.command("compute-sim-gm-params-total")
-def get_sim_gm_params_total(output_dir: Path, db_ffp: Path, im_set: str = "all"):
+@app.command("compute-event-gm-params-rel-total")
+def get_event_gm_params_rel_total(output_dir: Path, db_ffp: Path, im_set: str = "all"):
     """
-    Computes the GM parameters from the simulation data
-    directly, assumes between event term is 0, i.e. just uses total residual
+    Computes the GM parameters for each event from the realisations,
+    by setting between-event residual = 0 and within-event residual = total residual
     """
     ims = sr.constants.IM_SETS[im_set]
-    sim_gm_params = sr.data.compute_sim_gm_params_total(db_ffp, ims)
+    sim_gm_params = sr.data.compute_event_gm_params_rel_total(db_ffp, ims)
 
     for cur_params in sim_gm_params:
         (cur_out_dir := output_dir / cur_params.event).mkdir(exist_ok=True)
         cur_params.write(cur_out_dir)
 
 
-@app.command("compute-emp-event-site-correlations")
-def compute_emp_event_site_correlations(
-    output_dir: Path, emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path
-):
-    """
-    NOTE: I DON'T THINK THIS IS USED ANYMORE, DELETE??
-
-    Uses the Loth & Baker model to compute the site correlations
-
-    Note: As correlations only depend on the distance between sites
-        there are no differences between events, however it is required
-        in this format for the pairwise ranking model
-    """
-    gm_params_df = pd.read_csv(emp_gm_params_ffp, index_col=0)
-    site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")
-
-    sites = np.sort(np.unique(gm_params_df.site.values.astype(str)))
-    ims = np.asarray(sr.constants.PSA_KEYS)
-
-    # Compute the distance matrix
-    print(f"Computing distance matrix")
-    dist_matrix = sh.im_dist.calculate_distance_matrix(sites, site_df)
-
-    # Compute the site correlations
-    print(f"Computing site correlations")
-    corrs = np.full((sites.size, sites.size, len(ims)), fill_value=np.nan)
-    upper_mask = np.triu(np.ones_like(corrs[:, :, 0], dtype=bool), k=1)
-    for i, cur_im in enumerate(ims):
-        corrs[:, :, i][upper_mask] = corrs[:, :, i].T[
-            upper_mask
-        ] = sha.loth_baker_corr_model.get_correlations(
-            cur_im, cur_im, dist_matrix.values[upper_mask]
-        )
-        np.fill_diagonal(corrs[:, :, i], 1.0)
-
-    # Write the results
-    print(f"Writing results")
-    for cur_event in gm_params_df.event.unique().astype(str):
-        cur_sites = np.sort(
-            gm_params_df.loc[gm_params_df.event == cur_event, "site"].values.astype(str)
-        )
-        site_mask = np.isin(sites, cur_sites)
-
-        assert np.all(sites[site_mask] == cur_sites)
-
-        cur_site_corr = sr.data.SiteCorrelations(
-            corrs[site_mask, :, :][:, site_mask, :], cur_sites, ims, cur_event
-        )
-        cur_site_corr.write(output_dir / f"{cur_event}.pickle")
-
-
-@app.command("compute-sim-event-site-correlations")
-def compute_sim_event_site_correlations(
+@app.command("compute-event-site-correlations")
+def compute_event_site_correlations(
     output_dir: Path,
     sim_params_dir: Path,
 ):
     """
-    Computes the site correlations for each simulated event
-    I.e. Produces site-correlations per event using the simulation realisations
-
-
+    Computes the site correlations for each event using the
+    within-event residuals from the realisations
     """
-    correlation_results = sr.data.compute_sim_event_site_corrs(sim_params_dir)
+    correlation_results = sr.data.compute_event_site_corrs_from_rels(sim_params_dir)
 
     for cur_result in correlation_results:
         cur_result.write(output_dir / f"{cur_result.event}.pickle")
@@ -198,8 +144,8 @@ def compute_sim_event_site_correlations(
 @app.command("compute-sim-site-correlations")
 def compute_sim_site_correlations(output_dir: Path, sim_params_dir: Path):
     """
-    Computes the site-correlations across all simulations
-    using the within-event residual
+    Computes the site-correlations from the within residuals from
+    all events & realisations
     """
     corr_dfs = sr.data.compute_sim_site_corrs(sim_params_dir)
 
@@ -207,44 +153,33 @@ def compute_sim_site_correlations(output_dir: Path, sim_params_dir: Path):
         cur_df.to_csv(output_dir / f"{cur_key}.csv")
 
 
-@app.command("compute-obs-site-correlations")
-def compute_obs_site_correlations(
-    output_dir: Path, db_ffp: Path, site_count_th: int = 20
+@app.command("compute-im-site-correlations")
+def compute_im_site_correlations(
+    db_ffp: Path,
+    output_dir: Path,
 ):
-    """Computes the observed correlation between sites for each IM"""
+    """
+    Computes the site-correlations using IM values
+    of all event & realisations
+    """
+    print(f"Loading simulation data")
     db = sr.db.DB(db_ffp)
-    obs_df = db.get_obs_df()
+    sim_df = db.get_sim_df(log=True)
 
-    results = {}
-    n_site_pairs = None
-    for pSA_key in sr.constants.PSA_KEYS:
-        # Get the data into the correct format
-        cur_df = obs_df.loc[:, ["event_id", "site_id", pSA_key]]
-        cur_df = cur_df.pivot(index="event_id", columns="site_id", values=pSA_key)
+    ims = [cur_col for cur_col in sim_df.columns if cur_col in sr.constants.IMs]
 
-        # Compute the correlations
-        cur_corrs = cur_df.corr(min_periods=site_count_th)
-
-        # Sanity checking
-        cur_n_site_pairs = (
-            cur_corrs.size - np.count_nonzero(cur_corrs.isna()) - cur_corrs.shape[0]
-        ) // 2
-        n_site_pairs = cur_n_site_pairs if n_site_pairs is None else n_site_pairs
-        assert n_site_pairs == cur_n_site_pairs
-
-        # Store the result
-        results[pSA_key] = cur_corrs
-
-    # Compute the mean correlations
-    corr_values = np.stack([cur_corrs.values for cur_corrs in results.values()], axis=2)
-    results["mean"] = pd.DataFrame(
-        np.mean(corr_values, axis=2),
-        index=cur_corrs.index,
-        columns=cur_corrs.columns,
+    sim_df["sim_id"] = mlt.array_utils.numpy_str_join(
+        "_", sim_df["event_id"].values.astype(str), sim_df["rel_id"].values.astype(str)
     )
+    sim_df = sim_df.drop(columns=["event_id", "rel_id", "data_source"])
 
-    # Save the results
-    pd.to_pickle(results, output_dir / "obs_site_correlations.pickle")
+    print(f"Computing correlations")
+    for cur_im in tqdm.tqdm(ims):
+        cur_im_df = sim_df.pivot(index="sim_id", columns="site_id", values=cur_im)
+        cur_corr_df = cur_im_df.corr(method="pearson")
+
+        # Save
+        cur_corr_df.to_csv(output_dir / f"{cur_im}.csv")
 
 
 def __run_interp(pSA_values: np.ndarray, periods: np.ndarray):
@@ -284,3 +219,138 @@ def process_im_csv_files(raw_im_dir: Path, output_dir: Path):
 
 if __name__ == "__main__":
     app()
+
+
+# @app.command("compute-obs-site-correlations")
+# def compute_obs_site_correlations(
+#     output_dir: Path, db_ffp: Path, site_count_th: int = 20
+# ):
+#     """Computes the observed correlation between sites for each IM"""
+#     db = sr.db.DB(db_ffp)
+#     obs_df = db.get_obs_df()
+#
+#     results = {}
+#     n_site_pairs = None
+#     for pSA_key in sr.constants.PSA_KEYS:
+#         # Get the data into the correct format
+#         cur_df = obs_df.loc[:, ["event_id", "site_id", pSA_key]]
+#         cur_df = cur_df.pivot(index="event_id", columns="site_id", values=pSA_key)
+#
+#         # Compute the correlations
+#         cur_corrs = cur_df.corr(min_periods=site_count_th)
+#
+#         # Sanity checking
+#         cur_n_site_pairs = (
+#             cur_corrs.size - np.count_nonzero(cur_corrs.isna()) - cur_corrs.shape[0]
+#         ) // 2
+#         n_site_pairs = cur_n_site_pairs if n_site_pairs is None else n_site_pairs
+#         assert n_site_pairs == cur_n_site_pairs
+#
+#         # Store the result
+#         results[pSA_key] = cur_corrs
+#
+#     # Compute the mean correlations
+#     corr_values = np.stack([cur_corrs.values for cur_corrs in results.values()], axis=2)
+#     results["mean"] = pd.DataFrame(
+#         np.mean(corr_values, axis=2),
+#         index=cur_corrs.index,
+#         columns=cur_corrs.columns,
+#     )
+#
+#     # Save the results
+#     pd.to_pickle(results, output_dir / "obs_site_correlations.pickle")
+#
+#
+# @app.command("compute-emp-event-site-correlations")
+# def compute_emp_event_site_correlations(
+#     output_dir: Path, emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path
+# ):
+#     """
+#     Uses the Loth & Baker model to compute the site correlations
+#
+#     Note: As correlations only depend on the distance between sites
+#         there are no differences between events, however it is required
+#         in this format for the pairwise ranking model
+#     """
+#     gm_params_df = pd.read_csv(emp_gm_params_ffp, index_col=0)
+#     site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")
+#
+#     sites = np.sort(np.unique(gm_params_df.site.values.astype(str)))
+#     ims = np.asarray(sr.constants.PSA_KEYS)
+#
+#     # Compute the distance matrix
+#     print(f"Computing distance matrix")
+#     dist_matrix = sh.im_dist.calculate_distance_matrix(sites, site_df)
+#
+#     # Compute the site correlations
+#     print(f"Computing site correlations")
+#     corrs = np.full((sites.size, sites.size, len(ims)), fill_value=np.nan)
+#     upper_mask = np.triu(np.ones_like(corrs[:, :, 0], dtype=bool), k=1)
+#     for i, cur_im in enumerate(ims):
+#         corrs[:, :, i][upper_mask] = corrs[:, :, i].T[
+#             upper_mask
+#         ] = sha.loth_baker_corr_model.get_correlations(
+#             cur_im, cur_im, dist_matrix.values[upper_mask]
+#         )
+#         np.fill_diagonal(corrs[:, :, i], 1.0)
+#
+#     # Write the results
+#     print(f"Writing results")
+#     for cur_event in gm_params_df.event.unique().astype(str):
+#         cur_sites = np.sort(
+#             gm_params_df.loc[gm_params_df.event == cur_event, "site"].values.astype(str)
+#         )
+#         site_mask = np.isin(sites, cur_sites)
+#
+#         assert np.all(sites[site_mask] == cur_sites)
+#
+#         cur_site_corr = sr.data.SiteCorrelations(
+#             corrs[site_mask, :, :][:, site_mask, :], cur_sites, ims, cur_event
+#         )
+#         cur_site_corr.write(output_dir / f"{cur_event}.pickle")
+
+
+# @app.command("compute-gm-params-mera")
+# def compute_gm_params_mera(
+#     output_dir: Path,
+#     db_ffp: Path,
+#     data_source: str = None,
+# ):
+#     """
+#     Computes the GM parameters for all events using MERA
+#     and all available data (i.e. all events & realisations)
+#
+#     1) Compute mean for each event from the realisations
+#     2) Compute the residuals (realisations - mu)
+#     3) Run MERA on the residuals
+#     """
+#     from mera.mera_pymer4 import run_mera
+#
+#     db = sr.db.DB(db_ffp)
+#     sim_df = db.get_sim_df(log=True)
+#
+#     ims = [cur_col for cur_col in sim_df.columns if cur_col in sr.constants.IMs]
+#
+#     print(f"Computing residuals")
+#     residual_df = []
+#     for cur_im in tqdm.tqdm(ims):
+#         cur_residual_df = sim_df[cur_im] - sim_df.groupby(
+#             ["event_id", "site_id"], observed=True
+#         )[cur_im].transform("mean")
+#
+#         residual_df.append(cur_residual_df)
+#
+#     residual_df = pd.concat(residual_df, axis=1)
+#     residual_df["event_id"] = sim_df["event_id"]
+#     residual_df["site_id"] = sim_df["site_id"]
+#
+#     # Run MERA
+#     event_res_df, rem_res_df, bias_std_df = run_mera(
+#         residual_df, ims, "event_id", "site_id", compute_site_term=False
+#     )
+#
+#     event_res_df.to_parquet(output_dir / "event_res_df.parquet")
+#     rem_res_df.to_parquet(output_dir / "rem_res_df.parquet")
+#     bias_std_df.to_parquet(output_dir / "bias_std_df.parquet")
+#     residual_df.to_parquet(output_dir / "residual_df.parquet")
+

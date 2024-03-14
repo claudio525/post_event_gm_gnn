@@ -4,8 +4,7 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 import sqlite3
-
-import ml_tools as mlt
+import tqdm
 
 from . import data
 from . import constants
@@ -43,9 +42,7 @@ class DB:
 
         # Process the data
         events, sites = set(), set()
-        for ix, (cur_id, cur_im_df) in enumerate(im_data.items()):
-            print(f"Processing {ix+1}/{len(im_data)}")
-
+        for ix, (cur_id, cur_im_df) in enumerate(tqdm.tqdm(im_data.items())):
             if "REL" in cur_id:
                 cur_event_id, cur_rel_id = cur_id.split("_")
             else:
@@ -165,9 +162,25 @@ class DB:
         """Gets the record data"""
         return pd.read_sql("SELECT * FROM records", self.con, index_col="record_id")
 
-    def get_sim_df(self):
+    def get_sim_df(self, log: bool = False):
         """Gets the simulation data"""
-        return pd.read_sql("SELECT * FROM sim_im_data", self.con, index_col="record_id")
+        result_df = pd.read_sql(
+            "SELECT * FROM sim_im_data",
+            self.con,
+            index_col="record_id",
+            dtype={
+                "event_id": "category",
+                "rel_id": "category",
+                "site_id": "category",
+                "data_source": "category",
+            },
+        )
+
+        if log:
+            ims = [cur_col for cur_col in result_df.columns if cur_col in constants.PSA_KEYS]
+            result_df[ims] = np.log(result_df[ims])
+
+        return result_df
 
     def get_obs_df(self):
         """Gets the observation IM data"""

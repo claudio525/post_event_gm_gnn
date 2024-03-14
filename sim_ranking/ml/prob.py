@@ -962,12 +962,18 @@ def post_processing(
     best_epoch: int,
     scalar_features: ml_data.ScalarFeatures,
     data_metadata: Dict,
+    val_int_sites: np.ndarray,
+    train_sites: np.ndarray,
     id_suffix: str = "",
 ):
     (
         cur_out_dir := run_config.results_dir
         / f"{mlt.utils.create_run_id(False)}{id_suffix}"
     ).mkdir()
+
+    # Save the training sites and validation sites
+    np.save(cur_out_dir / "val_int_sites.npy", val_int_sites)
+    np.save(cur_out_dir / "train_sites.npy", train_sites)
 
     # Compute the distance matrix
     print(f"Computing distance matrix")

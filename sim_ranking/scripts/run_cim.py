@@ -52,6 +52,7 @@ def emp_cmvn_all(
     rel_gm_params_ffp: Path,
     rel_db_ffp: Path,
     results_dir: Path,
+    val_int_sites_ffp: Path = None,
     data_source: str = None,
     IMs: List[str] = None,
     min_n_obs_stations: int = 5,
@@ -71,6 +72,7 @@ def emp_cmvn_all(
             rel_gm_params_ffp,
             rel_db_ffp,
             results_dir / cur_event,
+            val_int_sites_ffp=val_int_sites_ffp,
             IMs=IMs,
             min_n_obs_stations=min_n_obs_stations,
             n_obs_stations=n_stations,
@@ -83,6 +85,7 @@ def run_emp_cmvn(
     rel_gm_params_ffp: Path,
     rel_db_ffp: Path,
     results_dir: Path,
+    val_int_sites_ffp: Path = None,
     IMs: List[str] = None,
     min_n_obs_stations: int = 5,
     n_obs_stations: int = 20,
@@ -123,6 +126,18 @@ def run_emp_cmvn(
     # Use all available observation stations
     int_stations = obs_df.index.values.astype(str)
 
+    # If val_int_sites_ffp is not None,
+    # then the sites in the file are not used
+    # as observation sites
+    if val_int_sites_ffp is not None:
+        val_int_sites = np.load(val_int_sites_ffp)
+        mask = obs_df.index.isin(val_int_sites)
+        if not quiet:
+            print(f"Excluding {mask.sum()} sites from the analysis"
+                  f" as specified by val_int_sites")
+        obs_df = obs_df.loc[~mask]
+
+
     # Load the simulation IM data
     sim_data = db.get_sim_data(rupture, int_stations)
     sim_data = {cur_site: cur_g for cur_site, cur_g in sim_data.groupby("site_id")}
@@ -162,6 +177,7 @@ def sim_cmvn_all(
     results_dir: Path,
     rel_corr_dir: Path,
     data_source: str,
+    val_int_sites_ffp: Path = None,
     IMs: List[str] = None,
     min_n_obs_stations: int = 5,
     n_obs_stations: int = 20,
@@ -186,6 +202,7 @@ def sim_cmvn_all(
             rel_sim_gm_params_dir / cur_event,
             rel_db_ffp,
             results_dir / cur_event,
+            val_int_sites_ffp=val_int_sites_ffp,
             rel_corr_dir=rel_corr_dir,
             IMs=IMs,
             min_n_obs_stations=min_n_obs_stations,
@@ -294,6 +311,7 @@ def run_sim_cmvn(
     rel_sim_gm_params_dir: Path,
     rel_db_ffp: Path,
     results_dir: Path,
+    val_int_sites_ffp: Path = None,
     rel_corr_dir: Path = None,
     IMs: List[str] = None,
     min_n_obs_stations: int = 5,
@@ -324,6 +342,18 @@ def run_sim_cmvn(
 
     # Use all available observation stations
     int_stations = obs_df.index.values.astype(str)
+
+    # If val_int_sites_ffp is not None,
+    # then the sites in the file are not used
+    # as observation sites
+    if val_int_sites_ffp is not None:
+        val_int_sites = np.load(val_int_sites_ffp)
+        mask = obs_df.index.isin(val_int_sites)
+        if not quiet:
+            print(f"Excluding {mask.sum()} sites from the analysis"
+                  f" as specified by val_int_sites")
+        obs_df = obs_df.loc[~mask]
+
 
     # Load the simulation IM data
     sim_data = db.get_sim_data(rupture, int_stations)

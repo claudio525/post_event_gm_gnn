@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import typer
 import seaborn as sns
 
@@ -241,7 +242,6 @@ def create_pSA_dist_plot(
             )
             / np.sum(ml_results_df.prob.values)
         )
-        print(f"wtf")
 
         ax.semilogx(
             sr.constants.PERIODS,
@@ -305,6 +305,152 @@ def create_pSA_dist_plot(
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
 
+def _create_pot_sites_map(event: str,
+                           site_df: pd.DataFrame,
+                          int_sites: np.ndarray,
+                          obs_sites: np.ndarray,
+                          event_df: pd.DataFrame,
+                          site_int: str
+                          ):
+    all_sites = np.unique(np.concatenate([int_sites, obs_sites]))
+
+    fig = go.Figure(
+        data=[
+            go.Scattermapbox(
+                lat=site_df.loc[obs_sites].lat,
+                lon=site_df.loc[obs_sites].lon,
+                mode="markers",
+                marker=dict(size=10, color="blue"),
+                hovertext=obs_sites,
+                hoverinfo="text",
+                name="Potential observation sites",
+            ),
+            go.Scattermapbox(
+                lat=site_df.loc[int_sites].lat,
+                lon=site_df.loc[int_sites].lon,
+                mode="markers",
+                marker=dict(size=10, color="orange"),
+                hovertext=int_sites,
+                hoverinfo="text",
+                name="Potential sites of interest",
+            ),
+            go.Scattermapbox(
+                lat=[site_df.loc[site_int, "lat"]],
+                lon=[site_df.loc[site_int, "lon"]],
+                mode="markers",
+                marker=dict(size=20, color="red"),
+                hovertext=site_int,
+                hoverinfo="text",
+                name="Site of interest",
+            ),
+            go.Scattermapbox(
+                lat=[event_df.loc[event, "lat"]],
+                lon=[event_df.loc[event, "lon"]],
+                mode="markers",
+                marker=dict(size=25, color="black"),
+                hovertext=event,
+                hoverinfo="text",
+                name="Event",
+            ),
+        ]
+    )
+
+    fig.update_layout(height=600, margin=dict(l=0, r=0, t=0, b=0))
+    fig.update_mapboxes(
+        accesstoken="pk.eyJ1IjoiY3MyMyIsImEiOiJjbGtpeXIxNnkwbDQ3M25xbDFrZWFnNHo3In0.OD7TJ_1PegpGvCOCxfHsnA",
+        center=dict(
+            lat=site_df.loc[all_sites].lat.mean(),
+            lon=site_df.loc[all_sites].lon.mean(),
+        ),
+        zoom=8,
+    )
+
+    return fig
+
+
+def _create_scenario_map(
+    event: str,
+    site_df: pd.DataFrame,
+    emp_sites: np.ndarray,
+    sim_sites: np.ndarray,
+    ml_sites: np.ndarray,
+    event_df: pd.DataFrame,
+    site_int: str
+):
+    all_sites = np.unique(np.concatenate([emp_sites, sim_sites, ml_sites]))
+
+    assert np.all(np.isin(emp_sites, sim_sites))
+    cim_sites = np.unique(np.concatenate([emp_sites, sim_sites]))
+
+    cim_only_sites = np.setdiff1d(cim_sites, ml_sites)
+    ml_only_sites = np.setdiff1d(ml_sites, cim_sites)
+    both_sites = np.intersect1d(cim_sites, ml_sites)
+    assert np.all(np.isin(np.concatenate((cim_only_sites, ml_only_sites, both_sites)), all_sites))
+
+
+    fig = go.Figure(
+        data=[
+            go.Scattermapbox(
+                lat=site_df.loc[both_sites].lat,
+                lon=site_df.loc[both_sites].lon,
+                mode="markers",
+                marker=dict(size=10, color="blue"),
+                hovertext=both_sites,
+                hoverinfo="text",
+                name="Observation sites - cIM & ML",
+            ),
+            go.Scattermapbox(
+                lat=site_df.loc[cim_only_sites].lat,
+                lon=site_df.loc[cim_only_sites].lon,
+                mode="markers",
+                marker=dict(size=10, color="magenta"),
+                hovertext=cim_only_sites,
+                hoverinfo="text",
+                name="Observation sites - cIM only",
+            ),
+            go.Scattermapbox(
+                lat=site_df.loc[ml_only_sites].lat,
+                lon=site_df.loc[ml_only_sites].lon,
+                mode="markers",
+                marker=dict(size=10, color="green"),
+                hovertext=ml_only_sites,
+                hoverinfo="text",
+                name="Observation sites - ML only",
+            ),
+            go.Scattermapbox(
+                lat=[site_df.loc[site_int, "lat"]],
+                lon=[site_df.loc[site_int, "lon"]],
+                mode="markers",
+                marker=dict(size=20, color="red"),
+                hovertext=site_int,
+                hoverinfo="text",
+                name="Site of interest",
+            ),
+            go.Scattermapbox(
+                lat=[event_df.loc[event, "lat"]],
+                lon=[event_df.loc[event, "lon"]],
+                mode="markers",
+                marker=dict(size=25, color="black"),
+                hovertext=event,
+                hoverinfo="text",
+                name="Event",
+            ),
+        ]
+    )
+
+    fig.update_layout(height=600, margin=dict(l=0, r=0, t=0, b=0))
+    fig.update_mapboxes(
+        accesstoken="pk.eyJ1IjoiY3MyMyIsImEiOiJjbGtpeXIxNnkwbDQ3M25xbDFrZWFnNHo3In0.OD7TJ_1PegpGvCOCxfHsnA",
+        center=dict(
+            lat=site_df.loc[all_sites].lat.mean(),
+            lon=site_df.loc[all_sites].lon.mean(),
+        ),
+        zoom=8,
+    )
+
+    return fig
+
+
 
 def run_ind_scenario(
     scenario_results: pd.DataFrame,
@@ -318,24 +464,27 @@ def run_ind_scenario(
 ):
     event_df = st_utils.ml_get_event_df(ml_results_dir)
 
-    cur_events = scenario_results.event_id.unique().astype(str)
 
-    cur_event = st.selectbox(
-        "Event",
-        event_df.loc[cur_events]
-        .sort_values("mag", ascending=False)
-        .index.values.astype(str),
-        key=f"{tab_type}_event",
-    )
+    col1, col2 = st.columns([1, 6])
 
-    cur_sites = (
-        scenario_results.loc[scenario_results.event_id == cur_event]
-        .site_int.unique()
-        .astype(str)
-    )
-    cur_site = st.selectbox("Site of Interest", cur_sites, key=f"{tab_type}_site")
+    with col1:
+        cur_events = scenario_results.event_id.unique().astype(str)
+        cur_event = st.selectbox(
+            "Event",
+            event_df.loc[cur_events]
+            .sort_values("mag", ascending=False)
+            .index.values.astype(str),
+            key=f"{tab_type}_event",
+        )
 
-    st.markdown(f"Magnitude: {event_df.loc[cur_event].mag}")
+        cur_sites = (
+            scenario_results.loc[scenario_results.event_id == cur_event]
+            .site_int.unique()
+            .astype(str)
+        )
+        cur_site = st.selectbox("Site of Interest", cur_sites, key=f"{tab_type}_site")
+
+        st.markdown(f"Magnitude: {event_df.loc[cur_event].mag}")
 
     # Load the cIM results
     cur_emp_cim_results_dir = emp_cim_results_dir / cur_event / "empirical_cMVN"
@@ -350,7 +499,8 @@ def run_ind_scenario(
     obs_df = st_utils.ml_get_obs_df(ml_results_dir)
     sim_df = st_utils.ml_get_sim_data(ml_results_dir, cur_event)
 
-    # Get the relevant data
+    ### Get the relevant data
+    # ML - current scenario
     cur_scenario_df = (
         scenario_results.loc[
             (scenario_results.event_id == cur_event)
@@ -359,12 +509,15 @@ def run_ind_scenario(
         .set_index("rel_id")
         .sort_index()
     )
+    # Event realisations
     cur_event_rels = cur_scenario_df.index.unique().astype(str)
+    # Observation data at the site of interest
     site_int_obs = (
         obs_df.loc[(obs_df.event_id == cur_event) & (obs_df.site_id == cur_site)]
         .iloc[0][sr.constants.PSA_KEYS]
         .astype(float)
     )
+    # Simulation data at the site of interest
     site_int_sims = (
         sim_df.loc[
             (sim_df.site_id == cur_site) & np.isin(sim_df.rel_id, cur_event_rels)
@@ -372,12 +525,14 @@ def run_ind_scenario(
         .set_index("rel_id")
         .sort_index()
     )
+    # ML - sample data for the current scenario
     cur_sample_results = sample_results.loc[
         (sample_results.event_id == cur_event) & (sample_results.site_int == cur_site)
     ]
 
     assert np.all(site_int_sims.index == cur_scenario_df.index)
 
+    # Synthethic observation and generation distribution
     cur_syn_obs_gm_params = (
         syn_obs_gm_params.loc[
             (syn_obs_gm_params.event == cur_event)
@@ -393,6 +548,34 @@ def run_ind_scenario(
         if gen_gm_params is not None
         else None
     )
+
+    with col2:
+        fig = _create_pot_sites_map(
+            cur_event,
+            st_utils.ml_get_site_df(ml_results_dir),
+            scenario_results.loc[
+                scenario_results.event_id == cur_event].site_int.unique().astype(str),
+            sample_results.loc[
+                sample_results.event_id == cur_event].site_obs.unique().astype(str),
+            event_df,
+            cur_site
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    with st.expander("Scenario Map"):
+        fig = _create_scenario_map(
+            cur_event,
+            st_utils.ml_get_site_df(ml_results_dir),
+            cur_emp_cim.get_obs_stations(cur_site),
+            cur_sim_cim.get_obs_stations(cur_site),
+            cur_sample_results.site_obs.unique().astype(str),
+            event_df,
+            cur_site
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
 
     # Plots
     create_pSA_dist_plot(

@@ -11,14 +11,123 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import gmhazard_calc as gc
+import tqdm
 from qcore.timeseries import BBSeis, read_ascii
 import ml_tools as mlt
 import spatial_hazard as sh
 import sha_calc as sha
 
 from . import constants
-from . import utils
 from .db import DB
+
+
+@dataclass
+class SiteCorrelations:
+    corrs: np.ndarray
+    sites: np.ndarray
+    ims: np.ndarray
+    event: str
+
+    def __post_init__(self):
+        assert self.corrs.shape == (
+            self.sites.size,
+            self.sites.size,
+            self.ims.size,
+        )
+        assert self.sites.size == np.unique(self.sites).size
+        assert self.ims.size == np.unique(self.ims).size
+
+    def write(self, data_ffp: Path):
+        with data_ffp.open("wb") as f:
+            pickle.dump(self, f)
+
+    @classmethod
+    def load(cls, data_ffp: Path):
+        with data_ffp.open("rb") as f:
+            return pickle.load(f)
+
+    def to_im_dict(self):
+        return {
+            cur_im: pd.DataFrame(
+                data=self.corrs[:, :, self._get_im_ix(cur_im)],
+                index=self.sites,
+                columns=self.sites,
+            )
+            for cur_im in self.ims
+        }
+
+    def _get_im_ix(self, cur_im: str):
+        return np.flatnonzero(cur_im == self.ims)[0]
+
+    def get_im_corrs(self, im: str):
+        return pd.DataFrame(
+            data=self.corrs[:, :, self._get_im_ix(im)],
+            index=self.sites,
+            columns=self.sites,
+        )
+
+    def get_site_im_corrs(self, site: str, ims: Sequence[str]):
+        site_ix = np.flatnonzero(site == self.sites)[0]
+        im_ind = [self._get_im_ix(cur_im) for cur_im in ims]
+
+        # Why do I need a transpose here??
+        return pd.DataFrame(
+            data=self.corrs[site_ix, :, im_ind].T, index=self.sites, columns=ims
+        )
+
+
+class SimGMParams(NamedTuple):
+
+    event: str
+    ims: List[str]
+    sites: List[str]
+    gm_params: pd.DataFrame
+    residuals: Union[pd.DataFrame, None] = None
+    event_residuals: Union[pd.DataFrame, None] = None
+    within_residuals: Union[pd.DataFrame, None] = None
+    bias_std: Union[pd.DataFrame, None] = None
+
+    def write(self, data_dir: Path):
+        mlt.utils.write_to_yaml(
+            dict(event=str(self.event), ims=self.ims, sites=self.sites),
+            data_dir / "meta.yaml",
+        )
+
+        self.gm_params.to_csv(data_dir / "gm_params.csv")
+
+        if self.residuals is not None:
+            self.residuals.to_parquet(data_dir / "residuals.parquet")
+
+        if self.event_residuals is not None:
+            self.event_residuals.to_csv(data_dir / "event_residuals.csv")
+
+        if self.within_residuals is not None:
+            self.within_residuals.to_parquet(data_dir / "rem_residuals.parquet")
+
+        if self.bias_std is not None:
+            self.bias_std.to_csv(data_dir / "bias_std.csv")
+
+    @classmethod
+    def load(cls, data_dir: Path):
+        meta = mlt.utils.load_yaml(data_dir / "meta.yaml")
+        return cls(
+            meta["event"],
+            meta["ims"],
+            meta["sites"],
+            pd.read_csv(data_dir / "gm_params.csv", index_col=0),
+            pd.read_parquet(cur_path)
+            if (cur_path := data_dir / "residuals.parquet").exists()
+            else None,
+            pd.read_csv(cur_path, index_col=0)
+            if (cur_path := data_dir / "event_residuals.csv").exists()
+            else None,
+            pd.read_parquet(cur_path)
+            if (cur_path := data_dir / "rem_residuals.parquet").exists()
+            else None,
+            pd.read_csv(cur_path, index_col=0)
+            if (cur_path := data_dir / "bias_std.csv").exists()
+            else None,
+        )
 
 
 def gen_emp_synthetic_observed(
@@ -52,7 +161,7 @@ def gen_emp_synthetic_observed(
     )
 
     # Generate the realisation
-    rels = gen_emp_realisations(gm_params, site_df, n_rels=1)
+    rels = gen_emp_synthethic_realisations(gm_params, site_df, n_rels=1)
 
     # Combine
     dfs = []
@@ -73,7 +182,7 @@ def gen_emp_synthetic_observed(
     return obs_df, gm_params
 
 
-def gen_emp_realisations(
+def gen_emp_synthethic_realisations(
     gm_params: pd.DataFrame, site_df: pd.DataFrame, n_rels: int = 25
 ):
     """
@@ -107,8 +216,8 @@ def gen_emp_realisations(
 
     # Generate the realisations
     result_dict = {}
-    for event_ix, cur_event in enumerate(events):
-        print(f"Processing event: {cur_event}, {event_ix + 1}/{events.size}")
+    for event_ix, cur_event in enumerate(tqdm.tqdm(events)):
+        # print(f"Processing event: {cur_event}, {event_ix + 1}/{events.size}")
         cur_df = gm_params.loc[gm_params.event == cur_event, :].set_index("site")
         cur_sites = cur_df.index.values.astype(str)
 
@@ -361,61 +470,6 @@ def run_emp_gmms(
     result_df.to_csv(output_ffp, index_label="id")
 
 
-@dataclass
-class SiteCorrelations:
-    corrs: np.ndarray
-    sites: np.ndarray
-    ims: np.ndarray
-    event: str
-
-    def __post_init__(self):
-        assert self.corrs.shape == (
-            self.sites.size,
-            self.sites.size,
-            self.ims.size,
-        )
-        assert self.sites.size == np.unique(self.sites).size
-        assert self.ims.size == np.unique(self.ims).size
-
-    def write(self, data_ffp: Path):
-        with data_ffp.open("wb") as f:
-            pickle.dump(self, f)
-
-    @classmethod
-    def load(cls, data_ffp: Path):
-        with data_ffp.open("rb") as f:
-            return pickle.load(f)
-
-    def to_im_dict(self):
-        return {
-            cur_im: pd.DataFrame(
-                data=self.corrs[:, :, self._get_im_ix(cur_im)],
-                index=self.sites,
-                columns=self.sites,
-            )
-            for cur_im in self.ims
-        }
-
-    def _get_im_ix(self, cur_im: str):
-        return np.flatnonzero(cur_im == self.ims)[0]
-
-    def get_im_corrs(self, im: str):
-        return pd.DataFrame(
-            data=self.corrs[:, :, self._get_im_ix(im)],
-            index=self.sites,
-            columns=self.sites,
-        )
-
-    def get_site_im_corrs(self, site: str, ims: Sequence[str]):
-        site_ix = np.flatnonzero(site == self.sites)[0]
-        im_ind = [self._get_im_ix(cur_im) for cur_im in ims]
-
-        # Why do I need a transpose here??
-        return pd.DataFrame(
-            data=self.corrs[site_ix, :, im_ind].T, index=self.sites, columns=ims
-        )
-
-
 def compute_sim_site_corrs(sim_params_dir: Path):
     """Generates site-correlations using all available simulations"""
     events = [
@@ -425,8 +479,8 @@ def compute_sim_site_corrs(sim_params_dir: Path):
     ]
 
     im_dfs = None
-    for ix, cur_event in enumerate(events):
-        print(f"Processing event {cur_event}, {ix + 1}/{len(events)}")
+    print(f"Combining event GM parameters")
+    for ix, cur_event in enumerate(tqdm.tqdm(events)):
         cur_sim_gm_params = SimGMParams.load(sim_params_dir / cur_event)
         cur_within_residuals = cur_sim_gm_params.within_residuals
 
@@ -443,7 +497,8 @@ def compute_sim_site_corrs(sim_params_dir: Path):
             im_dfs[cur_im].append(cur_df)
 
     corr_dfs = {}
-    for cur_im, cur_dfs in im_dfs.items():
+    print(f"Computing correlations for each IM")
+    for cur_im, cur_dfs in tqdm.tqdm(im_dfs.items()):
         cur_df = pd.concat(cur_dfs, axis=0)
         cur_df = cur_df.pivot(index="sim_id", columns="site", values=cur_im)
         cur_corr_df = cur_df.corr(method="pearson")
@@ -466,10 +521,10 @@ def compute_sim_site_corrs(sim_params_dir: Path):
     return corr_dfs
 
 
-def compute_sim_event_site_corrs(sim_params_dir: Path):
+def compute_event_site_corrs_from_rels(sim_params_dir: Path):
     """
-    Computes the site correlations for each simulated event
-    (i.e. across all the realisation)
+    Computes the site correlations for each event using the
+    within-event residuals from the realisations
     """
     events = [
         cur_ffp.stem
@@ -478,8 +533,8 @@ def compute_sim_event_site_corrs(sim_params_dir: Path):
     ]
 
     results = []
-    for ix, cur_event in enumerate(events):
-        print(f"Processing event {cur_event}, {ix + 1}/{len(events)}")
+    for ix, cur_event in enumerate(tqdm.tqdm(events)):
+        # print(f"Processing event {cur_event}, {ix + 1}/{len(events)}")
         cur_sim_gm_params = SimGMParams.load(sim_params_dir / cur_event)
         cur_ims = np.asarray(cur_sim_gm_params.ims)
         cur_sites = np.asarray(cur_sim_gm_params.sites)
@@ -527,61 +582,9 @@ def compute_sim_event_site_corrs(sim_params_dir: Path):
     return results
 
 
-class SimGMParams(NamedTuple):
-
-    event: str
-    ims: List[str]
-    sites: List[str]
-    gm_params: pd.DataFrame
-    residuals: Union[pd.DataFrame, None] = None
-    event_residuals: Union[pd.DataFrame, None] = None
-    within_residuals: Union[pd.DataFrame, None] = None
-    bias_std: Union[pd.DataFrame, None] = None
-
-    def write(self, data_dir: Path):
-        mlt.utils.write_to_yaml(
-            dict(event=str(self.event), ims=self.ims, sites=self.sites),
-            data_dir / "meta.yaml",
-        )
-
-        self.gm_params.to_csv(data_dir / "gm_params.csv")
-
-        if self.residuals is not None:
-            self.residuals.to_parquet(data_dir / "residuals.parquet")
-
-        if self.event_residuals is not None:
-            self.event_residuals.to_csv(data_dir / "event_residuals.csv")
-
-        if self.within_residuals is not None:
-            self.within_residuals.to_parquet(data_dir / "rem_residuals.parquet")
-
-        if self.bias_std is not None:
-            self.bias_std.to_csv(data_dir / "bias_std.csv")
-
-    @classmethod
-    def load(cls, data_dir: Path):
-        meta = mlt.utils.load_yaml(data_dir / "meta.yaml")
-        return cls(
-            meta["event"],
-            meta["ims"],
-            meta["sites"],
-            pd.read_csv(data_dir / "gm_params.csv", index_col=0),
-            pd.read_parquet(cur_path)
-            if (cur_path := data_dir / "residuals.parquet").exists()
-            else None,
-            pd.read_csv(cur_path, index_col=0)
-            if (cur_path := data_dir / "event_residuals.csv").exists()
-            else None,
-            pd.read_parquet(cur_path)
-            if (cur_path := data_dir / "rem_residuals.parquet").exists()
-            else None,
-            pd.read_csv(cur_path, index_col=0)
-            if (cur_path := data_dir / "bias_std.csv").exists()
-            else None,
-        )
-
-
-def compute_sim_gm_params_total(db_ffp: Path, ims: List[str], data_source: str = None):
+def compute_event_gm_params_rel_total(
+    db_ffp: Path, ims: List[str], data_source: str = None
+):
     """
     Computes the parametric IM distribution based
     on the simulation data.
@@ -754,7 +757,9 @@ def _process_sim_gm_params_mera_event(event: str, db_ffp: Path, ims: List[str]):
     )
 
 
-def compute_sim_gm_params_mera(db_ffp: Path, ims: List[str], data_source: str = None, n_procs: int = 1):
+def compute_event_gm_params_rel_mera(
+    db_ffp: Path, ims: List[str], data_source: str = None, n_procs: int = 1
+):
     """
     Computes the parametric IM distributions based
     on the simulation data using mixed effects regression
@@ -774,10 +779,6 @@ def compute_sim_gm_params_mera(db_ffp: Path, ims: List[str], data_source: str = 
             results.append(_process_sim_gm_params_mera_event(cur_event, db_ffp, ims))
 
     return results
-
-
-
-
 
 
 def load_site_sim_data(
@@ -805,17 +806,6 @@ def load_site_sim_data(
 def load_obs_data(obs_ffp: Path):
     """Loads the observation data from the NZ-GMDB IM flat file"""
     return pd.read_csv(obs_ffp, index_col=0, low_memory=False, dtype={"evid": str})
-
-
-def get_obs_rupture_data(obs_df: pd.DataFrame, rupture: str):
-    """
-    Loads the observation data for the specified
-    data from the NZ-GMDB IM flat file
-    """
-    obs_df = obs_df.loc[obs_df.evid == rupture]
-    obs_df = obs_df.set_index("sta").sort_index()
-
-    return obs_df
 
 
 def load_sim_waveform(sim_rupture_dir: Path, rel_id: str, site: str):

@@ -138,7 +138,7 @@ def run_conditional_mvn_ranking(
         # Aggregate along IM axis
         rel_misfits.append(
             pd.Series(
-                index=cur_sim_df.index, data=cur_rel_misfit.sum(axis=1), name=cur_site
+                index=cur_sim_df.index, data=cur_rel_misfit, name=cur_site
             )
         )
 

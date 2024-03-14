@@ -14,6 +14,7 @@ import typer
 import ml_tools as mlt
 import gmhazard_calc as gc
 
+import st_utils
 import sim_ranking as sr
 import spatial_hazard as sh
 
@@ -51,7 +52,7 @@ def _get_sim_data(results_dir: Path, sites: np.ndarray):
 
 
 def _get_sites(results_dir: Path):
-    sites = sr.st_utils.cim_load_cmvn_result(results_dir).stations
+    sites = st_utils.cim_load_cmvn_result(results_dir).stations
     method_type = sr.data.get_method_type(results_dir)
 
     if method_type is sr.constants.RankingMethod.emp_cMVN:
@@ -128,6 +129,8 @@ def main(
     results_dir: Path,
     multi_result_types: bool = False,
 ):
+    st.set_page_config(layout="wide")
+
     if not multi_result_types:
         cur_results_dir = results_dir
     else:
@@ -180,7 +183,7 @@ def main(
 
 
 def _get_observation_sites(results_dir: Path, site: str):
-    cmvn_result = _load_cmvn_result(results_dir)
+    cmvn_result = st_utils.cim_load_cmvn_result(results_dir)
 
     obs_sites = cmvn_result.get_obs_stations(site)
     periods, pSA_keys = _get_periods(results_dir)
@@ -216,10 +219,10 @@ def _site_vis(cur_results_dir: Path):
     sim_data = _get_sim_data(cur_results_dir, sites)
 
     periods, pSA_keys = _get_periods(cur_results_dir)
-    best_sim_ids = _load_best_sim_ids(cur_results_dir)
+    # best_sim_ids = _load_best_sim_ids(cur_results_dir)
     gm_params = _get_gm_params(cur_results_dir)
 
-    cmvn_result = _load_cmvn_result(cur_results_dir)
+    cmvn_result = st_utils.cim_load_cmvn_result(cur_results_dir)
 
     ### Response Spectrum at site of interest
     st.markdown(
@@ -238,7 +241,8 @@ def _site_vis(cur_results_dir: Path):
         sim_data[cur_site],
         obs_df.loc[cur_site],
         cur_site,
-        best_sim_ids.loc[cur_site],
+        # best_sim_ids.loc[cur_site],
+        None,
         cMVN_result=cmvn_result if show_conditional else None,
         gm_params=gm_params.loc[cur_site] if show_marginal else None,
         show_all_sims=True,
@@ -295,7 +299,7 @@ def _site_vis(cur_results_dir: Path):
         sr.plots.draw_marginal(plt.gca(), gm_params.loc[cur_site], periods, pSA_keys)
     if show_conditional:
         sr.plots.draw_cmnv(
-            plt.gca(), periods, pSA_keys, _load_cmvn_result(cur_results_dir), cur_site
+            plt.gca(), periods, pSA_keys, st_utils.cim_load_cmvn_result(cur_results_dir), cur_site
         )
 
     plt.xlabel(f"Period, T (s)")

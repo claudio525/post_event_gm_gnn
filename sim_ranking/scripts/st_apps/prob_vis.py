@@ -742,7 +742,7 @@ def create_pSA_dist_plot(
                 linewidth=1.0,
             )
 
-    ax.semilogx(sr.constants.PERIODS, qt_50, label="Model - Median", c="blue")
+    # ax.semilogx(sr.constants.PERIODS, qt_50, label="Model - Median", c="blue")
 
     weighted_avg = einops.einsum(
         results_df.prob.values,
@@ -1076,10 +1076,10 @@ def run_ind_scenario(
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     gen_gm_params = (
-        load_gm_params(gen_gm_params_ffp) if gen_gm_params_ffp is not None else None
+        st_utils.load_gm_params(gen_gm_params_ffp) if gen_gm_params_ffp is not None else None
     )
     syn_obs_gm_params = (
-        load_gm_params(syn_obs_gm_params_ffp)
+        st_utils.load_gm_params(syn_obs_gm_params_ffp)
         if syn_obs_gm_params_ffp is not None
         else None
     )
@@ -1342,6 +1342,10 @@ def main(
         ),
     )
     cur_results_dir = results_dir / result_id
+
+    if st_utils.ml_get_metadata(cur_results_dir)["method_type"] != 4:
+        st.error("This app is only for the results of the ML method type")
+        return
 
     (
         general_tab,

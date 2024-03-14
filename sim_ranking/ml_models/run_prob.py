@@ -120,8 +120,12 @@ def train_model(
         best_model_epoch,
         scalar_features,
         data_metadata,
+        val_int_sites,
+        train_sites,
         id_suffix=id_suffix,
     )
+
+
 
 
 if __name__ == "__main__":
