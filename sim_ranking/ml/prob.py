@@ -71,6 +71,11 @@ class HyperParamsConfig:
     use_res_sim_site_obs_sim_site_int: bool
     use_res_obs_site_obs_sim_site_int: bool
 
+    # Use the misfit score between simulation realisation
+    # and observed GM at the observation site as a
+    # scalar feature
+    use_obs_site_misfit_score: bool
+
     ind_fc_units: Sequence[int]
 
     combined_model: bool
@@ -105,6 +110,7 @@ class HyperParamsConfig:
             params["res_site_obs"],
             params["res_sim_site_obs_sim_site_int"],
             params["res_obs_site_obs_sim_site_int"],
+            params["use_obs_site_misfit_score"],
             params["ind_fc_units"],
             params["use_combined_model"],
             params["comb_fc_units"],
@@ -125,6 +131,7 @@ class HyperParamsConfig:
             "res_sim_site_obs_sim_site_int": self.use_res_sim_site_obs_sim_site_int,
             "res_obs_site_obs_sim_site_int": self.use_res_obs_site_obs_sim_site_int,
             "n_im_features": self.n_im_features,
+            "use_obs_site_misfit_score": self.use_obs_site_misfit_score,
             "ind_fc_units": self.ind_fc_units,
             "use_combined_model": self.combined_model,
             "comb_fc_units": self.comb_fc_units,
@@ -509,6 +516,7 @@ class ProbDataset(Dataset):
 
         scalar_features = self.scalar_features_values[batch_ind]
         misfit_score = self.misfit_score[record_site_int_ind]
+        obs_site_misfit_score = self.misfit_score[record_site_obs_ind]
 
         site_corr_weights = self.corr_weights[batch_ind]
 
@@ -521,6 +529,7 @@ class ProbDataset(Dataset):
             site_obs_sim_ims,
             site_obs_obs_ims,
             scalar_features,
+            obs_site_misfit_score,
             misfit_score,
             site_corr_weights,
         )
@@ -571,11 +580,17 @@ def create_model(
     scalar_features: ml_data.ScalarFeatures,
     run_config: RunParamsConfig,
 ):
+    n_scalar_features = (
+        scalar_features.n_scalar_features + 1
+        if hp_config.use_obs_site_misfit_score
+        else scalar_features.n_scalar_features
+    )
+
     if hp_config.combined_model:
         prob_model = models.ProbCombModel(
             hp_config.ind_fc_units,
             hp_config.comb_fc_units,
-            scalar_features.n_scalar_features,
+            n_scalar_features,
             len(run_config.ims),
             hp_config.n_im_features,
         )
@@ -590,14 +605,14 @@ def create_model(
                     run_config.n_rels,
                     len(run_config.ims),
                 ),
-                (hp_config.batch_size, scalar_features.n_scalar_features),
+                (hp_config.batch_size, n_scalar_features),
             ],
         )
 
     else:
         prob_model = models.ProbIndModel(
             hp_config.ind_fc_units,
-            scalar_features.n_scalar_features,
+            n_scalar_features,
             len(run_config.ims),
             hp_config.n_im_features,
             is_sub_model=False,
@@ -613,7 +628,7 @@ def create_model(
                     run_config.n_rels,
                     len(run_config.ims),
                 ),
-                (hp_config.batch_size, scalar_features.n_scalar_features),
+                (hp_config.batch_size, run_config.n_rels,  n_scalar_features),
             ],
         )
 
@@ -670,6 +685,7 @@ def train(
             site_obs_sim_ims,
             site_obs_obs_ims,
             scalar_features,
+            obs_site_misfit_score,
             misfit_score,
             site_corr_weights,
         ) in enumerate(iter_loop):
@@ -682,6 +698,7 @@ def train(
                 site_int_sim_ims,
                 site_obs_sim_ims,
                 scalar_features,
+                obs_site_misfit_score,
                 run_config,
                 hp_config,
             )
@@ -713,6 +730,7 @@ def train(
                 site_obs_sim_ims,
                 site_obs_obs_ims,
                 scalar_features,
+                obs_site_misfit_score,
                 misfit_score,
                 site_corr_weights,
             ) in enumerate(val_dataloader):
@@ -725,6 +743,7 @@ def train(
                     site_int_sim_ims,
                     site_obs_sim_ims,
                     scalar_features,
+                    obs_site_misfit_score,
                     run_config,
                     hp_config,
                 )
@@ -774,6 +793,7 @@ def get_prediction(
     site_int_sim_ims: torch.Tensor,
     site_obs_sim_ims: torch.Tensor,
     scalar_features: torch.Tensor,
+    obs_site_misfit_score: torch.Tensor,
     run_config: RunParamsConfig,
     hp_config: HyperParamsConfig,
 ):
@@ -820,6 +840,14 @@ def get_prediction(
     if hp_config.use_res_obs_site_obs_sim_site_int:
         im_tensor[:, ix, :, :] = site_obs_obs_ims[:, None, :] - site_int_sim_ims
         ix += 1
+
+    scalar_features = einops.repeat(
+        scalar_features, "batch ss -> batch rel ss", rel=run_config.n_rels
+    )
+    if hp_config.use_obs_site_misfit_score:
+        scalar_features = torch.cat(
+            [scalar_features, obs_site_misfit_score[..., None]], dim=2
+        )
 
     scalar_features = scalar_features.to(
         run_config.device, dtype=torch.float32, non_blocking=True
@@ -886,6 +914,7 @@ def get_dataset_predictions(
             site_obs_sim_ims,
             site_obs_obs_ims,
             scalar_features,
+            obs_site_misfit_score,
             misfit_score,
             site_corr_weights,
         ) in enumerate(pred_dataloader):
@@ -898,6 +927,7 @@ def get_dataset_predictions(
                 site_int_sim_ims,
                 site_obs_sim_ims,
                 scalar_features,
+                obs_site_misfit_score,
                 run_config,
                 hp_config,
             )
@@ -1030,6 +1060,11 @@ def post_processing(
     mlt.utils.write_to_yaml(metadata, cur_out_dir / "meta.yaml")
 
     # Create model visualisation
+    n_scalar_features = (
+        scalar_features.n_scalar_features + 1
+        if hp_config.use_obs_site_misfit_score
+        else scalar_features.n_scalar_features
+    )
     draw_graph(
         prob_model,
         input_size=[
@@ -1039,7 +1074,7 @@ def post_processing(
                 run_config.n_rels,
                 len(run_config.ims),
             ),
-            (hp_config.batch_size, scalar_features.n_scalar_features),
+            (hp_config.batch_size, run_config.n_rels, n_scalar_features),
         ],
         expand_nested=True,
         filename="prob_model_vis",

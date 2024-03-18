@@ -102,9 +102,10 @@ class ProbIndModel(ProbModel):
 
     def forward(self, im_values: torch.Tensor, scalar_values: torch.Tensor):
         X_im = einops.rearrange(im_values, "batch type rel im -> batch rel (type im)")
-        X_ss = einops.repeat(
-            scalar_values, "batch ss -> batch rel ss", rel=im_values.shape[2]
-        )
+        X_ss = scalar_values
+        # X_ss = einops.repeat(
+        #     scalar_values, "batch ss -> batch rel ss", rel=im_values.shape[2]
+        # )
 
         X = torch.cat((X_im, X_ss), axis=2)
         X = einops.rearrange(X, "batch rel feature -> (batch rel) feature")
