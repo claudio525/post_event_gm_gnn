@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import typer
 
-
 import sim_ranking as sr
 import sim_ranking.ml.prob as prob
 
@@ -25,6 +24,7 @@ def train_model(
     hyperparams_ffp: Path,
     n_epochs: int = 10,
     max_dist: float = 75,
+    per_im_prob: bool = False,
     debug: bool = False,
     n_rels: int = None,
     rel_sim_corr_dir: Path = None,
@@ -41,6 +41,7 @@ def train_model(
         n_rels,
         sr.constants.IM_SETS[im_set],
         sr.constants.IM_WEIGTHS_SETS[im_set],
+        per_im_prob,
         debug,
         device,
         results_dir=out_dir,

@@ -33,6 +33,10 @@ class RunParamsConfig:
     ims: Sequence[str]
     im_weights: np.ndarray
 
+    # If true then model will be trained to
+    # output P(R_i|X) for each IM independently
+    per_im_prob: bool
+
     debug: bool
     device: str
 
@@ -320,7 +324,8 @@ class ProbDataset(Dataset):
         # Create the (normalised) IM inputs
         self.norm_obs_ims, self.norm_sim_ims = [], []
         self.obs_ims, self.sim_ims = [], []
-        self.misfit_score, self.corr = [], []
+        self.misfit_score, self.site_corrs = [], []
+        self.im_misfit_score = []
         self.residual = []
 
         event_loop = tqdm(event_sites.items(), desc="Processing events")
@@ -371,7 +376,7 @@ class ProbDataset(Dataset):
             cur_residual = cur_obs_data[:, None, :] - cur_sim_data
             self.residual.append(cur_residual)
 
-            # Compute misfit score
+            # Compute (across IMs) misfit score
             if hp_config.misfit_fn == "mse":
                 cur_misfit_score = np.sum(self.im_weights * cur_residual ** 2, axis=2)
             elif hp_config.misfit_fn == "mae":
@@ -382,7 +387,16 @@ class ProbDataset(Dataset):
                 raise ValueError(f"Unknown misfit function: {hp_config.misfit_fn}")
             self.misfit_score.append(cur_misfit_score)
 
-            # # Normalise & Append
+            # Compute misfit score for each IM
+            if hp_config.misfit_fn == "mse":
+                cur_im_misfit_score = cur_residual ** 2
+            elif hp_config.misfit_fn == "mae":
+                cur_im_misfit_score = np.abs(cur_residual)
+            else:
+                raise ValueError(f"Unknown misfit function: {hp_config.misfit_fn}")
+            self.im_misfit_score.append(cur_im_misfit_score)
+
+            # Normalise & Append
             cur_obs_data = (
                 cur_obs_data - self.ims_mean[self.ims].values
             ) / self.ims_std[self.ims].values
@@ -407,7 +421,7 @@ class ProbDataset(Dataset):
                         cur_corr_df.values[cur_site_combs[:, 0], cur_site_combs[:, 1]]
                     )
 
-            self.corr.append(cur_corrs_values)
+            self.site_corrs.append(cur_corrs_values)
 
         self.n_sites_event = np.asarray(self.n_sites_event)
         self.cum_n_samples_event = np.cumsum(self.n_samples_event)
@@ -419,9 +433,10 @@ class ProbDataset(Dataset):
         self.obs_ims = np.concatenate(self.obs_ims, axis=0)
         self.residual = np.concatenate(self.residual, axis=0)
         self.misfit_score = np.concatenate(self.misfit_score, axis=0)
-        self.corr = np.concatenate(self.corr, axis=0)
-        self.corr_weights = einops.einsum(
-            self.im_weights[None, :], self.corr, "r w, r w -> r"
+        self.im_misfit_score = np.concatenate(self.im_misfit_score, axis=0)
+        self.site_corrs = np.concatenate(self.site_corrs, axis=0)
+        self.site_corr_weights = einops.einsum(
+            self.im_weights[None, :], self.site_corrs, "r w, r w -> r"
         )
 
         # Convert all site-combination to a dataframe for fast indexing
@@ -516,9 +531,11 @@ class ProbDataset(Dataset):
 
         scalar_features = self.scalar_features_values[batch_ind]
         misfit_score = self.misfit_score[record_site_int_ind]
+        im_misfit_score = self.im_misfit_score[record_site_int_ind]
         obs_site_misfit_score = self.misfit_score[record_site_obs_ind]
 
-        site_corr_weights = self.corr_weights[batch_ind]
+        im_site_corr_weights = self.site_corrs[batch_ind, :]
+        site_corr_weights = self.site_corr_weights[batch_ind]
 
         return (
             batch_ind,
@@ -531,7 +548,9 @@ class ProbDataset(Dataset):
             scalar_features,
             obs_site_misfit_score,
             misfit_score,
+            im_misfit_score,
             site_corr_weights,
+            im_site_corr_weights,
         )
 
 
@@ -593,6 +612,7 @@ def create_model(
             n_scalar_features,
             len(run_config.ims),
             hp_config.n_im_features,
+            run_config.per_im_prob,
         )
 
         print(f"Model summary")
@@ -605,7 +625,7 @@ def create_model(
                     run_config.n_rels,
                     len(run_config.ims),
                 ),
-                (hp_config.batch_size, n_scalar_features),
+                (hp_config.batch_size, run_config.n_rels, n_scalar_features),
             ],
         )
 
@@ -616,6 +636,7 @@ def create_model(
             len(run_config.ims),
             hp_config.n_im_features,
             is_sub_model=False,
+            per_im_prob=run_config.per_im_prob,
         )
 
         print(f"Model summary")
@@ -628,7 +649,7 @@ def create_model(
                     run_config.n_rels,
                     len(run_config.ims),
                 ),
-                (hp_config.batch_size, run_config.n_rels,  n_scalar_features),
+                (hp_config.batch_size, run_config.n_rels, n_scalar_features),
             ],
         )
 
@@ -687,7 +708,9 @@ def train(
             scalar_features,
             obs_site_misfit_score,
             misfit_score,
+            im_misfit_score,
             site_corr_weights,
+            im_site_corrs_weights,
         ) in enumerate(iter_loop):
             pred = get_prediction(
                 prob_model,
@@ -707,7 +730,14 @@ def train(
                 print("NaNs in model predictions, Quitting!")
                 exit()
 
-            cur_loss = compute_loss(misfit_score, pred, site_corr_weights, run_config)
+            if run_config.per_im_prob:
+                cur_loss = compute_im_loss(
+                    im_misfit_score, pred, im_site_corrs_weights, run_config
+                )
+            else:
+                cur_loss = compute_loss(
+                    misfit_score, pred, site_corr_weights, run_config
+                )
 
             optimizer.zero_grad()
             cur_loss.backward()
@@ -732,7 +762,9 @@ def train(
                 scalar_features,
                 obs_site_misfit_score,
                 misfit_score,
+                im_misfit_score,
                 site_corr_weights,
+                im_site_corrs_weights,
             ) in enumerate(val_dataloader):
                 pred = get_prediction(
                     prob_model,
@@ -748,9 +780,14 @@ def train(
                     hp_config,
                 )
 
-                cur_loss = compute_loss(
-                    misfit_score, pred, site_corr_weights, run_config
-                )
+                if run_config.per_im_prob:
+                    cur_loss = compute_im_loss(
+                        im_misfit_score, pred, im_site_corrs_weights, run_config
+                    )
+                else:
+                    cur_loss = compute_loss(
+                        misfit_score, pred, site_corr_weights, run_config
+                    )
 
                 metrics["loss_hist_val"][epoch_ix] += cur_loss.item()
 
@@ -779,6 +816,25 @@ def compute_loss(
     misfit_score = misfit_score.to(run_config.device, dtype=torch.float32)
     site_corr_weights = site_corr_weights.to(run_config.device, dtype=torch.float32)
     loss = einops.einsum(site_corr_weights, pred, misfit_score, "b, b r, b r -> b")
+    if reduce:
+        return loss.mean()
+    return loss
+
+
+def compute_im_loss(
+    im_misfit_score: torch.Tensor,
+    pred: torch.Tensor,
+    im_site_corrs_weights: torch.Tensor,
+    run_config: RunParamsConfig,
+    reduce: bool = True,
+):
+    im_misfit_score = im_misfit_score.to(run_config.device, dtype=torch.float32)
+    im_site_corrs_weights = im_site_corrs_weights.to(
+        run_config.device, dtype=torch.float32
+    )
+    loss = einops.einsum(
+        im_site_corrs_weights, pred, im_misfit_score, "b im, b r im, b r im -> b"
+    )
     if reduce:
         return loss.mean()
     return loss
@@ -872,22 +928,34 @@ def get_dataset_predictions(
         "site_int",
         "site_obs",
         "rel_id",
-        "prob",
-        "misfit_score",
-        "site_corr_weights",
         "s2s_distance",
-    ] + run_config.ims
+    ]
+    im_res_cols = np.char.add(run_config.ims, "_residual").tolist()
+    columns += im_res_cols
+
+    if run_config.per_im_prob:
+        im_site_corr_weights_cols = np.char.add(
+            run_config.ims, "_site_corr_weights"
+        ).tolist()
+        im_misfit_cols = np.char.add(run_config.ims, "_misfit").tolist()
+        prob_cols = np.char.add(run_config.ims, "_prob").tolist()
+        columns += prob_cols + im_misfit_cols
+    else:
+        columns += ["prob", "misfit_score", "site_corr_weights"]
+
     results_df = pd.DataFrame(
         index=np.arange(len(dataset) * run_config.n_rels), columns=columns
     )
 
-    num_cols = run_config.ims + [
-        "prob",
-        "misfit_score",
-        "site_corr_weights",
-        "s2s_distance",
-    ]
-    results_df = results_df.astype(dict(zip(num_cols, len(num_cols) * [np.float32])))
+    # n_float_cols = run_config.ims + [
+    #     "prob",
+    #     "misfit_score",
+    #     "site_corr_weights",
+    #     "s2s_distance",
+    # ]
+    results_df = results_df.astype(
+        dict(zip(columns[4:], len(columns[4:]) * [np.float32]))
+    )
 
     results_df["event_id"] = pd.Categorical(
         categories=dataset.events, values=results_df.shape[0] * [pd.NA]
@@ -902,7 +970,6 @@ def get_dataset_predictions(
         categories=np.unique(dataset.rels), values=results_df.shape[0] * [pd.NA]
     )
 
-    t = []
     with torch.no_grad():
         prob_model.eval()
         for i, (
@@ -916,7 +983,9 @@ def get_dataset_predictions(
             scalar_features,
             obs_site_misfit_score,
             misfit_score,
+            im_misfit_score,
             site_corr_weights,
+            im_site_corrs_weights,
         ) in enumerate(pred_dataloader):
             pred = get_prediction(
                 prob_model,
@@ -932,44 +1001,85 @@ def get_dataset_predictions(
                 hp_config,
             )
 
-            events, site_int, site_obs, rels, misfit = dataset.get_metadata(batch_ind)
+            events, site_int, site_obs, rels, residual = dataset.get_metadata(batch_ind)
 
             cur_start_ix = i * hp_config.batch_size * run_config.n_rels
             cur_end_ix = cur_start_ix + pred.shape[0] * run_config.n_rels - 1
+
+            ### Store results
+            # Event
             results_df.loc[cur_start_ix:cur_end_ix, "event_id"] = einops.repeat(
                 events, "batch -> (batch rel)", rel=pred.shape[1]
             )
-            df_site_int = einops.repeat(
+            # Site of Interest
+            results_df.loc[
+                cur_start_ix:cur_end_ix, "site_int"
+            ] = df_site_int = einops.repeat(
                 site_int, "batch -> (batch rel)", rel=pred.shape[1]
             )
-            results_df.loc[cur_start_ix:cur_end_ix, "site_int"] = df_site_int
-            df_site_obs = einops.repeat(
+            # Observation site
+            results_df.loc[
+                cur_start_ix:cur_end_ix, "site_obs"
+            ] = df_site_obs = einops.repeat(
                 site_obs, "batch -> (batch rel)", rel=pred.shape[1]
             )
-            results_df.loc[cur_start_ix:cur_end_ix, "site_obs"] = df_site_obs
+            # Realisation
             results_df.loc[cur_start_ix:cur_end_ix, "rel_id"] = einops.rearrange(
                 rels, "batch rel -> (batch rel)"
             )
-            results_df.loc[cur_start_ix:cur_end_ix, "prob"] = (
-                einops.rearrange(pred, "batch rel -> (batch rel)")
-                .numpy(force=True)
-                .astype(np.float32)
-            )
-            results_df.loc[cur_start_ix:cur_end_ix, "misfit_score"] = (
-                einops.rearrange(misfit_score, "batch rel -> (batch rel)")
-                .numpy(force=True)
-                .astype(np.float32)
-            )
-            results_df.loc[cur_start_ix:cur_end_ix, "site_corr_weights"] = (
-                einops.repeat(
-                    site_corr_weights, "batch -> (batch rel)", rel=pred.shape[1]
+            # Probabilities
+            if run_config.per_im_prob:
+                results_df.loc[cur_start_ix:cur_end_ix, prob_cols] = (
+                    einops.rearrange(pred, "batch rel im -> (batch rel) im")
+                    .numpy(force=True)
+                    .astype(np.float32)
                 )
-                .numpy(force=True)
-                .astype(np.float32)
-            )
-            results_df.loc[cur_start_ix:cur_end_ix, run_config.ims] = einops.rearrange(
-                misfit, "batch rel im -> (batch rel) im"
+            else:
+                results_df.loc[cur_start_ix:cur_end_ix, "prob"] = (
+                    einops.rearrange(pred, "batch rel -> (batch rel)")
+                    .numpy(force=True)
+                    .astype(np.float32)
+                )
+
+            # Misfit score
+            if run_config.per_im_prob:
+                results_df.loc[cur_start_ix:cur_end_ix, im_misfit_cols] = (
+                    einops.rearrange(im_misfit_score, "batch rel im -> (batch rel) im")
+                    .numpy(force=True)
+                    .astype(np.float32)
+                )
+            else:
+                results_df.loc[cur_start_ix:cur_end_ix, "misfit_score"] = (
+                    einops.rearrange(misfit_score, "batch rel -> (batch rel)")
+                    .numpy(force=True)
+                    .astype(np.float32)
+                )
+
+            if run_config.per_im_prob:
+                results_df.loc[cur_start_ix:cur_end_ix, im_site_corr_weights_cols] = (
+                    einops.repeat(
+                        im_site_corrs_weights,
+                        "batch im -> (batch rel) im",
+                        rel=pred.shape[1],
+                    )
+                    .numpy(force=True)
+                    .astype(np.float32)
+                )
+            else:
+                results_df.loc[cur_start_ix:cur_end_ix, "site_corr_weights"] = (
+                    einops.repeat(
+                        site_corr_weights, "batch -> (batch rel)", rel=pred.shape[1]
+                    )
+                    .numpy(force=True)
+                    .astype(np.float32)
+                )
+
+            # IM residuals
+            results_df.loc[cur_start_ix:cur_end_ix, im_res_cols] = einops.rearrange(
+                residual, "batch rel im -> (batch rel) im"
             ).astype(np.float32)
+
+            # Site-to-site distance
             results_df.loc[
                 cur_start_ix:cur_end_ix, "s2s_distance"
             ] = dist_matrix.values[
@@ -1051,7 +1161,9 @@ def post_processing(
 
     # Metadata
     metadata = {
-        "method_type": constants.RankingMethod.ml_prob.value,
+        "method_type": constants.RankingMethod.ml_prob_per_im.value
+        if run_config.per_im_prob
+        else constants.RankingMethod.ml_prob.value,
         "hp_config": hp_config.to_dict(),
         "best_epoch": best_epoch,
         "data": data_metadata,
@@ -1083,23 +1195,84 @@ def post_processing(
     )
 
 
+@nb.njit
+def _im_weighted_mean(
+    unique_rel_ids: np.ndarray,
+    rel_ids: np.ndarray,
+    im_probs: np.ndarray,
+    im_site_corr_weights: np.ndarray,
+):
+    agg_im_probs = np.zeros((unique_rel_ids.size, im_probs.shape[1]))
+    for i in range(unique_rel_ids.size):
+        cur_mask = rel_ids == unique_rel_ids[i]
+        agg_im_probs[i, :] = np.sum(
+            im_probs[cur_mask]
+            * (
+                im_site_corr_weights[cur_mask]
+                / im_site_corr_weights[cur_mask].sum(axis=0)
+            ),
+            axis=0,
+        )
+
+    return agg_im_probs
+
+    #     yield np.sum(prob[cur_mask] * weights[cur_mask], axis=0)
+    # pass
+
+
 def compute_scenario_distribution(
     sample_results: pd.DataFrame, run_config: RunParamsConfig
 ):
     """
     Computes the realisation distribution for each scenario
     """
+    string_to_int = np.vectorize(lambda x: hash(x))
+    im_prob_cols = np.char.add(run_config.ims, "_prob")
+    im_site_corr_weight_cols = np.char.add(run_config.ims, "_site_corr_weights")
+    im_res_cols = np.char.add(run_config.ims, "_residual")
+    im_misfit_cols = np.char.add(run_config.ims, "_misfit")
+
     scenario_results = []
     groups = sample_results.groupby(["event_id", "site_int"], observed=True)
     iter_loop = tqdm(groups, desc="Processing scenarios")
     for (cur_event, cur_site_int), cur_group in iter_loop:
         cur_rel_group = cur_group.groupby("rel_id", observed=True)
+        if run_config.per_im_prob:
+            cur_group["rel_int_id"] = string_to_int(cur_group.rel_id.values)
 
-        wm = lambda x: np.sum(
-            x.prob.values
-            * (x.site_corr_weights.values / x.site_corr_weights.values.sum())
-        )
-        cur_result = cur_rel_group.apply(wm).to_frame("prob")
+            cur_result = pd.DataFrame(
+                data=_im_weighted_mean(
+                    # Have to pass this, as np.unique sorts the result
+                    cur_group.rel_int_id.values[: run_config.n_rels],
+                    cur_group.rel_int_id.values,
+                    cur_group[im_prob_cols].values,
+                    cur_group[im_site_corr_weight_cols].values,
+                ),
+                index=cur_group.rel_id.values[: run_config.n_rels],
+                columns=im_prob_cols,
+            )
+
+            # cur_result[im_prob_cols]=  cur_rel_group.apply(wm)
+            # t = pd.DataFrame(index=cur_rel_group.first().index)
+            # for cur_im in run_config.ims:
+            #     cur_wm = lambda x: np.sum(
+            #         x[f"{cur_im}_prob"].values
+            #         * (
+            #             x[f"{cur_im}_site_corr_weights"].values
+            #             / x[f"{cur_im}_site_corr_weights"].values.sum()
+            #         )
+            #     )
+            #     t[f"{cur_im}_prob"] = cur_rel_group.apply(cur_wm)
+            #
+            # print(f"wtf")
+        else:
+
+            wm = lambda x: np.sum(
+                x.prob.values
+                * (x.site_corr_weights.values / x.site_corr_weights.values.sum())
+            )
+            cur_result = cur_rel_group.apply(wm).to_frame("prob")
+
         cur_result["event_id"] = cur_event
         cur_result["site_int"] = cur_site_int
         cur_result["rel_id"] = cur_result.index
@@ -1108,20 +1281,21 @@ def compute_scenario_distribution(
         cur_result["min_distance"] = cur_group.s2s_distance.min()
         cur_result["max_distance"] = cur_group.s2s_distance.max()
 
-        cur_site_obs_first = cur_group.groupby("site_obs", observed=True).first()
-        cur_result["weighted_mean_distance"] = (
-            np.sum(
-                cur_site_obs_first.s2s_distance.values
-                * cur_site_obs_first.site_corr_weights.values
-            )
-            / cur_site_obs_first.site_corr_weights.values.sum()
-        )
+        # cur_site_obs_first = cur_group.groupby("site_obs", observed=True).first()
+        # cur_result["weighted_mean_distance"] = (
+        #     np.sum(
+        #         cur_site_obs_first.s2s_distance.values
+        #         * cur_site_obs_first.site_corr_weights.values
+        #     )
+        #     / cur_site_obs_first.site_corr_weights.values.sum()
+        # )
 
-        cur_result["misfit_score"] = cur_rel_group.misfit_score.first().values
+        assert np.all(cur_rel_group.first().index == cur_result.index)
+        cur_result[im_misfit_cols] = cur_rel_group.first()[im_misfit_cols]
 
-        cur_residuals = cur_rel_group.first().loc[:, run_config.ims]
+        cur_residuals = cur_rel_group.first().loc[:, im_res_cols]
         assert np.all(cur_residuals.index == cur_result.rel_id)
-        cur_result.loc[:, run_config.ims] = cur_residuals.values
+        cur_result.loc[:, im_res_cols] = cur_residuals.values
 
         cur_result.index = mlt.array_utils.numpy_str_join(
             "_", cur_event, cur_site_int, cur_result.index.values.astype(str)

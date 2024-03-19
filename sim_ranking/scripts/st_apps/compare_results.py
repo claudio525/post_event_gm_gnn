@@ -59,18 +59,18 @@ def create_pSA_dist_plot(
 
     ## ML - Compute the quantiles
     assert site_int_sims.index.equals(ml_results_df.index)
-    cdf_x, cdf_y = [], []
-    for cur_im in sr.constants.PSA_KEYS:
-        cur_sort_ind = np.argsort(site_int_sims[cur_im].values)
-        cdf_x.append(site_int_sims[cur_im].values[cur_sort_ind])
-        cdf_y.append(np.cumsum(ml_results_df.prob.values[cur_sort_ind]))
-
-    cdf_x = pd.DataFrame(np.asarray(cdf_x).T, columns=sr.constants.PSA_KEYS)
-    cdf_y = pd.DataFrame(np.asarray(cdf_y).T, columns=sr.constants.PSA_KEYS)
-
-    qt_2, qt_16, qt_50, qt_84, qt_98 = sha.query_non_parametric_multi_cdf_invs(
-        np.asarray([0.02, 0.16, 0.5, 0.84, 0.98]), cdf_x.T.values, cdf_y.T.values
-    )
+    # cdf_x, cdf_y = [], []
+    # for cur_im in sr.constants.PSA_KEYS:
+    #     cur_sort_ind = np.argsort(site_int_sims[cur_im].values)
+    #     cdf_x.append(site_int_sims[cur_im].values[cur_sort_ind])
+    #     cdf_y.append(np.cumsum(ml_results_df.prob.values[cur_sort_ind]))
+    #
+    # cdf_x = pd.DataFrame(np.asarray(cdf_x).T, columns=sr.constants.PSA_KEYS)
+    # cdf_y = pd.DataFrame(np.asarray(cdf_y).T, columns=sr.constants.PSA_KEYS)
+    #
+    # qt_2, qt_16, qt_50, qt_84, qt_98 = sha.query_non_parametric_multi_cdf_invs(
+    #     np.asarray([0.02, 0.16, 0.5, 0.84, 0.98]), cdf_x.T.values, cdf_y.T.values
+    # )
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -225,23 +225,43 @@ def create_pSA_dist_plot(
 
     if show_ml:
         ## ML Mean
-        weighted_avg = einops.einsum(
-            ml_results_df.prob.values,
-            np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
-            "i, i j -> j",
-        )
-        weighted_std = np.sqrt(
-            einops.einsum(
+        if "prob" in ml_results_df:
+            weighted_avg = einops.einsum(
                 ml_results_df.prob.values,
-                (
-                    np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
-                    - weighted_avg
-                )
-                ** 2,
+                np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
                 "i, i j -> j",
             )
-            / np.sum(ml_results_df.prob.values)
-        )
+            weighted_std = np.sqrt(
+                einops.einsum(
+                    ml_results_df.prob.values,
+                    (
+                        np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
+                        - weighted_avg
+                    )
+                    ** 2,
+                    "i, i j -> j",
+                )
+                / np.sum(ml_results_df.prob.values)
+            )
+        else:
+            im_prob_cols = [f"{cur_im}_prob" for cur_im in sr.constants.PSA_KEYS]
+            weighted_avg = einops.einsum(
+                ml_results_df[im_prob_cols].values,
+                np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
+                "i j, i j -> j",
+            )
+            weighted_std = np.sqrt(
+                einops.einsum(
+                    ml_results_df[im_prob_cols].values,
+                    (
+                        np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
+                        - weighted_avg
+                    )
+                    ** 2,
+                    "i j, i j -> j",
+                )
+                / np.sum(ml_results_df[im_prob_cols].values)
+            )
 
         ax.semilogx(
             sr.constants.PERIODS,
@@ -305,13 +325,15 @@ def create_pSA_dist_plot(
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
 
-def _create_pot_sites_map(event: str,
-                           site_df: pd.DataFrame,
-                          int_sites: np.ndarray,
-                          obs_sites: np.ndarray,
-                          event_df: pd.DataFrame,
-                          site_int: str
-                          ):
+
+def _create_pot_sites_map(
+    event: str,
+    site_df: pd.DataFrame,
+    int_sites: np.ndarray,
+    obs_sites: np.ndarray,
+    event_df: pd.DataFrame,
+    site_int: str,
+):
     all_sites = np.unique(np.concatenate([int_sites, obs_sites]))
 
     fig = go.Figure(
@@ -375,7 +397,7 @@ def _create_scenario_map(
     sim_sites: np.ndarray,
     ml_sites: np.ndarray,
     event_df: pd.DataFrame,
-    site_int: str
+    site_int: str,
 ):
     all_sites = np.unique(np.concatenate([emp_sites, sim_sites, ml_sites]))
 
@@ -385,8 +407,9 @@ def _create_scenario_map(
     cim_only_sites = np.setdiff1d(cim_sites, ml_sites)
     ml_only_sites = np.setdiff1d(ml_sites, cim_sites)
     both_sites = np.intersect1d(cim_sites, ml_sites)
-    assert np.all(np.isin(np.concatenate((cim_only_sites, ml_only_sites, both_sites)), all_sites))
-
+    assert np.all(
+        np.isin(np.concatenate((cim_only_sites, ml_only_sites, both_sites)), all_sites)
+    )
 
     fig = go.Figure(
         data=[
@@ -451,7 +474,6 @@ def _create_scenario_map(
     return fig
 
 
-
 def run_ind_scenario(
     scenario_results: pd.DataFrame,
     sample_results: pd.DataFrame,
@@ -463,8 +485,6 @@ def run_ind_scenario(
     gen_gm_params: pd.DataFrame = None,
 ):
     event_df = st_utils.ml_get_event_df(ml_results_dir)
-
-
     col1, col2 = st.columns([1, 6])
 
     with col1:
@@ -553,12 +573,14 @@ def run_ind_scenario(
         fig = _create_pot_sites_map(
             cur_event,
             st_utils.ml_get_site_df(ml_results_dir),
-            scenario_results.loc[
-                scenario_results.event_id == cur_event].site_int.unique().astype(str),
-            sample_results.loc[
-                sample_results.event_id == cur_event].site_obs.unique().astype(str),
+            scenario_results.loc[scenario_results.event_id == cur_event]
+            .site_int.unique()
+            .astype(str),
+            sample_results.loc[sample_results.event_id == cur_event]
+            .site_obs.unique()
+            .astype(str),
             event_df,
-            cur_site
+            cur_site,
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -572,10 +594,9 @@ def run_ind_scenario(
             cur_sim_cim.get_obs_stations(cur_site),
             cur_sample_results.site_obs.unique().astype(str),
             event_df,
-            cur_site
+            cur_site,
         )
         st.plotly_chart(fig, use_container_width=True)
-
 
     # Plots
     create_pSA_dist_plot(

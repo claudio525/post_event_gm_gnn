@@ -13,6 +13,7 @@ class RankingMethod(Enum):
     sim_cMVN_emp_corr = 3
 
     ml_prob = 4
+    ml_prob_per_im = 5
 
 METHOD_RESULT_DIR_NAME_MAPPING = {
     RankingMethod.emp_cMVN: "empirical_cMVN",

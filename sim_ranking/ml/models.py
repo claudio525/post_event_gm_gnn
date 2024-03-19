@@ -65,6 +65,7 @@ class ProbIndModel(ProbModel):
         n_ims: int,
         n_im_features: int,
         is_sub_model: bool,
+        per_im_prob: bool
     ):
         super().__init__(
             n_scalar_inputs=n_scalar_inputs,
@@ -74,6 +75,7 @@ class ProbIndModel(ProbModel):
 
         self.fc_units = fc_units
         self.is_sub_model = is_sub_model
+        self.per_im_prob = per_im_prob
         self.input_size = n_ims * self.n_im_features + self.n_scalar_inputs
 
         self.fc_layers = nn.Sequential()
@@ -86,11 +88,12 @@ class ProbIndModel(ProbModel):
             self.fc_layers.append(nn.BatchNorm1d(self.fc_units[i]))
             self.fc_layers.append(nn.LeakyReLU())
 
-
         if self.is_sub_model:
             # If the model is a sub-model the last number in fc_units
             # is the number of outputs
             pass
+        elif per_im_prob:
+            self.fc_layers.append(nn.Linear(fc_units[-1], n_ims))
         else:
             self.fc_layers.append(nn.Linear(fc_units[-1], 1))
 
@@ -98,6 +101,8 @@ class ProbIndModel(ProbModel):
     def n_outputs(self):
         if self.is_sub_model:
             return self.fc_units[-1]
+        elif self.per_im_prob:
+            return self.n_ims
         return 1
 
     def forward(self, im_values: torch.Tensor, scalar_values: torch.Tensor):
@@ -119,6 +124,7 @@ class ProbIndModel(ProbModel):
             n_outs=self.n_outputs,
         )
 
+        # Apply sigmoid unless its a sub-model
         if not self.is_sub_model:
             X = custom_sigmoid(X.squeeze(), 0.5)
             pred = X / X.sum(axis=1, keepdims=True)
@@ -137,6 +143,7 @@ class ProbCombModel(ProbModel):
         n_scalar_inputs: int,
         n_ims: int,
         n_im_features: int,
+        per_im_prob: bool
     ):
         super().__init__(
             n_scalar_inputs=n_scalar_inputs,
@@ -144,18 +151,19 @@ class ProbCombModel(ProbModel):
             n_im_features=n_im_features,
         )
 
-
         self.ind_model = ProbIndModel(
             fc_units=ind_fc_units,
             n_scalar_inputs=n_scalar_inputs,
             n_ims=n_ims,
             n_im_features=n_im_features,
-            is_sub_model=True
+            is_sub_model=True,
+            per_im_prob=False
         )
 
         self.fc_comb_units = comb_fc_units
 
         self.n_inputs = self.ind_model.n_outputs
+        self.n_outputs = n_ims if per_im_prob else 1
 
         # Combined layers
         # self.fc_comb_layers = nn.Sequential()
@@ -177,7 +185,7 @@ class ProbCombModel(ProbModel):
             # self.fc_comb_layers.append(nn.ELU())
 
         # self.fc_comb_layers.append(nn.Linear(self.fc_comb_units[-1], self.n_rels))
-        self.fc_comb_layers.append(nn.Linear(self.fc_comb_units[-1], 1))
+        self.fc_comb_layers.append(nn.Linear(self.fc_comb_units[-1], self.n_outputs))
 
     def forward(self, im_values: torch.Tensor, scalar_values: torch.Tensor):
         X = self.ind_model(im_values, scalar_values)
@@ -185,7 +193,7 @@ class ProbCombModel(ProbModel):
         X = einops.rearrange(X, "batch rel feature -> (batch rel) feature")
         for cur_layer in self.fc_comb_layers:
             X = cur_layer(X)
-        X = einops.rearrange(X, "(batch rel) 1 -> batch rel", batch=im_values.shape[0], rel=im_values.shape[2])
+        X = einops.rearrange(X, "(batch rel) n_outs -> batch rel n_outs", batch=im_values.shape[0], rel=im_values.shape[2])
 
         X = custom_sigmoid(X.squeeze(), 0.5)
         pred = X / X.sum(axis=1, keepdims=True)

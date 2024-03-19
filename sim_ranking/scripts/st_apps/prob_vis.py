@@ -60,15 +60,16 @@ def run_general_tab(results_dir: Path):
 
     ### Scenario loss
     train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(results_dir)
-    train_scenario_loss = sr.ml.prob.compute_scenario_loss(train_scenario_results)
-    val_scenario_loss = sr.ml.prob.compute_scenario_loss(val_scenario_results)
+    if "prob" in train_scenario_results.columns:
+        train_scenario_loss = sr.ml.prob.compute_scenario_loss(train_scenario_results)
+        val_scenario_loss = sr.ml.prob.compute_scenario_loss(val_scenario_results)
 
-    st.markdown(
-        f"#### Mean train scenario loss: {train_scenario_loss.scenario_loss.mean():.4f}"
-    )
-    st.write(
-        f"#### Mean val scenario loss: {val_scenario_loss.scenario_loss.mean():.4f}"
-    )
+        st.markdown(
+            f"#### Mean train scenario loss: {train_scenario_loss.scenario_loss.mean():.4f}"
+        )
+        st.write(
+            f"#### Mean val scenario loss: {val_scenario_loss.scenario_loss.mean():.4f}"
+        )
 
     # Model visualization
     col_1, col_2 = st.columns(2)
@@ -332,9 +333,10 @@ def _scenario_viewer(
         (sample_results.event_id == event) & (sample_results.site_int == site_int)
     ]
 
-    st.markdown(
-        f"**Scenario loss: {sr.ml.prob.compute_scenario_loss(cur_scenario_df).scenario_loss.iloc[0]:.4f}**"
-    )
+    if "prob" in cur_scenario_df.columns:
+        st.markdown(
+            f"**Scenario loss: {sr.ml.prob.compute_scenario_loss(cur_scenario_df).scenario_loss.iloc[0]:.4f}**"
+        )
 
     assert np.all(site_int_sims.index == cur_scenario_df.index)
 
@@ -364,76 +366,77 @@ def _scenario_viewer(
         cur_scenario_df,
         site_int_sims,
         site_int_obs,
-        high_rels if len(high_rels) > 0 else None,
-        cur_gen_gm_params,
-        cur_syn_obs_gm_params,
-    )
-
-    col1, col2, col3 = st.columns([0.2, 0.6, 0.2])
-    with col1:
-        st.dataframe(
-            cur_scenario_df[["prob", "misfit_score"]]
-            .sort_values("prob", ascending=False)
-            .head(10)
-        )
-
-    with col2:
-        tmp_df = cur_sample_results[["site_obs", "rel_id", "prob"]].pivot(
-            columns="site_obs", index="rel_id", values="prob"
-        )
-        assert np.all(tmp_df.index == cur_scenario_df.index)
-        tmp_df["scenario_prop"] = cur_scenario_df["prob"]
-        tmp_df["misfit_score"] = cur_scenario_df["misfit_score"]
-        tmp_df = tmp_df.sort_values("scenario_prop", ascending=False)
-        st.dataframe(tmp_df)
-
-    with col3:
-        st.dataframe(
-            cur_scenario_df[["prob", "misfit_score"]]
-            .sort_values("misfit_score", ascending=True)
-            .head(10)
-        )
-
-    st.dataframe(
-        cur_sample_results.groupby("site_obs", observed=True)
-        .first()[["site_corr_weights", "s2s_distance", "angular_distance"]]
-        .sort_values("site_corr_weights", ascending=False)
-        .T
-    )
-
-    create_misfit_dist_plot(cur_scenario_df, tab_type)
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        ims = st.multiselect(
-            "IMs",
-            sr.constants.PSA_KEYS,
-            key=f"{tab_type}_ims",
-            default=[
-                "pSA_0.01",
-                "pSA_0.1",
-                "pSA_0.5",
-                "pSA_1.0",
-                "pSA_2.5",
-                "pSA_5.0",
-                "pSA_10.0",
-            ],
-        )
-    with col2:
-        n_bins = st.number_input("Number of Bins", 5, 100, 10, key=f"{tab_type}_n_bins")
-    with col3:
-        cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
-
-    create_dist_plot(
-        site_int_sims,
-        site_int_obs,
-        cur_scenario_df,
-        n_bins,
-        ims,
-        cdf,
+        high_rels=high_rels if len(high_rels) > 0 else None,
         gen_gm_params=cur_gen_gm_params,
         syn_obs_gm_params=cur_syn_obs_gm_params,
     )
+
+    if "prob" in cur_scenario_df.columns:
+        col1, col2, col3 = st.columns([0.2, 0.6, 0.2])
+        with col1:
+            st.dataframe(
+                cur_scenario_df[["prob", "misfit_score"]]
+                .sort_values("prob", ascending=False)
+                .head(10)
+            )
+
+        with col2:
+            tmp_df = cur_sample_results[["site_obs", "rel_id", "prob"]].pivot(
+                columns="site_obs", index="rel_id", values="prob"
+            )
+            assert np.all(tmp_df.index == cur_scenario_df.index)
+            tmp_df["scenario_prop"] = cur_scenario_df["prob"]
+            tmp_df["misfit_score"] = cur_scenario_df["misfit_score"]
+            tmp_df = tmp_df.sort_values("scenario_prop", ascending=False)
+            st.dataframe(tmp_df)
+
+        with col3:
+            st.dataframe(
+                cur_scenario_df[["prob", "misfit_score"]]
+                .sort_values("misfit_score", ascending=True)
+                .head(10)
+            )
+
+        st.dataframe(
+            cur_sample_results.groupby("site_obs", observed=True)
+            .first()[["site_corr_weights", "s2s_distance", "angular_distance"]]
+            .sort_values("site_corr_weights", ascending=False)
+            .T
+        )
+
+        create_misfit_dist_plot(cur_scenario_df, tab_type)
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            ims = st.multiselect(
+                "IMs",
+                sr.constants.PSA_KEYS,
+                key=f"{tab_type}_ims",
+                default=[
+                    "pSA_0.01",
+                    "pSA_0.1",
+                    "pSA_0.5",
+                    "pSA_1.0",
+                    "pSA_2.5",
+                    "pSA_5.0",
+                    "pSA_10.0",
+                ],
+            )
+        with col2:
+            n_bins = st.number_input("Number of Bins", 5, 100, 10, key=f"{tab_type}_n_bins")
+        with col3:
+            cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
+
+        create_dist_plot(
+            site_int_sims,
+            site_int_obs,
+            cur_scenario_df,
+            n_bins,
+            ims,
+            cdf,
+            gen_gm_params=cur_gen_gm_params,
+            syn_obs_gm_params=cur_syn_obs_gm_params,
+        )
 
 
 def create_misfit_dist_plot(results_df: pd.DataFrame, tab_type: str):
@@ -597,65 +600,83 @@ def _sample_viewer(
         else None
     )
 
-    st.text(f"Probabilities Standard Deviation: {cur_results_df.prob.std():.2f}")
+    if "prob" in cur_results_df.columns:
+        st.text(f"Probabilities Standard Deviation: {cur_results_df.prob.std():.2f}")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        show_gen_dist = st.checkbox("Show generation distribution", value=False, key=f"{tab_type}_show_gen")
+    with col2:
+        show_obs_dist = st.checkbox(
+            "Show synthetic observation distribution",
+            value=False,
+            key=f"{tab_type}_show_syn_obs",
+        )
+    with col3:
+        show_obs_site = st.checkbox("Show observation site", value=True, key=f"{tab_type}_show_obs")
 
     create_pSA_dist_plot(
         cur_results_df,
         site_int_sims,
         site_int_obs,
-        high_rels if len(high_rels) > 0 else None,
-        cur_gen_gm_params,
-        cur_syn_obs_gm_params,
+        high_rels=high_rels if len(high_rels) > 0 else None,
+        site_obs_obs=site_obs_obs if show_obs_site else None,
+        gen_gm_params=cur_gen_gm_params if show_gen_dist else None,
+        syn_obs_gm_params=cur_syn_obs_gm_params if show_obs_dist else None,
     )
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.dataframe(
-            cur_results_df[["prob", "misfit_score"]]
-            .sort_values("prob", ascending=False)
-            .head(10)
-        )
-    with col2:
-        st.dataframe(
-            cur_results_df[["prob", "misfit_score"]]
-            .sort_values("misfit_score", ascending=True)
-            .head(10)
+    if "prob" in cur_results_df.columns:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.dataframe(
+                cur_results_df[["prob", "misfit_score"]]
+                .sort_values("prob", ascending=False)
+                .head(10)
+            )
+        with col2:
+            st.dataframe(
+                cur_results_df[["prob", "misfit_score"]]
+                .sort_values("misfit_score", ascending=True)
+                .head(10)
+            )
+
+        create_misfit_dist_plot(cur_results_df, tab_type)
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            ims = st.multiselect(
+                "IMs",
+                sr.constants.PSA_KEYS,
+                key=f"{tab_type}_im",
+                default=[
+                    "pSA_0.01",
+                    "pSA_0.1",
+                    "pSA_0.5",
+                    "pSA_1.0",
+                    "pSA_2.5",
+                    "pSA_5.0",
+                    "pSA_10.0",
+                ],
+            )
+        with col2:
+            n_bins = st.slider("Number of Bins", 5, 50, 10, key=f"{tab_type}_n_bins")
+        with col3:
+            cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
+
+        create_dist_plot(
+            site_int_sims,
+            site_int_obs,
+            cur_results_df,
+            n_bins,
+            ims,
+            cdf,
+            site_obs_obs,
+            cur_gen_gm_params,
+            cur_syn_obs_gm_params,
         )
 
-    create_misfit_dist_plot(cur_results_df, tab_type)
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        ims = st.multiselect(
-            "IMs",
-            sr.constants.PSA_KEYS,
-            key=f"{tab_type}_im",
-            default=[
-                "pSA_0.01",
-                "pSA_0.1",
-                "pSA_0.5",
-                "pSA_1.0",
-                "pSA_2.5",
-                "pSA_5.0",
-                "pSA_10.0",
-            ],
-        )
-    with col2:
-        n_bins = st.slider("Number of Bins", 5, 50, 10, key=f"{tab_type}_n_bins")
-    with col3:
-        cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
-
-    create_dist_plot(
-        site_int_sims,
-        site_int_obs,
-        cur_results_df,
-        n_bins,
-        ims,
-        cdf,
-        site_obs_obs,
-        cur_gen_gm_params,
-        cur_syn_obs_gm_params,
-    )
+    with st.expander("Raw data"):
+        st.dataframe(cur_results_df)
 
 
 def create_pSA_dist_plot(
@@ -663,21 +684,22 @@ def create_pSA_dist_plot(
     site_int_sims: pd.DataFrame,
     site_int_obs: pd.DataFrame,
     high_rels: List[str] = None,
+    site_obs_obs: pd.DataFrame = None,
     gen_gm_params: pd.DataFrame = None,
     syn_obs_gm_params: pd.DataFrame = None,
 ):
-    cdf_x, cdf_y = [], []
-    for cur_im in sr.constants.PSA_KEYS:
-        cur_sort_ind = np.argsort(site_int_sims[cur_im].values)
-        cdf_x.append(site_int_sims[cur_im].values[cur_sort_ind])
-        cdf_y.append(np.cumsum(results_df.prob.values[cur_sort_ind]))
-
-    cdf_x = pd.DataFrame(np.asarray(cdf_x).T, columns=sr.constants.PSA_KEYS)
-    cdf_y = pd.DataFrame(np.asarray(cdf_y).T, columns=sr.constants.PSA_KEYS)
-
-    qt_2, qt_16, qt_50, qt_84, qt_98 = sha.query_non_parametric_multi_cdf_invs(
-        np.asarray([0.02, 0.16, 0.5, 0.84, 0.98]), cdf_x.T.values, cdf_y.T.values
-    )
+    # cdf_x, cdf_y = [], []
+    # for cur_im in sr.constants.PSA_KEYS:
+    #     cur_sort_ind = np.argsort(site_int_sims[cur_im].values)
+    #     cdf_x.append(site_int_sims[cur_im].values[cur_sort_ind])
+    #     cdf_y.append(np.cumsum(results_df.prob.values[cur_sort_ind]))
+    #
+    # cdf_x = pd.DataFrame(np.asarray(cdf_x).T, columns=sr.constants.PSA_KEYS)
+    # cdf_y = pd.DataFrame(np.asarray(cdf_y).T, columns=sr.constants.PSA_KEYS)
+    #
+    # qt_2, qt_16, qt_50, qt_84, qt_98 = sha.query_non_parametric_multi_cdf_invs(
+    #     np.asarray([0.02, 0.16, 0.5, 0.84, 0.98]), cdf_x.T.values, cdf_y.T.values
+    # )
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -713,77 +735,101 @@ def create_pSA_dist_plot(
             linewidth=1.0,
         )
 
-        if gen_gm_params is not None:
-            ax.semilogx(
-                sr.constants.PERIODS,
-                np.exp(gen_gm_params.loc[mean_cols].values.astype(float)),
-                label="Generation distribution",
-                c="k",
-                linewidth=1.0,
-            )
-            ax.semilogx(
-                sr.constants.PERIODS,
-                np.exp(
-                    gen_gm_params.loc[mean_cols].values.astype(float)
-                    + gen_gm_params.loc[std_cols].values.astype(float)
-                ),
-                c="k",
-                linestyle="--",
-                linewidth=1.0,
-            )
-            ax.semilogx(
-                sr.constants.PERIODS,
-                np.exp(
-                    gen_gm_params.loc[mean_cols].values.astype(float)
-                    - gen_gm_params.loc[std_cols].values.astype(float)
-                ),
-                c="k",
-                linestyle="--",
-                linewidth=1.0,
-            )
+    if gen_gm_params is not None:
+        ax.semilogx(
+            sr.constants.PERIODS,
+            np.exp(gen_gm_params.loc[mean_cols].values.astype(float)),
+            label="Generation distribution",
+            c="k",
+            linewidth=1.0,
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            np.exp(
+                gen_gm_params.loc[mean_cols].values.astype(float)
+                + gen_gm_params.loc[std_cols].values.astype(float)
+            ),
+            c="k",
+            linestyle="--",
+            linewidth=1.0,
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            np.exp(
+                gen_gm_params.loc[mean_cols].values.astype(float)
+                - gen_gm_params.loc[std_cols].values.astype(float)
+            ),
+            c="k",
+            linestyle="--",
+            linewidth=1.0,
+        )
 
-    # ax.semilogx(sr.constants.PERIODS, qt_50, label="Model - Median", c="blue")
+    if site_obs_obs is not None:
+        ax.semilogx(
+            sr.constants.PERIODS,
+            site_obs_obs.squeeze().loc[sr.constants.PSA_KEYS].values,
+            label="Observed - Observation Site",
+            c="magenta",
+            linewidth=1.0,
+        )
 
-    weighted_avg = einops.einsum(
-        results_df.prob.values,
-        np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
-        "i, i j -> j",
-    )
+    if "prob" in results_df.columns:
+        weighted_avg = einops.einsum(
+            results_df.prob.values,
+            np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
+            "i, i j -> j",
+        )
+        weighted_std = np.sqrt(
+            einops.einsum(
+                results_df.prob.values,
+                (
+                        np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
+                        - weighted_avg
+                )
+                ** 2,
+                "i, i j -> j",
+            )
+            / np.sum(results_df.prob.values)
+        )
+    else:
+        im_prob_cols = [f"{cur_im}_prob" for cur_im in sr.constants.PSA_KEYS]
+        weighted_avg = einops.einsum(
+            results_df[im_prob_cols].values,
+            np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
+            "i j, i j -> j",
+        )
+        weighted_std = np.sqrt(
+            einops.einsum(
+                results_df[im_prob_cols].values,
+                (
+                        np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
+                        - weighted_avg
+                )
+                ** 2,
+                "i j, i j -> j",
+            )
+            / np.sum(results_df[im_prob_cols].values)
+        )
+
     ax.semilogx(
         sr.constants.PERIODS,
         np.exp(weighted_avg),
-        label="Model - Mean",
-        c="darkblue",
+        label="ML - Mean",
+        c="blue",
     )
-
-    # plt.fill_between(
-    #     sr.constants.PERIODS,
-    #     qt_2,
-    #     qt_98,
-    #     alpha=0.4,
-    #     label="Model - 2/98th",
-    #     color="lightgreen",
-    # )
-    # plt.semilogx(
-    #     sr.constants.PERIODS, qt_2, c="lightgreen", linestyle="--", linewidth=1.0
-    # )
-    # plt.semilogx(
-    #     sr.constants.PERIODS, qt_98, c="lightgreen", linestyle="--", linewidth=1.0
-    # )
-
     ax.fill_between(
         sr.constants.PERIODS,
-        qt_16,
-        qt_84,
+        np.exp(weighted_avg + weighted_std),
+        np.exp(weighted_avg - weighted_std),
         alpha=0.4,
-        label="Model - 16/84th",
+        label="ML +/- 1 Std",
         color="lightblue",
     )
     ax.semilogx(
-        sr.constants.PERIODS, qt_16, c="lightblue", linestyle="--", linewidth=1.0
+        sr.constants.PERIODS, np.exp(weighted_avg + weighted_std), c="lightblue"
     )
     ax.semilogx(
-        sr.constants.PERIODS, qt_84, c="lightblue", linestyle="--", linewidth=1.0
+        sr.constants.PERIODS, np.exp(weighted_avg - weighted_std), c="lightblue"
     )
 
     if high_rels is not None:
@@ -1235,9 +1281,13 @@ def loss_dist(results_df: pd.DataFrame, title: str = "Loss Distribution"):
 
 
 def run_agg_single(cur_results_dir: Path):
+
     train_sample_results, val_sample_results = st_utils.ml_load_sample_results(
         cur_results_dir
     )
+
+    if "prob" not in train_sample_results.columns:
+        return
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
@@ -1289,6 +1339,9 @@ def run_agg_scenario(cur_results_dir: Path):
     train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(
         cur_results_dir
     )
+
+    if "prob" not in train_scenario_results.columns:
+        return
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
@@ -1343,7 +1396,7 @@ def main(
     )
     cur_results_dir = results_dir / result_id
 
-    if st_utils.ml_get_metadata(cur_results_dir)["method_type"] != 4:
+    if st_utils.ml_get_metadata(cur_results_dir)["method_type"] not in [4, 5]:
         st.error("This app is only for the results of the ML method type")
         return
 
