@@ -78,7 +78,7 @@ def train_model(
     val_events = np.random.choice(events, 75, replace=False)
     train_events = np.setdiff1d(events, val_events)
 
-    train_dataset, val_dataset, scalar_features, data_metadata = prob.data_preb(
+    train_dataset, val_dataset, scalar_features, data_metadata = prob.data_prep(
         event_sites,
         train_events,
         val_events,

@@ -142,7 +142,7 @@ class HyperParamsConfig:
         }
 
 
-def data_preb(
+def data_prep(
     event_sites: Dict[str, np.ndarray],
     train_events: np.ndarray,
     val_events: np.ndarray,
@@ -155,6 +155,7 @@ def data_preb(
     sim_corr_dir: Path = None,
 ):
     # Scalar features
+    EVENT_FEATURE_KEYS = ["mag"]
     SITE_FEATURE_KEYS = ["vs30", "z1.0", "z2.5", "tsite"]
     SITE_TO_SITE_FEATURE_KEYS = ["dist"]
     EVENT_SITE_FEATURE_KEYS = ["r_rup"]
@@ -191,7 +192,7 @@ def data_preb(
     # Run pre-processing for the site features
     # TODO: This should be updated such that the normalisation
     # only happens on training sites, not all sites
-    print(f"Pre-processing site features")
+    print(f"Pre-processing site & event features")
     site_features_df, site_feature_stats = features.preprocess_site_features(
         station_df, SITE_FEATURE_KEYS
     )
@@ -212,6 +213,8 @@ def data_preb(
         run_config.max_dist,
     )
     scalar_features = ml_data.ScalarFeatures(
+        event_df,
+        EVENT_FEATURE_KEYS,
         site_features_df,
         SITE_FEATURE_KEYS,
         site_to_site_features,
@@ -378,7 +381,7 @@ class ProbDataset(Dataset):
 
             # Compute (across IMs) misfit score
             if hp_config.misfit_fn == "mse":
-                cur_misfit_score = np.sum(self.im_weights * cur_residual ** 2, axis=2)
+                cur_misfit_score = np.sum(self.im_weights * np.abs(cur_residual) ** 2, axis=2)
             elif hp_config.misfit_fn == "mae":
                 cur_misfit_score = np.sum(
                     self.im_weights * np.abs(cur_residual), axis=2
@@ -389,7 +392,7 @@ class ProbDataset(Dataset):
 
             # Compute misfit score for each IM
             if hp_config.misfit_fn == "mse":
-                cur_im_misfit_score = cur_residual ** 2
+                cur_im_misfit_score = np.abs(cur_residual) ** 2
             elif hp_config.misfit_fn == "mae":
                 cur_im_misfit_score = np.abs(cur_residual)
             else:
@@ -537,18 +540,20 @@ class ProbDataset(Dataset):
         im_site_corr_weights = self.site_corrs[batch_ind, :]
         site_corr_weights = self.site_corr_weights[batch_ind]
 
+        rel_shuffle_ind = np.random.permutation(self.n_rels)
+
         return (
             batch_ind,
-            site_int_norm_sim_ims,
-            site_obs_norm_sim_ims,
+            site_int_norm_sim_ims[:, rel_shuffle_ind, :],
+            site_obs_norm_sim_ims[:, rel_shuffle_ind, :],
             site_obs_norm_obs_ims,
-            site_int_sim_ims,
+            site_int_sim_ims[:, rel_shuffle_ind, :],
             site_obs_sim_ims,
             site_obs_obs_ims,
             scalar_features,
-            obs_site_misfit_score,
-            misfit_score,
-            im_misfit_score,
+            obs_site_misfit_score[:, rel_shuffle_ind],
+            misfit_score[:, rel_shuffle_ind],
+            im_misfit_score[:, rel_shuffle_ind, :],
             site_corr_weights,
             im_site_corr_weights,
         )
@@ -599,61 +604,78 @@ def create_model(
     scalar_features: ml_data.ScalarFeatures,
     run_config: RunParamsConfig,
 ):
-    n_scalar_features = (
-        scalar_features.n_scalar_features + 1
-        if hp_config.use_obs_site_misfit_score
-        else scalar_features.n_scalar_features
+    n_inputs = (run_config.n_rels * hp_config.n_im_features) + scalar_features.n_scalar_features
+
+    prob_model = models.ProbIMModel(
+        n_inputs, hp_config.ind_fc_units, run_config.n_rels
     )
 
-    if hp_config.combined_model:
-        prob_model = models.ProbCombModel(
-            hp_config.ind_fc_units,
-            hp_config.comb_fc_units,
-            n_scalar_features,
-            len(run_config.ims),
-            hp_config.n_im_features,
-            run_config.per_im_prob,
-        )
-
-        print(f"Model summary")
-        summary(
-            prob_model,
-            input_size=[
-                (
-                    hp_config.batch_size,
-                    hp_config.n_im_features,
-                    run_config.n_rels,
-                    len(run_config.ims),
-                ),
-                (hp_config.batch_size, run_config.n_rels, n_scalar_features),
-            ],
-        )
-
-    else:
-        prob_model = models.ProbIndModel(
-            hp_config.ind_fc_units,
-            n_scalar_features,
-            len(run_config.ims),
-            hp_config.n_im_features,
-            is_sub_model=False,
-            per_im_prob=run_config.per_im_prob,
-        )
-
-        print(f"Model summary")
-        summary(
-            prob_model,
-            input_size=[
-                (
-                    hp_config.batch_size,
-                    hp_config.n_im_features,
-                    run_config.n_rels,
-                    len(run_config.ims),
-                ),
-                (hp_config.batch_size, run_config.n_rels, n_scalar_features),
-            ],
-        )
+    print(f"Model summary")
+    summary(
+        prob_model,
+        input_size=[
+            (hp_config.batch_size, n_inputs),
+        ],
+    )
 
     return prob_model
+
+
+    # n_scalar_features = (
+    #     scalar_features.n_scalar_features + 1
+    #     if hp_config.use_obs_site_misfit_score
+    #     else scalar_features.n_scalar_features
+    # )
+    #
+    # if hp_config.combined_model:
+    #     prob_model = models.ProbCombModel(
+    #         hp_config.ind_fc_units,
+    #         hp_config.comb_fc_units,
+    #         n_scalar_features,
+    #         len(run_config.ims),
+    #         hp_config.n_im_features,
+    #         run_config.per_im_prob,
+    #     )
+    #
+    #     print(f"Model summary")
+    #     summary(
+    #         prob_model,
+    #         input_size=[
+    #             (
+    #                 hp_config.batch_size,
+    #                 hp_config.n_im_features,
+    #                 run_config.n_rels,
+    #                 len(run_config.ims),
+    #             ),
+    #             (hp_config.batch_size, run_config.n_rels, n_scalar_features),
+    #         ],
+    #     )
+    #
+    # else:
+    #     prob_model = models.ProbIndModel(
+    #         hp_config.ind_fc_units,
+    #         n_scalar_features,
+    #         len(run_config.ims),
+    #         hp_config.n_im_features,
+    #         is_sub_model=False,
+    #         per_im_prob=run_config.per_im_prob,
+    #     )
+    #
+    #     print(f"Model summary")
+    #     summary(
+    #         prob_model,
+    #         input_size=[
+    #             (
+    #                 hp_config.batch_size,
+    #                 hp_config.n_im_features,
+    #                 run_config.n_rels,
+    #                 len(run_config.ims),
+    #             ),
+    #             (hp_config.batch_size, run_config.n_rels, n_scalar_features),
+    #         ],
+    #     )
+    #
+    # return prob_model
 
 
 def train(
@@ -909,8 +931,14 @@ def get_prediction(
         run_config.device, dtype=torch.float32, non_blocking=True
     )
 
-    return prob_model(im_tensor, scalar_features)
+    ## TMP
+    X_im = einops.rearrange(im_tensor, "batch imf rel im -> (batch im) (rel imf)")
+    X_ss = einops.repeat(scalar_features[:, 0, :], "batch ss -> (batch im) ss", im=len(run_config.ims))
+    X = torch.cat([X_im, X_ss], dim=1)
 
+    pred = prob_model(X)
+    pred = einops.rearrange(pred, "(batch im) rel -> batch rel im", im=len(run_config.ims))
+    return pred
 
 def get_dataset_predictions(
     dataset: ProbDataset,
@@ -1172,21 +1200,17 @@ def post_processing(
     mlt.utils.write_to_yaml(metadata, cur_out_dir / "meta.yaml")
 
     # Create model visualisation
-    n_scalar_features = (
-        scalar_features.n_scalar_features + 1
-        if hp_config.use_obs_site_misfit_score
-        else scalar_features.n_scalar_features
-    )
+    # n_scalar_features = (
+    #     scalar_features.n_scalar_features + 1
+    #     if hp_config.use_obs_site_misfit_score
+    #     else scalar_features.n_scalar_features
+    # )
+
+    n_inputs = (run_config.n_rels * hp_config.n_im_features) + scalar_features.n_scalar_features
     draw_graph(
         prob_model,
         input_size=[
-            (
-                hp_config.batch_size,
-                hp_config.n_im_features,
-                run_config.n_rels,
-                len(run_config.ims),
-            ),
-            (hp_config.batch_size, run_config.n_rels, n_scalar_features),
+            (hp_config.batch_size, n_inputs),
         ],
         expand_nested=True,
         filename="prob_model_vis",

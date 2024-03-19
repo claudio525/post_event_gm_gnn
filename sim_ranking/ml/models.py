@@ -134,6 +134,33 @@ class ProbIndModel(ProbModel):
         return pred
 
 
+class ProbIMModel(nn.Module):
+
+    def __init__(self, n_inputs: int, units: Sequence[int], n_rels: int):
+        super().__init__()
+
+        self.n_inputs = n_inputs
+        self.n_rels = n_rels
+
+        self.fc_layers = nn.Sequential()
+        for i in range(len(units)):
+            if i == 0:
+                self.fc_layers.append(nn.Linear(self.n_inputs, units[i]))
+            else:
+                self.fc_layers.append(nn.Linear(units[i - 1], units[i]))
+
+            self.fc_layers.append(nn.BatchNorm1d(units[i]))
+            self.fc_layers.append(nn.LeakyReLU())
+
+        self.fc_layers.append(nn.Linear(units[-1], self.n_rels))
+        self.fc_layers.append(nn.Softmax(dim=1))
+
+    def forward(self, X: torch.Tensor):
+        X = self.fc_layers(X)
+        return X
+
+
+
 class ProbCombModel(ProbModel):
 
     def __init__(
