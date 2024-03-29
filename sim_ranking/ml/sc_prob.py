@@ -1,0 +1,807 @@
+from pathlib import Path
+from typing import List, Dict
+from dataclasses import dataclass
+
+import einops
+import numpy as np
+import pandas as pd
+import torch
+from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
+from torchinfo import summary
+
+import ml_tools as mlt
+import spatial_hazard as sh
+
+from . import data as ml_data
+from . import features
+from . import models
+from . import prob
+from ..db import DB
+from .. import constants
+
+
+@dataclass
+class HyperParamsConfig:
+    n_epochs: int
+    batch_size: int
+    l2_reg: float
+    lr: float
+
+    misfit_fn: str
+
+    fc_units: List[int]
+
+    use_im_sim_site_obs: bool
+    use_im_sim_site_int: bool
+    use_im_obs_site_obs: bool
+
+    use_res_site_obs: bool
+    use_res_sim_site_obs_sim_site_int: bool
+    use_res_obs_site_obs_sim_site_int: bool
+
+    def __post_init__(self):
+        self.n_im_features = sum(
+            [
+                self.use_im_sim_site_obs,
+                self.use_im_sim_site_int,
+                self.use_im_obs_site_obs,
+                self.use_res_site_obs,
+                self.use_res_sim_site_obs_sim_site_int,
+                self.use_res_obs_site_obs_sim_site_int,
+            ]
+        )
+
+    @classmethod
+    def from_yaml(cls, ffp: Path, n_epochs: int):
+        params = mlt.utils.load_yaml(ffp)
+
+        return cls(
+            n_epochs,
+            params["batch_size"],
+            params["l2_reg"],
+            params["lr"],
+            params["misfit_fn"],
+            params["fc_units"],
+            params["im_sim_site_obs"],
+            params["im_sim_site_int"],
+            params["im_obs_site_obs"],
+            params["res_site_obs"],
+            params["res_sim_site_obs_sim_site_int"],
+            params["res_obs_site_obs_sim_site_int"],
+        )
+
+    def to_dict(self):
+        return {
+            "n_epochs": self.n_epochs,
+            "batch_size": self.batch_size,
+            "l2_reg": self.l2_reg,
+            "lr": self.lr,
+            "misfit_fn": self.misfit_fn,
+            "fc_units": self.fc_units,
+            "n_im_features": self.n_im_features,
+            "im_sim_site_obs": self.use_im_sim_site_obs,
+            "im_sim_site_int": self.use_im_sim_site_int,
+            "im_obs_site_obs": self.use_im_obs_site_obs,
+            "res_site_obs": self.use_res_site_obs,
+            "res_sim_site_obs_sim_site_int": self.use_res_sim_site_obs_sim_site_int,
+            "res_obs_site_obs_sim_site_int": self.use_res_obs_site_obs_sim_site_int,
+        }
+
+
+def data_prep(
+    event_sites: Dict[str, np.ndarray],
+    train_events: np.ndarray,
+    val_events: np.ndarray,
+    train_sites: np.ndarray,
+    val_int_sites: np.ndarray,
+    events: np.ndarray,
+    run_config: prob.RunParamsConfig,
+    hp_config: HyperParamsConfig,
+    db: DB,
+    corr_dir: Path,
+):
+    # Scalar features
+    EVENT_FEATURE_KEYS = ["mag"]
+    SITE_FEATURE_KEYS = ["vs30", "z1.0", "z2.5", "tsite"]
+    SITE_TO_SITE_FEATURE_KEYS = ["dist"]
+    EVENT_SITE_FEATURE_KEYS = ["r_rup"]
+    EVENT_SITE_TO_SITE_FEATURE_KEYS = ["angular_dist"]
+
+    event_df = db.get_event_df()
+    record_df = db.get_record_df()
+
+    print(f"Computing distance matrix")
+    station_df = db.get_site_df()
+    all_sites = db.get_avail_sites()
+    dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, station_df)
+
+    ### Scalar Features
+    # Run pre-processing for the site features
+    # TODO: This should be updated such that the normalisation
+    # only happens on training sites, not all sites
+    print(f"Pre-processing site & event features")
+    site_features_df, site_feature_stats = features.preprocess_site_features(
+        station_df, SITE_FEATURE_KEYS
+    )
+
+    # Compute the site-to-site features
+    print(f"Computing scalar features")
+    (
+        site_to_site_features,
+        event_site_features,
+        event_site_to_site_features,
+    ) = features.compute_scalar_features(
+        events,
+        event_sites,
+        event_df,
+        station_df,
+        record_df,
+        dist_matrix,
+        run_config.max_dist,
+    )
+    scalar_features = ml_data.ScalarFeatures(
+        event_df,
+        EVENT_FEATURE_KEYS,
+        site_features_df,
+        SITE_FEATURE_KEYS,
+        site_to_site_features,
+        SITE_TO_SITE_FEATURE_KEYS,
+        event_site_features,
+        EVENT_SITE_FEATURE_KEYS,
+        event_site_to_site_features,
+        EVENT_SITE_TO_SITE_FEATURE_KEYS,
+    )
+
+    # Compute mean and standard deviation for each period
+    # for normalisation (only training events)
+    obs_data = db.get_obs_df()
+    ims_mean = np.mean(np.log(obs_data.loc[:, run_config.ims]), axis=0)
+    ims_std = np.std(np.log(obs_data.loc[:, run_config.ims]), axis=0)
+
+    # Get the training and validation dataset site combinations
+    print(f"Creating site combinations")
+    train_site_combs, train_event_sites = ml_data.compute_site_combinations(
+        event_sites,
+        train_events,
+        dist_matrix,
+        train_sites,
+        train_sites,
+        max_dist=run_config.max_dist,
+    )
+    val_site_combs, val_event_sites = ml_data.compute_site_combinations(
+        event_sites,
+        val_events,
+        dist_matrix,
+        train_sites,
+        val_int_sites,
+        max_dist=run_config.max_dist,
+    )
+
+    # Create the datasets
+    print(f"Creating datasets")
+    train_dataset = SCProbDataset(
+        train_event_sites,
+        train_site_combs,
+        db,
+        run_config,
+        scalar_features,
+        ims_mean,
+        ims_std,
+        hp_config,
+        corr_dir,
+    )
+
+    val_dataset = SCProbDataset(
+        val_event_sites,
+        val_site_combs,
+        db,
+        run_config,
+        scalar_features,
+        ims_mean,
+        ims_std,
+        hp_config,
+        corr_dir,
+    )
+
+    metadata = {
+        "train_sites": train_sites.tolist(),
+        "val_int_sites": val_int_sites.tolist(),
+        "train_events": train_events.tolist(),
+        "val_events": val_events.tolist(),
+        "n_train_samples": len(train_dataset),
+        "n_val_samples": len(val_dataset),
+        "max_dist": run_config.max_dist,
+        "n_rels": run_config.n_rels,
+        "features": {
+            "event_features": scalar_features.event_feature_keys,
+            "site_features": scalar_features.site_feature_keys,
+            "site_to_site_features": scalar_features.site_to_site_feature_keys,
+            "event_site_features": scalar_features.event_site_feature_keys,
+            "event_site_to_site_features": scalar_features.event_site_to_site_feature_keys,
+            "site_feature_stats": site_feature_stats.to_dict(),
+            "ims_mean": ims_mean.to_dict(),
+            "ims_std": ims_std.to_dict(),
+            "n_scalar_features": int(scalar_features.n_scalar_features),
+        },
+    }
+
+    print(f"Number of training samples: {len(train_dataset)}")
+    print(f"Number of validation samples: {len(val_dataset)}")
+
+    return train_dataset, val_dataset, scalar_features, metadata
+
+    ## Sanity checking
+    # sim_df = db.get_sim_df(log=True)
+    # obs_df = db.get_obs_df(log=True)
+    # (
+    #     batch_ind,
+    #     scenario_ids,
+    #     record_scenario_ids,
+    #     _,
+    #     __,
+    #     __,
+    #     site_int_sim,
+    #     site_obs_sim,
+    #     site_obs_obs,
+    #     scalar_features,
+    #     im_misfit,
+    #     im_site_corrs,
+    # ) = train_dataset.get_batch(np.arange(len(train_dataset), dtype=int))
+    #
+    # events, record_events, site_int, site_obs, rels, residuals = train_dataset.get_metadata(batch_ind)
+    # for ix, (cur_event, cur_site_int, cur_site_obs) in enumerate(tqdm(zip(record_events, site_int, site_obs))):
+    #     if ix % 1000 == 0:
+    #         print(f"Checking {ix} of {len(record_events)}")
+    #     cur_int_sims = sim_df.loc[
+    #         (sim_df.event_id == cur_event) & (sim_df.site_id == cur_site_int)]
+    #     cur_int_sims = cur_int_sims.set_index("rel_id")[constants.PSA_KEYS]
+    #     assert np.allclose(site_int_sim[ix, :, :], cur_int_sims.loc[rels[0]].values)
+    #
+    #     cur_obs_sims = sim_df.loc[
+    #         (sim_df.event_id == cur_event) & (sim_df.site_id == cur_site_obs)]
+    #     cur_obs_sims = cur_obs_sims.set_index("rel_id")[constants.PSA_KEYS]
+    #     assert np.allclose(site_obs_sim[ix, :, :], cur_obs_sims.loc[rels[0]].values)
+    #
+    #     cur_site_obs_obs = obs_df.loc[(obs_data.event_id == cur_event) & (obs_data.site_id == cur_site_obs), constants.PSA_KEYS].values
+    #     assert np.allclose(site_obs_obs[ix, :], cur_site_obs_obs)
+
+
+class SCProbDataset(Dataset):
+    def __init__(
+        self,
+        event_sites: Dict[str, np.ndarray],
+        event_site_combs: Dict[str, np.ndarray],
+        db: DB,
+        run_config: prob.RunParamsConfig,
+        scalar_features: ml_data.ScalarFeatures,
+        ims_mean: np.ndarray,
+        ims_std: np.ndarray,
+        hp_config: HyperParamsConfig,
+        corr_dir: Path,
+    ):
+        self.db = db
+        self.event_sites = event_sites
+        self.event_site_combs = event_site_combs
+
+        self.events = np.asarray(list(event_sites.keys()))
+
+        self.ims = np.asarray(run_config.ims)
+        self.im_weights = run_config.im_weights
+
+        self.n_rels = run_config.n_rels
+
+        self.ims_mean = ims_mean
+        self.ims_std = ims_std
+
+        self.scalar_features = scalar_features
+
+        self.n_events = len(self.event_sites)
+
+        # Create the feature tensor
+        self.scalar_features_values = ml_data.create_scalar_feature_tensor(
+            self.events, self.event_sites, self.scalar_features, self.event_site_combs
+        )
+
+        self.event_scenario_ids = {}
+        self.event_rels, self.scenario_ids = {}, []
+        self.n_sites_scenario, self.n_sites_event = [], []
+        self.norm_obs_ims, self.norm_sim_ims = [], []
+        self.obs_ims, self.sim_ims = [], []
+        self.residual, self.im_site_corrs = [], []
+        self.n_scenarios_event = []
+        self.im_misfit_score = []
+        for ix, (cur_event, cur_sites) in enumerate(
+            tqdm(self.event_sites.items(), desc="Processsing events")
+        ):
+            # Get the simulation data
+            cur_sim_df = db.get_sim_data(cur_event, cur_sites)
+
+            # Number of sites
+            cur_n_sites = cur_sites.size
+            self.n_sites_event.append(cur_n_sites)
+
+            # Select realisations
+            cur_avail_rels = np.unique(cur_sim_df.rel_id.values.astype(str))
+            assert self.n_rels <= cur_avail_rels.size
+            cur_rels = self.event_rels[cur_event] = np.sort(
+                np.random.choice(
+                    cur_avail_rels,
+                    self.n_rels,
+                    replace=False,
+                )
+            )
+
+            # Number of scenarios
+            cur_n_scenarios = np.unique(self.event_site_combs[cur_event][:, 0]).size
+            self.n_scenarios_event.append(cur_n_scenarios)
+
+            cur_ids = ix * 100 + np.arange(cur_n_scenarios)
+            self.event_scenario_ids[cur_event] = cur_ids
+            self.scenario_ids.append(cur_ids)
+
+            # Number of sites per scenario
+            assert np.all(np.diff(self.event_site_combs[cur_event][:, 0]) >= 0)
+            cur_n_sites_scenario = np.unique(
+                self.event_site_combs[cur_event][:, 0], return_counts=True
+            )[1]
+            self.n_sites_scenario.append(cur_n_sites_scenario)
+
+            ## Observation IMs
+            cur_obs_data = db.get_obs_data(cur_event, cur_sites)
+            cur_obs_data = np.log(cur_obs_data.loc[cur_sites, self.ims]).values
+            self.obs_ims.append(cur_obs_data)
+
+            ## Simulation IMs
+            # Sort, sanity check and convert IMs to log-space
+            cur_sim_df = cur_sim_df.loc[
+                mlt.array_utils.pandas_isin(cur_sim_df.rel_id, cur_rels)
+            ].sort_values(["rel_id", "site_id"])
+            assert np.all(cur_sim_df.iloc[:cur_n_sites]["site_id"].values == cur_sites)
+            cur_sim_df.loc[:, self.ims] = np.log(cur_sim_df.loc[:, self.ims])
+
+            # Rearrange to (n_records, n_rels, n_ims)
+            cur_sim_data = einops.rearrange(
+                cur_sim_df.loc[:, self.ims].values,
+                "(rel rec) im -> rec rel im",
+                rel=run_config.n_rels,
+            )
+            self.sim_ims.append(cur_sim_data)
+
+            # Residual
+            cur_residual = cur_obs_data[:, None, :] - cur_sim_data
+            self.residual.append(cur_residual)
+
+            # Compute misfit score for each IM
+            if hp_config.misfit_fn == "mse":
+                cur_im_misfit_score = np.abs(cur_residual) ** 2
+            elif hp_config.misfit_fn == "mae":
+                cur_im_misfit_score = np.abs(cur_residual)
+            else:
+                raise ValueError(f"Unknown misfit function: {hp_config.misfit_fn}")
+            self.im_misfit_score.append(cur_im_misfit_score)
+
+            # Normalise & Append
+            cur_obs_data = (
+                cur_obs_data - self.ims_mean[self.ims].values
+            ) / self.ims_std[self.ims].values
+            self.norm_obs_ims.append(cur_obs_data)
+            cur_sim_data = (
+                cur_sim_data - self.ims_mean[self.ims].values
+            ) / self.ims_std[self.ims].values
+            self.norm_sim_ims.append(cur_sim_data)
+
+            # Get the (absolute) spatial correlations
+            # Stored per site-combination
+            cur_site_combs = self.event_site_combs[cur_event]
+            cur_corrs_values = np.ones((cur_site_combs.shape[0], len(self.ims)))
+            cur_corrs = pd.read_pickle(corr_dir / f"{cur_event}.pickle")
+            for im_ix, cur_im in enumerate(self.ims):
+                cur_corr_df = cur_corrs.get_im_corrs(cur_im).loc[cur_sites, cur_sites]
+                cur_corrs_values[:, im_ix] = np.abs(
+                    cur_corr_df.values[cur_site_combs[:, 0], cur_site_combs[:, 1]]
+                )
+
+            self.im_site_corrs.append(cur_corrs_values)
+
+        self.n_scenarios_event = np.asarray(self.n_scenarios_event)
+        self.cum_n_scenarios_event = np.cumsum(self.n_scenarios_event)
+
+        self.n_sites_event = np.asarray(self.n_sites_event)
+        self.cum_n_sites_event = np.cumsum(self.n_sites_event)
+
+        self.n_sites_scenario = np.concatenate(self.n_sites_scenario)
+        self.cum_n_sites_scenario = np.cumsum(self.n_sites_scenario)
+
+        self.norm_sim_ims = np.concatenate(self.norm_sim_ims, axis=0)
+        self.norm_obs_ims = np.concatenate(self.norm_obs_ims, axis=0)
+        self.sim_ims = np.concatenate(self.sim_ims, axis=0)
+        self.obs_ims = np.concatenate(self.obs_ims, axis=0)
+        self.residual = np.concatenate(self.residual, axis=0)
+        self.im_misfit_score = np.concatenate(self.im_misfit_score, axis=0)
+        self.im_site_corrs = np.concatenate(self.im_site_corrs, axis=0)
+
+        self.scenario_ids = np.concatenate(self.scenario_ids)
+        self.record_scenario_ids = np.repeat(self.scenario_ids, self.n_sites_scenario)
+
+        self.record_events = np.repeat(
+            np.repeat(self.events, self.n_scenarios_event), self.n_sites_scenario
+        )
+
+        # Convert all site-combination to a dataframe for fast indexing
+        site_combs_df, sim_ims_df = [], []
+        site_combs_ix, sim_ims_ix = 0, 0
+        for cur_event in self.events:
+
+            ### TODO: Give scenario id
+            # Site Combinations
+            cur_site_comb_df = pd.DataFrame(
+                self.event_site_combs[cur_event], columns=["site_int", "site_obs"]
+            )
+            cur_site_comb_df["event"] = cur_event
+            cur_site_comb_df["ix"] = np.arange(
+                site_combs_ix, site_combs_ix + cur_site_comb_df.shape[0]
+            )
+
+            cur_site_comb_df["scenario_id"] = np.repeat(
+                self.event_scenario_ids[cur_event],
+                np.unique(self.event_site_combs[cur_event][:, 0], return_counts=True)[
+                    1
+                ],
+            )
+
+            site_combs_ix += cur_site_comb_df.shape[0]
+            site_combs_df.append(cur_site_comb_df)
+
+        self.site_combs_df = pd.concat(site_combs_df)
+        self.site_combs_df = self.site_combs_df.set_index("ix")
+        self.site_combs = self.site_combs_df[["site_int", "site_obs"]].values
+
+        self.sites = np.concatenate(
+            [self.event_sites[cur_event] for cur_event in self.events]
+        )
+        self.rels = np.stack(
+            [self.event_rels[cur_event] for cur_event in self.events], axis=0
+        )
+
+    def get_indices(self, batch_ind: np.ndarray):
+        # Have to it this way, as some events may not have samples
+        event_ind = np.argmax(
+            batch_ind - self.cum_n_scenarios_event[:, None] < 0, axis=0
+        )
+        scenario_ind = np.where(
+            event_ind > 0,
+            batch_ind - self.cum_n_scenarios_event[event_ind - 1],
+            batch_ind,
+        )
+
+        n_records = self.n_sites_scenario[batch_ind].sum()
+        site_int_ind = np.full(n_records, fill_value=-1, dtype=int)
+        site_obs_ind = np.full(n_records, fill_value=-1, dtype=int)
+        record_ind = np.full(n_records, fill_value=-1, dtype=int)
+        i_counter = 0
+        for i in range(len(batch_ind)):
+            cur_b_ix, cur_ev_ix = batch_ind[i], event_ind[i]
+            if cur_b_ix == 0:
+                cur_record_ind = np.arange(0, self.cum_n_sites_scenario[cur_b_ix])
+            else:
+                cur_record_ind = np.arange(
+                    self.cum_n_sites_scenario[cur_b_ix - 1],
+                    self.cum_n_sites_scenario[cur_b_ix],
+                )
+
+            if cur_ev_ix == 0:
+                cur_site_int_ind = self.site_combs[cur_record_ind, 0]
+                cur_site_obs_ind = self.site_combs[cur_record_ind, 1]
+            else:
+                cur_site_int_ind = (
+                    self.cum_n_sites_event[cur_ev_ix - 1]
+                    + self.site_combs[cur_record_ind, 0]
+                )
+                cur_site_obs_ind = (
+                    self.cum_n_sites_event[cur_ev_ix - 1]
+                    + self.site_combs[cur_record_ind, 1]
+                )
+
+            record_ind[i_counter : i_counter + cur_record_ind.size] = cur_record_ind
+
+            site_int_ind[i_counter : i_counter + cur_record_ind.size] = cur_site_int_ind
+            site_obs_ind[i_counter : i_counter + cur_record_ind.size] = cur_site_obs_ind
+
+            i_counter += cur_record_ind.size
+
+        assert (
+            np.all(site_int_ind >= 0)
+            and np.all(site_obs_ind >= 0)
+            and np.all(record_ind >= 0)
+        )
+
+        return event_ind, scenario_ind, record_ind, site_int_ind, site_obs_ind
+
+    def get_metadata(self, batch_ind: np.ndarray, rel_shuffle_ind: np.ndarray):
+        (
+            event_ind,
+            scenario_ind,
+            record_ind,
+            record_site_int_ind,
+            record_site_obs_ind,
+        ) = self.get_indices(batch_ind)
+
+        return (
+            self.events[event_ind],
+            self.record_events[record_ind],
+            self.sites[record_site_int_ind],
+            self.sites[record_site_obs_ind],
+            self.rels[event_ind][:, rel_shuffle_ind],
+            self.residual[record_site_int_ind],
+        )
+
+    def get_batch(self, batch_ind: np.ndarray, shuffle_rels: bool = False):
+        (
+            event_ind,
+            scenario_ind,
+            record_ind,
+            record_site_int_ind,
+            record_site_obs_ind,
+        ) = self.get_indices(batch_ind)
+
+        site_int_norm_sim_ims = self.norm_sim_ims[record_site_int_ind, :, :]
+        site_obs_norm_sim_ims = self.norm_sim_ims[record_site_obs_ind, :, :]
+        site_obs_norm_obs_ims = self.norm_obs_ims[record_site_obs_ind, :]
+
+        site_int_sim_ims = self.sim_ims[record_site_int_ind, :, :]
+        site_obs_sim_ims = self.sim_ims[record_site_obs_ind, :, :]
+        site_obs_obs_ims = self.obs_ims[record_site_obs_ind, :]
+
+        scalar_features = self.scalar_features_values[record_ind]
+        im_misfit_score = self.im_misfit_score[record_site_int_ind]
+
+        im_site_corrs = self.im_site_corrs[record_ind, :]
+
+        rel_shuffle_ind = (
+            np.random.permutation(self.n_rels)
+            if shuffle_rels
+            else np.arange(self.n_rels)
+        )
+
+        return (
+            batch_ind,
+            rel_shuffle_ind,
+            self.scenario_ids[batch_ind],
+            self.record_scenario_ids[record_ind],
+            site_int_norm_sim_ims[:, rel_shuffle_ind, :],
+            site_obs_norm_sim_ims[:, rel_shuffle_ind, :],
+            site_obs_norm_obs_ims,
+            site_int_sim_ims[:, rel_shuffle_ind, :],
+            site_obs_sim_ims,
+            site_obs_obs_ims,
+            scalar_features,
+            im_misfit_score[:, rel_shuffle_ind, :],
+            im_site_corrs,
+        )
+
+    def __getitem__(self, index):
+        raise NotImplementedError()
+
+    def __len__(self):
+        return self.cum_n_scenarios_event[-1]
+
+
+def create_model(
+    hp_config: HyperParamsConfig,
+    scalar_features: ml_data.ScalarFeatures,
+    run_config: prob.RunParamsConfig,
+):
+    n_inputs = (
+        run_config.n_rels * hp_config.n_im_features
+    ) + scalar_features.n_scalar_features
+
+    prob_model = models.ProbIMModel(n_inputs, hp_config.fc_units, run_config.n_rels)
+
+    print(f"Model summary")
+    summary(
+        prob_model,
+        input_size=[
+            (
+                hp_config.batch_size,
+                hp_config.n_im_features,
+                run_config.n_rels,
+                run_config.n_ims,
+            ),
+            (
+                hp_config.batch_size,
+                run_config.n_rels,
+                scalar_features.n_scalar_features,
+            ),
+        ],
+    )
+
+    return prob_model
+
+
+def compute_loss(
+    scenario_ids: torch.Tensor,
+    record_scenario_ids: torch.Tensor,
+    pred: torch.Tensor,
+    im_misfit_score: torch.Tensor,
+    w_pred: torch.Tensor,
+    run_config: prob.RunParamsConfig,
+):
+    # Create the scenario mask
+    n_scenarios = scenario_ids.shape[0]
+    n_samples = pred.shape[0]
+
+    scenario_mask = einops.repeat(
+        record_scenario_ids,
+        "n_samples -> n_samples n_scenarios",
+        n_scenarios=n_scenarios,
+    )
+    scenario_mask = scenario_mask == einops.repeat(
+        scenario_ids, "n_scenarios -> n_samples n_scenarios", n_samples=n_samples
+    )
+    scenario_mask = scenario_mask.to(run_config.device)
+
+    ### Normalize weight predictions
+    # Apply the scenario mask
+    w_pred = w_pred[:, None, :] * scenario_mask[..., None]
+    # Sum each scenario weights, and then remove scenario axis
+    w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
+
+    # Compute the loss per sample
+    sample_loss = einops.einsum(
+        pred,
+        w_pred,
+        im_misfit_score.to(run_config.device, dtype=torch.float32),
+        "n_samples n_rels n_ims,"
+        "n_samples n_ims,"
+        "n_samples n_rels n_ims -> n_samples",
+    )
+    scenario_loss = (sample_loss[:, None] * scenario_mask).sum(axis=0)
+    loss = scenario_loss.mean()
+
+    return sample_loss, scenario_loss, loss
+
+
+def train(
+    prob_model: models.ProbIMModel,
+    weight_model: models.WeightModel,
+    train_dataset: SCProbDataset,
+    val_dataset: SCProbDataset,
+    hp_config: HyperParamsConfig,
+    run_config: prob.RunParamsConfig,
+    quiet: bool = False,
+):
+    metrics = {
+        "loss_hist_train": torch.zeros(hp_config.n_epochs),
+        "loss_hist_val": torch.zeros(hp_config.n_epochs),
+    }
+
+    best_epoch_key = "loss_hist_val"
+    best_val_loss = np.inf
+    best_model_state, best_model_epoch = None, None
+
+    optimizer = torch.optim.Adam(
+        prob_model.parameters(), lr=hp_config.lr, weight_decay=hp_config.l2_reg
+    )
+
+    train_dataloader = prob.CustomTabularDataLoader(
+        train_dataset, hp_config.batch_size, True
+    )
+    val_dataloader = prob.CustomTabularDataLoader(
+        val_dataset, hp_config.batch_size, True
+    )
+
+    for epoch_ix in range(hp_config.n_epochs):
+        prob_model.train()
+        iter_loop = tqdm(train_dataloader, disable=quiet)
+        iter_loop.set_description(f"Epoch {epoch_ix}/{hp_config.n_epochs}")
+        for i, (
+            batch_ind,
+            rel_shuffle_ind,
+            scenario_ids,
+            record_scenario_ids,
+            site_int_norm_sim_ims,
+            site_obs_norm_sim_ims,
+            site_obs_norm_obs_ims,
+            site_int_sim_ims,
+            site_obs_sim_ims,
+            site_obs_obs_ims,
+            scalar_features,
+            im_misfit_score,
+            im_site_corrs,
+        ) in enumerate(iter_loop):
+            pred = prob.get_prediction(
+                prob_model,
+                site_obs_norm_obs_ims,
+                site_int_norm_sim_ims,
+                site_obs_norm_sim_ims,
+                site_obs_obs_ims,
+                site_int_sim_ims,
+                site_obs_sim_ims,
+                scalar_features,
+                run_config,
+                hp_config,
+            )
+
+            w_pred = weight_model(
+                scalar_features.to(
+                    run_config.device, dtype=torch.float32, non_blocking=True
+                )
+            )
+
+            sample_loss, scenario_loss, loss = compute_loss(
+                scenario_ids,
+                record_scenario_ids,
+                pred,
+                im_misfit_score,
+                w_pred,
+                run_config,
+            )
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            metrics["loss_hist_train"][epoch_ix] += loss.item()
+
+        metrics["loss_hist_train"][epoch_ix] /= len(train_dataloader)
+
+        prob_model.eval()
+        with torch.no_grad():
+            for i, (
+                batch_ind,
+                rel_shuffle_ind,
+                scenario_ids,
+                record_scenario_ids,
+                site_int_norm_sim_ims,
+                site_obs_norm_sim_ims,
+                site_obs_norm_obs_ims,
+                site_int_sim_ims,
+                site_obs_sim_ims,
+                site_obs_obs_ims,
+                scalar_features,
+                im_misfit_score,
+                im_site_corrs,
+            ) in enumerate(val_dataloader):
+                pred = prob.get_prediction(
+                    prob_model,
+                    site_obs_norm_obs_ims,
+                    site_int_norm_sim_ims,
+                    site_obs_norm_sim_ims,
+                    site_obs_obs_ims,
+                    site_int_sim_ims,
+                    site_obs_sim_ims,
+                    scalar_features,
+                    run_config,
+                    hp_config,
+                )
+
+                w_pred = weight_model(
+                    scalar_features.to(
+                        run_config.device, dtype=torch.float32, non_blocking=True
+                    )
+                )
+
+                sample_loss, scenario_loss, loss = compute_loss(
+                    scenario_ids,
+                    record_scenario_ids,
+                    pred,
+                    im_misfit_score,
+                    w_pred,
+                    run_config,
+                )
+
+                metrics["loss_hist_val"][epoch_ix] += loss.item()
+
+            metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
+
+            if metrics["loss_hist_val"][epoch_ix] < best_val_loss:
+                best_val_loss = metrics["loss_hist_val"][epoch_ix]
+                best_model_state = prob_model.state_dict()
+                best_model_epoch = epoch_ix
+
+            print(f"Epoch {epoch_ix + 1}/{hp_config.n_epochs}")
+            print(f"\tTraining" f"\t\tLoss: {metrics['loss_hist_train'][epoch_ix]:.4f}")
+            print(f"\tValidation" f"\t\tLoss: {metrics['loss_hist_val'][epoch_ix]:.4f}")
+
+

@@ -182,13 +182,15 @@ class DB:
 
         return result_df
 
-    def get_obs_df(self):
+    def get_obs_df(self, log: bool = False):
         """Gets the observation IM data"""
         result_df = pd.read_sql(
             "SELECT * FROM obs_im_data", self.con, index_col="record_id"
         )
-        # if custom_record_id:
-        #     result_df.index = mlt.array_utils.numpy_str_join("_", result_df.event_id.values.astype(str), result_df.site_id.values.astype(str))
+
+        if log:
+            ims = [cur_col for cur_col in result_df.columns if cur_col in constants.PSA_KEYS]
+            result_df[ims] = np.log(result_df[ims])
 
         return result_df
 

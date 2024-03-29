@@ -46,6 +46,10 @@ class RunParamsConfig:
         if self.results_dir is None:
             self.results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
 
+    @property
+    def n_ims(self):
+        return len(self.ims)
+
     def to_dict(self):
         return {
             "max_dist": self.max_dist,
@@ -152,7 +156,7 @@ def data_prep(
     run_config: RunParamsConfig,
     hp_config: HyperParamsConfig,
     db: DB,
-    sim_corr_dir: Path = None,
+    sim_corr_dir: Path,
 ):
     # Scalar features
     EVENT_FEATURE_KEYS = ["mag"]
@@ -267,6 +271,7 @@ def data_prep(
         "max_dist": run_config.max_dist,
         "n_rels": run_config.n_rels,
         "features": {
+            "event_features": scalar_features.event_feature_keys,
             "site_features": scalar_features.site_feature_keys,
             "site_to_site_features": scalar_features.site_to_site_feature_keys,
             "event_site_features": scalar_features.event_site_feature_keys,
@@ -333,7 +338,6 @@ class ProbDataset(Dataset):
 
         event_loop = tqdm(event_sites.items(), desc="Processing events")
         for cur_event, cur_sites in event_loop:
-            # for cur_event, cur_sites in event_sites.items():
             # Observed
             cur_obs_data = db.get_obs_data(cur_event, cur_sites)
             cur_obs_data = np.log(cur_obs_data.loc[cur_sites, self.ims]).values
@@ -565,7 +569,7 @@ class CustomTabularDataLoader:
     https://discuss.pytorch.org/t/dataloader-much-slower-than-manual-batching/27014/6
     """
 
-    def __init__(self, dataset: ProbDataset, batch_size: int, shuffle: bool):
+    def __init__(self, dataset: Dataset, batch_size: int, shuffle: bool):
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -863,7 +867,7 @@ def compute_im_loss(
 
 
 def get_prediction(
-    prob_model: models.ProbIndModel,
+    prob_model: models.ProbIMModel,
     site_obs_norm_obs_ims: torch.Tensor,
     site_int_norm_sim_ims: torch.Tensor,
     site_obs_norm_sim_ims: torch.Tensor,
@@ -871,7 +875,7 @@ def get_prediction(
     site_int_sim_ims: torch.Tensor,
     site_obs_sim_ims: torch.Tensor,
     scalar_features: torch.Tensor,
-    obs_site_misfit_score: torch.Tensor,
+    # obs_site_misfit_score: torch.Tensor,
     run_config: RunParamsConfig,
     hp_config: HyperParamsConfig,
 ):
@@ -922,23 +926,16 @@ def get_prediction(
     scalar_features = einops.repeat(
         scalar_features, "batch ss -> batch rel ss", rel=run_config.n_rels
     )
-    if hp_config.use_obs_site_misfit_score:
-        scalar_features = torch.cat(
-            [scalar_features, obs_site_misfit_score[..., None]], dim=2
-        )
+    # if hp_config.use_obs_site_misfit_score:
+    #     scalar_features = torch.cat(
+    #         [scalar_features, obs_site_misfit_score[..., None]], dim=2
+    #     )
 
     scalar_features = scalar_features.to(
         run_config.device, dtype=torch.float32, non_blocking=True
     )
 
-    ## TMP
-    X_im = einops.rearrange(im_tensor, "batch imf rel im -> (batch im) (rel imf)")
-    X_ss = einops.repeat(scalar_features[:, 0, :], "batch ss -> (batch im) ss", im=len(run_config.ims))
-    X = torch.cat([X_im, X_ss], dim=1)
-
-    pred = prob_model(X)
-    pred = einops.rearrange(pred, "(batch im) rel -> batch rel im", im=len(run_config.ims))
-    return pred
+    return prob_model(im_tensor, scalar_features)
 
 def get_dataset_predictions(
     dataset: ProbDataset,

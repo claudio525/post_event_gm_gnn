@@ -155,9 +155,22 @@ class ProbIMModel(nn.Module):
         self.fc_layers.append(nn.Linear(units[-1], self.n_rels))
         self.fc_layers.append(nn.Softmax(dim=1))
 
-    def forward(self, X: torch.Tensor):
-        X = self.fc_layers(X)
-        return X
+    def forward(self, im_features: torch.Tensor, scalar_features: torch.Tensor):
+        n_ims = im_features.shape[3]
+
+        # Convert shapes that the model performs one prediction per IM
+        ## TODO: Add one-hot encoding
+        X_im = einops.rearrange(im_features, "batch imf rel im -> (batch im) (rel imf)")
+        X_ss = einops.repeat(scalar_features[:, 0, :], "batch ss -> (batch im) ss",
+                             im=n_ims)
+        X = torch.cat([X_im, X_ss], dim=1)
+
+        pred = self.fc_layers(X)
+
+        # Convert result to shape (batch, n_rels, n_ims)
+        pred = einops.rearrange(pred, "(batch im) rel -> batch rel im", im=n_ims)
+        return pred
+
 
 
 
@@ -290,6 +303,25 @@ class MLPModel(nn.Module):
 
     def forward(self, x):
         return self.layers(x)
+
+class WeightModel(nn.Module):
+    def __init__(self, n_outputs: int, units: Sequence[int], n_scalar_inputs: int):
+        super().__init__()
+        self.units = units
+        self.layers = nn.Sequential()
+        for i in range(len(units)):
+            if i == 0:
+                self.layers.append(nn.Linear(n_scalar_inputs, units[i]))
+            else:
+                self.layers.append(nn.Linear(units[i - 1], units[i]))
+            self.layers.append(nn.ELU())
+        self.layers.append(nn.Linear(units[-1], n_outputs))
+
+    def forward(self, x):
+        X = self.layers(x)
+
+        pred = F.sigmoid(X)
+        return pred
 
 
 def custom_sigmoid(x: torch.Tensor, a: float):
