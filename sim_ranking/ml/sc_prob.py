@@ -1,5 +1,6 @@
+import os
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Sequence
 from dataclasses import dataclass
 
 import einops
@@ -9,6 +10,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from torchinfo import summary
+from torchview import draw_graph
 
 import ml_tools as mlt
 import spatial_hazard as sh
@@ -26,7 +28,10 @@ class HyperParamsConfig:
     n_epochs: int
     batch_size: int
     l2_reg: float
-    lr: float
+    lr: Sequence[float]
+    lr_epochs: Sequence[int]
+
+    # lr: float
 
     misfit_fn: str
 
@@ -61,6 +66,7 @@ class HyperParamsConfig:
             params["batch_size"],
             params["l2_reg"],
             params["lr"],
+            params["lr_epochs"],
             params["misfit_fn"],
             params["fc_units"],
             params["im_sim_site_obs"],
@@ -77,6 +83,7 @@ class HyperParamsConfig:
             "batch_size": self.batch_size,
             "l2_reg": self.l2_reg,
             "lr": self.lr,
+            "lr_epochs": self.lr_epochs,
             "misfit_fn": self.misfit_fn,
             "fc_units": self.fc_units,
             "n_im_features": self.n_im_features,
@@ -209,8 +216,8 @@ def data_prep(
         "val_int_sites": val_int_sites.tolist(),
         "train_events": train_events.tolist(),
         "val_events": val_events.tolist(),
-        "n_train_samples": len(train_dataset),
-        "n_val_samples": len(val_dataset),
+        "n_train_scenarios": len(train_dataset),
+        "n_val_scenarios": len(val_dataset),
         "max_dist": run_config.max_dist,
         "n_rels": run_config.n_rels,
         "features": {
@@ -226,8 +233,8 @@ def data_prep(
         },
     }
 
-    print(f"Number of training samples: {len(train_dataset)}")
-    print(f"Number of validation samples: {len(val_dataset)}")
+    print(f"Number of training samples (scenarios): {len(train_dataset)}")
+    print(f"Number of validation samples (scenarios) : {len(val_dataset)}")
 
     return train_dataset, val_dataset, scalar_features, metadata
 
@@ -534,9 +541,10 @@ class SCProbDataset(Dataset):
             self.sites[record_site_obs_ind],
             self.rels[event_ind][:, rel_shuffle_ind],
             self.residual[record_site_int_ind],
+            self.n_sites_scenario[batch_ind],
         )
 
-    def get_batch(self, batch_ind: np.ndarray, shuffle_rels: bool = False):
+    def get_batch(self, batch_ind: np.ndarray, shuffle_rels: bool):
         (
             event_ind,
             scenario_ind,
@@ -596,7 +604,9 @@ def create_model(
         run_config.n_rels * hp_config.n_im_features
     ) + scalar_features.n_scalar_features
 
-    prob_model = models.ProbIMModel(n_inputs, hp_config.fc_units, run_config.n_rels)
+    prob_model = models.ProbIMModel(
+        n_inputs, hp_config.fc_units, run_config.n_rels, one_hot_n_ims=0
+    )
 
     print(f"Model summary")
     summary(
@@ -619,17 +629,9 @@ def create_model(
     return prob_model
 
 
-def compute_loss(
-    scenario_ids: torch.Tensor,
-    record_scenario_ids: torch.Tensor,
-    pred: torch.Tensor,
-    im_misfit_score: torch.Tensor,
-    w_pred: torch.Tensor,
-    run_config: prob.RunParamsConfig,
-):
-    # Create the scenario mask
+def get_scenario_mask(record_scenario_ids: torch.Tensor, scenario_ids: torch.Tensor):
     n_scenarios = scenario_ids.shape[0]
-    n_samples = pred.shape[0]
+    n_samples = record_scenario_ids.shape[0]
 
     scenario_mask = einops.repeat(
         record_scenario_ids,
@@ -639,14 +641,17 @@ def compute_loss(
     scenario_mask = scenario_mask == einops.repeat(
         scenario_ids, "n_scenarios -> n_samples n_scenarios", n_samples=n_samples
     )
-    scenario_mask = scenario_mask.to(run_config.device)
 
-    ### Normalize weight predictions
-    # Apply the scenario mask
-    w_pred = w_pred[:, None, :] * scenario_mask[..., None]
-    # Sum each scenario weights, and then remove scenario axis
-    w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
+    return scenario_mask
 
+
+def compute_loss(
+    scenario_mask: torch.Tensor,
+    pred: torch.Tensor,
+    im_misfit_score: torch.Tensor,
+    w_pred: torch.Tensor,
+    run_config: prob.RunParamsConfig,
+):
     # Compute the loss per sample
     sample_loss = einops.einsum(
         pred,
@@ -660,6 +665,26 @@ def compute_loss(
     loss = scenario_loss.mean()
 
     return sample_loss, scenario_loss, loss
+
+
+def get_weight_prediction(
+    weight_model: models.WeightModel,
+    scalar_features: torch.Tensor,
+    scenario_mask: torch.Tensor,
+    run_config: prob.RunParamsConfig,
+):
+    """Gets the normalised weight predictions"""
+    w_pred = weight_model(
+        scalar_features.to(run_config.device, dtype=torch.float32, non_blocking=True)
+    )
+
+    ### Normalize weight predictions
+    # Apply the scenario mask
+    w_pred = w_pred[:, None, :] * scenario_mask[..., None]
+    # Sum each scenario weights, and then remove scenario axis
+    w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
+
+    return w_pred
 
 
 def train(
@@ -681,17 +706,28 @@ def train(
     best_model_state, best_model_epoch = None, None
 
     optimizer = torch.optim.Adam(
-        prob_model.parameters(), lr=hp_config.lr, weight_decay=hp_config.l2_reg
+        prob_model.parameters(), lr=hp_config.lr[0], weight_decay=hp_config.l2_reg
     )
 
     train_dataloader = prob.CustomTabularDataLoader(
-        train_dataset, hp_config.batch_size, True
+        train_dataset, hp_config.batch_size, True, shuffle_rels=True
     )
     val_dataloader = prob.CustomTabularDataLoader(
-        val_dataset, hp_config.batch_size, True
+        val_dataset, hp_config.batch_size, True, shuffle_rels=False
     )
 
+    lr_ix = 0
     for epoch_ix in range(hp_config.n_epochs):
+        if lr_ix < len(hp_config.lr_epochs) and epoch_ix == hp_config.lr_epochs[lr_ix]:
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = hp_config.lr[lr_ix + 1]
+
+            print("----------------------------------------------------")
+            print(f"Reduced learning rate to {hp_config.lr[lr_ix + 1]}")
+            print("----------------------------------------------------")
+
+            lr_ix += 1
+
         prob_model.train()
         iter_loop = tqdm(train_dataloader, disable=quiet)
         iter_loop.set_description(f"Epoch {epoch_ix}/{hp_config.n_epochs}")
@@ -723,15 +759,20 @@ def train(
                 hp_config,
             )
 
-            w_pred = weight_model(
-                scalar_features.to(
-                    run_config.device, dtype=torch.float32, non_blocking=True
-                )
-            )
+            scenario_mask = get_scenario_mask(record_scenario_ids, scenario_ids)
+            scenario_mask = scenario_mask.to(run_config.device)
+
+            # w_pred = get_weight_prediction(
+            #     weight_model, scalar_features, scenario_mask, run_config)
+
+            ## TMP
+            w_pred = im_site_corrs.to(run_config.device, dtype=torch.float32)
+            w_pred = w_pred[:, None, :] * scenario_mask[..., None]
+            # Sum each scenario weights, and then remove scenario axis
+            w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
 
             sample_loss, scenario_loss, loss = compute_loss(
-                scenario_ids,
-                record_scenario_ids,
+                scenario_mask,
                 pred,
                 im_misfit_score,
                 w_pred,
@@ -776,15 +817,20 @@ def train(
                     hp_config,
                 )
 
-                w_pred = weight_model(
-                    scalar_features.to(
-                        run_config.device, dtype=torch.float32, non_blocking=True
-                    )
-                )
+                scenario_mask = get_scenario_mask(record_scenario_ids, scenario_ids)
+                scenario_mask = scenario_mask.to(run_config.device)
+
+                # w_pred = get_weight_prediction(
+                #     weight_model, scalar_features, scenario_mask, run_config)
+
+                ## TMP
+                w_pred = im_site_corrs.to(run_config.device, dtype=torch.float32)
+                w_pred = w_pred[:, None, :] * scenario_mask[..., None]
+                # Sum each scenario weights, and then remove scenario axis
+                w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
 
                 sample_loss, scenario_loss, loss = compute_loss(
-                    scenario_ids,
-                    record_scenario_ids,
+                    scenario_mask,
                     pred,
                     im_misfit_score,
                     w_pred,
@@ -804,4 +850,306 @@ def train(
             print(f"\tTraining" f"\t\tLoss: {metrics['loss_hist_train'][epoch_ix]:.4f}")
             print(f"\tValidation" f"\t\tLoss: {metrics['loss_hist_val'][epoch_ix]:.4f}")
 
+    return metrics, best_model_state, best_model_epoch
 
+
+def get_dataset_prediction(
+    dataset: SCProbDataset,
+    prob_model: models.ProbIMModel,
+    weight_model: models.WeightModel,
+    run_config: prob.RunParamsConfig,
+    dist_matrix: pd.DataFrame,
+    hp_config: HyperParamsConfig,
+):
+    pred_dataloader = prob.CustomTabularDataLoader(
+        dataset, hp_config.batch_size, shuffle=False, shuffle_rels=False
+    )
+
+    columns = [
+        "event_id",
+        "site_int",
+        "site_obs",
+        "rel_id",
+        "s2s_distance",
+    ]
+    im_res_cols = np.char.add(run_config.ims, "_residual").tolist()
+    columns += im_res_cols
+
+    if run_config.per_im_prob:
+        im_site_weights_cols = np.char.add(
+            run_config.ims, "_site_weights"
+        ).tolist()
+        im_misfit_cols = np.char.add(run_config.ims, "_misfit").tolist()
+        prob_cols = np.char.add(run_config.ims, "_prob").tolist()
+        columns += prob_cols + im_misfit_cols
+    else:
+        columns += ["prob", "misfit_score", "site_weights"]
+
+    results_df = pd.DataFrame(
+        index=np.arange(dataset.n_sites_scenario.sum() * run_config.n_rels), columns=columns
+    )
+
+    results_df = results_df.astype(
+        dict(zip(columns[4:], len(columns[4:]) * [np.float32]))
+    )
+
+    results_df["event_id"] = pd.Categorical(
+        categories=dataset.events, values=results_df.shape[0] * [pd.NA]
+    )
+    results_df["site_int"] = pd.Categorical(
+        categories=np.unique(dataset.sites), values=results_df.shape[0] * [pd.NA]
+    )
+    results_df["site_obs"] = pd.Categorical(
+        categories=np.unique(dataset.sites), values=results_df.shape[0] * [pd.NA]
+    )
+    results_df["rel_id"] = pd.Categorical(
+        categories=np.unique(dataset.rels), values=results_df.shape[0] * [pd.NA]
+    )
+
+    with torch.no_grad():
+        prob_model.eval()
+        start_ix = 0
+        for i, (
+            batch_ind,
+            rel_shuffle_ind,
+            scenario_ids,
+            record_scenario_ids,
+            site_int_norm_sim_ims,
+            site_obs_norm_sim_ims,
+            site_obs_norm_obs_ims,
+            site_int_sim_ims,
+            site_obs_sim_ims,
+            site_obs_obs_ims,
+            scalar_features,
+            im_misfit_score,
+            im_site_corrs,
+        ) in enumerate(tqdm(pred_dataloader)):
+            pred = prob.get_prediction(
+                prob_model,
+                site_obs_norm_obs_ims,
+                site_int_norm_sim_ims,
+                site_obs_norm_sim_ims,
+                site_obs_obs_ims,
+                site_int_sim_ims,
+                site_obs_sim_ims,
+                scalar_features,
+                run_config,
+                hp_config,
+            )
+
+            scenario_mask = get_scenario_mask(record_scenario_ids, scenario_ids)
+            scenario_mask = scenario_mask.to(run_config.device)
+
+            # w_pred = get_weight_prediction(
+            #     weight_model, scalar_features, scenario_mask, run_config)
+
+            ## TMP
+            w_pred = im_site_corrs.to(run_config.device, dtype=torch.float32)
+            w_pred = w_pred[:, None, :] * scenario_mask[..., None]
+            # Sum each scenario weights, and then remove scenario axis
+            w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
+
+            (
+                events,
+                record_events,
+                site_int,
+                site_obs,
+                rels,
+                residual,
+                n_sites_scenario,
+            ) = dataset.get_metadata(batch_ind, rel_shuffle_ind)
+
+            cur_n_samples = pred.shape[0]
+            end_ix = start_ix + cur_n_samples * run_config.n_rels - 1
+
+            ### Store results
+            # Event
+            results_df.loc[start_ix:end_ix, "event_id"] = einops.repeat(
+                record_events, "batch -> (batch rel)", rel=pred.shape[1]
+            )
+            # Site of Interest
+            results_df.loc[
+                start_ix:end_ix, "site_int"
+            ] = df_site_int = einops.repeat(
+                site_int, "batch -> (batch rel)", rel=pred.shape[1]
+            )
+            # Observation site
+            results_df.loc[
+                start_ix:end_ix, "site_obs"
+            ] = df_site_obs = einops.repeat(
+                site_obs, "batch -> (batch rel)", rel=pred.shape[1]
+            )
+            # Realisation
+            results_df.loc[start_ix:end_ix, "rel_id"] = einops.rearrange(
+                np.repeat(rels, n_sites_scenario, axis=0), "batch rel -> (batch rel)"
+            )
+            # Probabilities
+            if run_config.per_im_prob:
+                results_df.loc[start_ix:end_ix, prob_cols] = (
+                    einops.rearrange(pred, "batch rel im -> (batch rel) im")
+                    .numpy(force=True)
+                    .astype(np.float32)
+                )
+            else:
+                results_df.loc[start_ix:end_ix, "prob"] = (
+                    einops.rearrange(pred, "batch rel -> (batch rel)")
+                    .numpy(force=True)
+                    .astype(np.float32)
+                )
+
+            # Misfit score
+            if run_config.per_im_prob:
+                results_df.loc[start_ix:end_ix, im_misfit_cols] = (
+                    einops.rearrange(im_misfit_score, "batch rel im -> (batch rel) im")
+                    .numpy(force=True)
+                    .astype(np.float32)
+                )
+            else:
+                raise NotImplementedError()
+                # results_df.loc[cur_start_ix:cur_end_ix, "misfit_score"] = (
+                #     einops.rearrange(misfit_score, "batch rel -> (batch rel)")
+                #     .numpy(force=True)
+                #     .astype(np.float32)
+                # )
+
+            if run_config.per_im_prob:
+                results_df.loc[start_ix:end_ix, im_site_weights_cols] = (
+                    einops.repeat(
+                        w_pred,
+                        "batch im -> (batch rel) im",
+                        rel=pred.shape[1],
+                    )
+                    .numpy(force=True)
+                    .astype(np.float32)
+                )
+            else:
+                raise NotImplementedError()
+                # results_df.loc[cur_start_ix:cur_end_ix, "site_corr_weights"] = (
+                #     einops.repeat(
+                #         site_corr_weights, "batch -> (batch rel)", rel=pred.shape[1]
+                #     )
+                #     .numpy(force=True)
+                #     .astype(np.float32)
+                # )
+
+            # IM residuals
+            results_df.loc[start_ix:end_ix, im_res_cols] = einops.rearrange(
+                residual, "batch rel im -> (batch rel) im"
+            ).astype(np.float32)
+
+            # Site-to-site distance
+            results_df.loc[
+                start_ix:end_ix, "s2s_distance"
+            ] = dist_matrix.values[
+                dist_matrix.index.get_indexer_for(df_site_int),
+                dist_matrix.columns.get_indexer_for(df_site_obs),
+            ].astype(
+                np.float32
+            )
+
+            start_ix = end_ix + 1
+
+        return results_df
+
+
+def post_processing(
+    prob_model: models.ProbIMModel,
+    weight_model: models.WeightModel,
+    train_dataset: SCProbDataset,
+    val_dataset: SCProbDataset,
+    hp_config: HyperParamsConfig,
+    run_config: prob.RunParamsConfig,
+    metrics: Dict,
+    best_epoch: int,
+    scalar_features: ml_data.ScalarFeatures,
+    data_metadata: Dict,
+    val_int_sites: np.ndarray,
+    train_sites: np.ndarray,
+    id_suffix: str = "",
+):
+    (
+        cur_out_dir := run_config.results_dir
+        / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+    ).mkdir()
+
+    # Save the training sites and validation sites
+    np.save(cur_out_dir / "val_int_sites.npy", val_int_sites)
+    np.save(cur_out_dir / "train_sites.npy", train_sites)
+
+    # Compute the distance matrix
+    print(f"Computing distance matrix")
+    station_df = DB(
+        Path(os.path.expandvars("$wdata")) / data_metadata["db"]
+    ).get_site_df()
+    all_sites = np.unique(np.concatenate((train_dataset.sites, val_dataset.sites)))
+    dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, station_df)
+
+    ### Sample
+    print(f"Computing sample distributions")
+    train_sample_results = get_dataset_prediction(
+        train_dataset, prob_model, weight_model, run_config, dist_matrix, hp_config
+    )
+    print(
+        f"\tTrain sample results - Memory usage: {train_sample_results.memory_usage(deep=True).sum() / 1e6} MB"
+    )
+    val_sample_results = get_dataset_prediction(
+        val_dataset, prob_model, weight_model, run_config, dist_matrix, hp_config
+    )
+    print(
+        f"\tVal sample results - Memory usage: {val_sample_results.memory_usage(deep=True).sum() / 1e6}"
+    )
+
+    train_sample_results.to_parquet(cur_out_dir / "train_sample_results.parquet")
+    val_sample_results.to_parquet(cur_out_dir / "val_sample_results.parquet")
+
+    ### Scenario
+    print(f"Computing scenario distributions")
+    print("Training dataset")
+    train_scenario_results = prob.compute_scenario_distribution(
+        train_sample_results, run_config, "_site_weights"
+    )
+    print("Validation dataset")
+    val_scenario_results = prob.compute_scenario_distribution(val_sample_results, run_config, "_site_weights")
+
+    train_scenario_results.to_parquet(cur_out_dir / "train_scenario_results.parquet")
+    val_scenario_results.to_parquet(cur_out_dir / "val_scenario_results.parquet")
+
+    # Save loss history
+    pd.to_pickle(metrics, cur_out_dir / "metrics.pickle")
+
+    # Save the model
+    torch.save(prob_model, cur_out_dir / "model.pt")
+
+    # Metadata
+    metadata = {
+        "method_type": constants.RankingMethod.ml_prob_per_im.value
+        if run_config.per_im_prob
+        else constants.RankingMethod.ml_prob.value,
+        "hp_config": hp_config.to_dict(),
+        "best_epoch": best_epoch,
+        "data": data_metadata,
+        "run_config": run_config.to_dict(),
+    }
+    mlt.utils.write_to_yaml(metadata, cur_out_dir / "meta.yaml")
+
+    # n_inputs = (run_config.n_rels * hp_config.n_im_features) + scalar_features.n_scalar_features
+    draw_graph(
+        prob_model,
+        input_size=[
+            (
+                hp_config.batch_size,
+                hp_config.n_im_features,
+                run_config.n_rels,
+                run_config.n_ims,
+            ),
+            (
+                hp_config.batch_size,
+                run_config.n_rels,
+                scalar_features.n_scalar_features,
+            ),
+        ],
+        expand_nested=True,
+        filename="prob_model_vis",
+        save_graph=True,
+        directory=str(cur_out_dir),
+    )

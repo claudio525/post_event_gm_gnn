@@ -569,10 +569,11 @@ class CustomTabularDataLoader:
     https://discuss.pytorch.org/t/dataloader-much-slower-than-manual-batching/27014/6
     """
 
-    def __init__(self, dataset: Dataset, batch_size: int, shuffle: bool):
+    def __init__(self, dataset: Dataset, batch_size: int, shuffle: bool, shuffle_rels: bool):
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
+        self.shuffle_rels = shuffle_rels
 
         # Calculate number of batches
         self.n_samples = len(self.dataset)
@@ -599,7 +600,7 @@ class CustomTabularDataLoader:
         # Convert to torch tensors
         return [
             torch.from_numpy(cur_array)
-            for cur_array in self.dataset.get_batch(batch_ind)
+            for cur_array in self.dataset.get_batch(batch_ind, self.shuffle_rels)
         ]
 
 
@@ -972,12 +973,6 @@ def get_dataset_predictions(
         index=np.arange(len(dataset) * run_config.n_rels), columns=columns
     )
 
-    # n_float_cols = run_config.ims + [
-    #     "prob",
-    #     "misfit_score",
-    #     "site_corr_weights",
-    #     "s2s_distance",
-    # ]
     results_df = results_df.astype(
         dict(zip(columns[4:], len(columns[4:]) * [np.float32]))
     )
@@ -1021,7 +1016,7 @@ def get_dataset_predictions(
                 site_int_sim_ims,
                 site_obs_sim_ims,
                 scalar_features,
-                obs_site_misfit_score,
+                # obs_site_misfit_score,
                 run_config,
                 hp_config,
             )
@@ -1242,14 +1237,14 @@ def _im_weighted_mean(
 
 
 def compute_scenario_distribution(
-    sample_results: pd.DataFrame, run_config: RunParamsConfig
+    sample_results: pd.DataFrame, run_config: RunParamsConfig, im_site_weights_suffix: str = "_site_corr_weights"
 ):
     """
     Computes the realisation distribution for each scenario
     """
     string_to_int = np.vectorize(lambda x: hash(x))
     im_prob_cols = np.char.add(run_config.ims, "_prob")
-    im_site_corr_weight_cols = np.char.add(run_config.ims, "_site_corr_weights")
+    im_site_corr_weight_cols = np.char.add(run_config.ims, im_site_weights_suffix)
     im_res_cols = np.char.add(run_config.ims, "_residual")
     im_misfit_cols = np.char.add(run_config.ims, "_misfit")
 

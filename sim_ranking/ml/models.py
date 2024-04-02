@@ -136,10 +136,13 @@ class ProbIndModel(ProbModel):
 
 class ProbIMModel(nn.Module):
 
-    def __init__(self, n_inputs: int, units: Sequence[int], n_rels: int):
+    def __init__(self, n_inputs: int, units: Sequence[int], n_rels: int, one_hot_n_ims: int = 0):
         super().__init__()
 
-        self.n_inputs = n_inputs
+        self.one_hot = one_hot_n_ims > 0
+        self.n_ims = one_hot_n_ims if self.one_hot else None
+
+        self.n_inputs = n_inputs if not self.one_hot else n_inputs + one_hot_n_ims
         self.n_rels = n_rels
 
         self.fc_layers = nn.Sequential()
@@ -151,6 +154,9 @@ class ProbIMModel(nn.Module):
 
             self.fc_layers.append(nn.BatchNorm1d(units[i]))
             self.fc_layers.append(nn.LeakyReLU())
+            # self.fc_layers.append(nn.ELU())
+            # self.fc_layers.append(nn.SELU())
+            # self.fc_layers.append(nn.ReLU())
 
         self.fc_layers.append(nn.Linear(units[-1], self.n_rels))
         self.fc_layers.append(nn.Softmax(dim=1))
@@ -158,12 +164,16 @@ class ProbIMModel(nn.Module):
     def forward(self, im_features: torch.Tensor, scalar_features: torch.Tensor):
         n_ims = im_features.shape[3]
 
+        # One hot encode the IM type
+        # one_hot_vec = torch.eye(self.n_ims, device=im_features.device, dtype=im_features.dtype)
+        # one_hot_vec = einops.repeat(one_hot_vec, "im vec -> (batch im) vec", batch=im_features.shape[0])
+
         # Convert shapes that the model performs one prediction per IM
-        ## TODO: Add one-hot encoding
         X_im = einops.rearrange(im_features, "batch imf rel im -> (batch im) (rel imf)")
         X_ss = einops.repeat(scalar_features[:, 0, :], "batch ss -> (batch im) ss",
                              im=n_ims)
         X = torch.cat([X_im, X_ss], dim=1)
+        # X = torch.cat([X_im, X_ss, one_hot_vec], dim=1)
 
         pred = self.fc_layers(X)
 
@@ -315,6 +325,7 @@ class WeightModel(nn.Module):
             else:
                 self.layers.append(nn.Linear(units[i - 1], units[i]))
             self.layers.append(nn.ELU())
+
         self.layers.append(nn.Linear(units[-1], n_outputs))
 
     def forward(self, x):

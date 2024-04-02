@@ -356,12 +356,6 @@ def _scenario_viewer(
         else None
     )
 
-    # st.text(f"Probabilities Standard Deviation: {cur_scenario_df.prob.std():.2f}")
-    # sort_ind = np.argsort(cur_scenario_df.prob.values)
-    # x = cur_scenario_df.prob.values[sort_ind]
-    # y = np.cumsum(cur_scenario_df.prob.values[sort_ind])
-    # sha.query_non_parametric_cdf(np.asarray([0.16, 0.84]), x, y)
-
     create_pSA_dist_plot(
         cur_scenario_df,
         site_int_sims,
@@ -370,6 +364,33 @@ def _scenario_viewer(
         gen_gm_params=cur_gen_gm_params,
         syn_obs_gm_params=cur_syn_obs_gm_params,
     )
+
+    st.divider()
+
+    st.text(f"Number of Observation sites: {cur_scenario_df.n_obs_sites.iloc[0]}")
+    st.text(f"Distance to closest observation site: {cur_scenario_df.min_distance.iloc[0]}")
+
+    # Get the observation sites (sorted by distance)
+    cur_obs_sites_df = cur_sample_results.groupby("site_obs", observed=True).first()
+    cur_obs_sites = cur_obs_sites_df[
+        "s2s_distance"].sort_values().index.values.astype(str)
+
+    weight_cols = mlt.array_utils.numpy_str_join("_", sr.constants.PSA_KEYS, "site_weights")
+    for cur_obs_site in cur_obs_sites:
+        with st.expander(cur_obs_site):
+            st.text(f"Observation site: {cur_obs_site}, "
+                    f"distance {cur_obs_sites_df.loc[cur_obs_site, 's2s_distance']:.2f}")
+            st.dataframe(cur_obs_sites_df.loc[cur_obs_site, weight_cols].to_frame().T)
+            create_pSA_dist_plot(
+                cur_sample_results.loc[cur_sample_results.site_obs == cur_obs_site],
+                site_int_sims,
+                site_int_obs,
+                high_rels=high_rels if len(high_rels) > 0 else None,
+                site_obs_obs=obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == cur_obs_site)],
+                # gen_gm_params=cur_gen_gm_params if show_gen_dist else None,
+                # syn_obs_gm_params=cur_syn_obs_gm_params if show_obs_dist else None,
+            )
+
 
     if "prob" in cur_scenario_df.columns:
         col1, col2, col3 = st.columns([0.2, 0.6, 0.2])
@@ -688,19 +709,6 @@ def create_pSA_dist_plot(
     gen_gm_params: pd.DataFrame = None,
     syn_obs_gm_params: pd.DataFrame = None,
 ):
-    # cdf_x, cdf_y = [], []
-    # for cur_im in sr.constants.PSA_KEYS:
-    #     cur_sort_ind = np.argsort(site_int_sims[cur_im].values)
-    #     cdf_x.append(site_int_sims[cur_im].values[cur_sort_ind])
-    #     cdf_y.append(np.cumsum(results_df.prob.values[cur_sort_ind]))
-    #
-    # cdf_x = pd.DataFrame(np.asarray(cdf_x).T, columns=sr.constants.PSA_KEYS)
-    # cdf_y = pd.DataFrame(np.asarray(cdf_y).T, columns=sr.constants.PSA_KEYS)
-    #
-    # qt_2, qt_16, qt_50, qt_84, qt_98 = sha.query_non_parametric_multi_cdf_invs(
-    #     np.asarray([0.02, 0.16, 0.5, 0.84, 0.98]), cdf_x.T.values, cdf_y.T.values
-    # )
-
     fig, ax = plt.subplots(figsize=(12, 6))
 
     mean_cols = [f"{cur_key}_mean" for cur_key in sr.constants.PSA_KEYS]
@@ -1226,6 +1234,12 @@ def agg_residuals(
 
 
 def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_type: str):
+    if "prob" in results_df.columns:
+        prob_key = "prob"
+    else:
+        prob_key = st.selectbox("Probability Key", [cur_c for cur_c in results_df.columns if "_prob" in cur_c],
+                                key=f"{tab_type}_prob_key")
+
     n_probs = st.number_input(
         "Number of Probabilities", 1, 100, 2, key=f"{tab_type}_n_probs"
     )
@@ -1236,7 +1250,7 @@ def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_typ
         else ["event_id", "site_int"]
     )
     groups = get_results_group(results_df, group_cols)
-    top_k_probs = groups["prob"].apply(lambda x: x.nlargest(n_probs).sum())
+    top_k_probs = groups[prob_key].apply(lambda x: x.nlargest(n_probs).sum())
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -1319,9 +1333,13 @@ def run_agg_single(cur_results_dir: Path):
 
 
 def agg_scenario_vis(cur_results_dir: Path, results_df: pd.DataFrame, tab_type: str):
+    print(f"wtf")
+
     with st.expander("Posterior Probabilities"):
         posterior_probs_inv(cur_results_dir, results_df, tab_type)
     st.divider()
+
+    return
 
     with st.expander(
         "Scenario Loss Distribution"
@@ -1339,9 +1357,6 @@ def run_agg_scenario(cur_results_dir: Path):
     train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(
         cur_results_dir
     )
-
-    if "prob" not in train_scenario_results.columns:
-        return
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 

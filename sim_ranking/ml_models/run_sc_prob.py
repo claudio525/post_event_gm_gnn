@@ -17,6 +17,7 @@ if torch.cuda.is_available():
 
 print(f"Using device: {device.upper()}")
 
+
 def train_model(
     rel_db_ffp: Path,
     hyperparams_ffp: Path,
@@ -92,12 +93,12 @@ def train_model(
     prob_model.to(device)
 
     weight_model = sr.ml.models.WeightModel(
-        run_config.n_ims, [16, 16], scalar_features.n_scalar_features
+        run_config.n_ims, [32], scalar_features.n_scalar_features
     )
     weight_model.to(device)
 
     print(f"Run training")
-    sc_prob.train(
+    metrics, best_model_state, best_model_epoch = sc_prob.train(
         prob_model,
         weight_model,
         train_dataset,
@@ -107,8 +108,32 @@ def train_model(
         data_metadata,
     )
 
+    prob_model.load_state_dict(best_model_state)
+
+    print(
+        f"Best model epoch: {best_model_epoch + 1}, "
+        f"Validation:\n"
+        f"\tLoss: {metrics['loss_hist_val'][best_model_epoch]:.4f}\n"
+    )
+
+    print(f"Run post-processing")
+    data_metadata["db"] = str(rel_db_ffp)
+    sc_prob.post_processing(
+        prob_model,
+        weight_model,
+        train_dataset,
+        val_dataset,
+        hp_config,
+        run_config,
+        metrics,
+        best_model_epoch,
+        scalar_features,
+        data_metadata,
+        val_int_sites,
+        train_sites,
+        id_suffix=id_suffix,
+    )
 
 
 if __name__ == "__main__":
     typer.run(train_model)
-
