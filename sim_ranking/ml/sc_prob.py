@@ -595,7 +595,43 @@ class SCProbDataset(Dataset):
         return self.cum_n_scenarios_event[-1]
 
 
-def create_model(
+def create_indRelModel(
+    hp_config: HyperParamsConfig,
+    scalar_features: ml_data.ScalarFeatures,
+    run_config: prob.RunParamsConfig,
+):
+
+    prob_model = models.ProbIndModel(
+        hp_config.fc_units,
+        scalar_features.n_scalar_features,
+        len(run_config.ims),
+        hp_config.n_im_features,
+        is_sub_model=False,
+        per_im_prob=run_config.per_im_prob,
+    )
+
+    print(f"Model summary")
+    summary(
+        prob_model,
+        input_size=[
+            (
+                hp_config.batch_size,
+                hp_config.n_im_features,
+                run_config.n_rels,
+                len(run_config.ims),
+            ),
+            (
+                hp_config.batch_size,
+                run_config.n_rels,
+                scalar_features.n_scalar_features,
+            ),
+        ],
+    )
+
+    return prob_model
+
+
+def create_IMmodel(
     hp_config: HyperParamsConfig,
     scalar_features: ml_data.ScalarFeatures,
     run_config: prob.RunParamsConfig,
@@ -710,7 +746,7 @@ def train(
     )
 
     train_dataloader = prob.CustomTabularDataLoader(
-        train_dataset, hp_config.batch_size, True, shuffle_rels=True
+        train_dataset, hp_config.batch_size, True, shuffle_rels=False
     )
     val_dataloader = prob.CustomTabularDataLoader(
         val_dataset, hp_config.batch_size, True, shuffle_rels=False
@@ -876,9 +912,7 @@ def get_dataset_prediction(
     columns += im_res_cols
 
     if run_config.per_im_prob:
-        im_site_weights_cols = np.char.add(
-            run_config.ims, "_site_weights"
-        ).tolist()
+        im_site_weights_cols = np.char.add(run_config.ims, "_site_weights").tolist()
         im_misfit_cols = np.char.add(run_config.ims, "_misfit").tolist()
         prob_cols = np.char.add(run_config.ims, "_prob").tolist()
         columns += prob_cols + im_misfit_cols
@@ -886,7 +920,8 @@ def get_dataset_prediction(
         columns += ["prob", "misfit_score", "site_weights"]
 
     results_df = pd.DataFrame(
-        index=np.arange(dataset.n_sites_scenario.sum() * run_config.n_rels), columns=columns
+        index=np.arange(dataset.n_sites_scenario.sum() * run_config.n_rels),
+        columns=columns,
     )
 
     results_df = results_df.astype(
@@ -968,15 +1003,11 @@ def get_dataset_prediction(
                 record_events, "batch -> (batch rel)", rel=pred.shape[1]
             )
             # Site of Interest
-            results_df.loc[
-                start_ix:end_ix, "site_int"
-            ] = df_site_int = einops.repeat(
+            results_df.loc[start_ix:end_ix, "site_int"] = df_site_int = einops.repeat(
                 site_int, "batch -> (batch rel)", rel=pred.shape[1]
             )
             # Observation site
-            results_df.loc[
-                start_ix:end_ix, "site_obs"
-            ] = df_site_obs = einops.repeat(
+            results_df.loc[start_ix:end_ix, "site_obs"] = df_site_obs = einops.repeat(
                 site_obs, "batch -> (batch rel)", rel=pred.shape[1]
             )
             # Realisation
@@ -1038,14 +1069,10 @@ def get_dataset_prediction(
             ).astype(np.float32)
 
             # Site-to-site distance
-            results_df.loc[
-                start_ix:end_ix, "s2s_distance"
-            ] = dist_matrix.values[
+            results_df.loc[start_ix:end_ix, "s2s_distance"] = dist_matrix.values[
                 dist_matrix.index.get_indexer_for(df_site_int),
                 dist_matrix.columns.get_indexer_for(df_site_obs),
-            ].astype(
-                np.float32
-            )
+            ].astype(np.float32)
 
             start_ix = end_ix + 1
 
@@ -1109,7 +1136,9 @@ def post_processing(
         train_sample_results, run_config, "_site_weights"
     )
     print("Validation dataset")
-    val_scenario_results = prob.compute_scenario_distribution(val_sample_results, run_config, "_site_weights")
+    val_scenario_results = prob.compute_scenario_distribution(
+        val_sample_results, run_config, "_site_weights"
+    )
 
     train_scenario_results.to_parquet(cur_out_dir / "train_scenario_results.parquet")
     val_scenario_results.to_parquet(cur_out_dir / "val_scenario_results.parquet")

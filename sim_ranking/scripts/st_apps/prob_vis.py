@@ -1333,13 +1333,9 @@ def run_agg_single(cur_results_dir: Path):
 
 
 def agg_scenario_vis(cur_results_dir: Path, results_df: pd.DataFrame, tab_type: str):
-    print(f"wtf")
-
     with st.expander("Posterior Probabilities"):
         posterior_probs_inv(cur_results_dir, results_df, tab_type)
     st.divider()
-
-    return
 
     with st.expander(
         "Scenario Loss Distribution"
@@ -1349,8 +1345,8 @@ def agg_scenario_vis(cur_results_dir: Path, results_df: pd.DataFrame, tab_type: 
         loss_dist(results_df)
     st.divider()
 
-    with st.expander("Weighted Residuals"):
-        agg_residuals(cur_results_dir, results_df, tab_type)
+    # with st.expander("Weighted Residuals"):
+    #     agg_residuals(cur_results_dir, results_df, tab_type)
 
 
 def run_agg_scenario(cur_results_dir: Path):

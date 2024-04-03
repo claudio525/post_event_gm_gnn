@@ -84,8 +84,7 @@ class ProbIndModel(ProbModel):
                 self.fc_layers.append(nn.Linear(self.input_size, fc_units[i]))
             else:
                 self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
-
-            self.fc_layers.append(nn.BatchNorm1d(self.fc_units[i]))
+            # self.fc_layers.append(nn.BatchNorm1d(self.fc_units[i]))
             self.fc_layers.append(nn.LeakyReLU())
 
         if self.is_sub_model:
@@ -108,16 +107,13 @@ class ProbIndModel(ProbModel):
     def forward(self, im_values: torch.Tensor, scalar_values: torch.Tensor):
         X_im = einops.rearrange(im_values, "batch type rel im -> batch rel (type im)")
         X_ss = scalar_values
-        # X_ss = einops.repeat(
-        #     scalar_values, "batch ss -> batch rel ss", rel=im_values.shape[2]
-        # )
 
         X = torch.cat((X_im, X_ss), axis=2)
         X = einops.rearrange(X, "batch rel feature -> (batch rel) feature")
 
-        X = self.fc_layers(X)
-        X = einops.rearrange(
-            X,
+        pred = self.fc_layers(X)
+        pred = einops.rearrange(
+            pred,
             "(batch rel) n_outs -> batch rel n_outs",
             batch=im_values.shape[0],
             rel=im_values.shape[2],
@@ -126,10 +122,9 @@ class ProbIndModel(ProbModel):
 
         # Apply sigmoid unless its a sub-model
         if not self.is_sub_model:
-            X = custom_sigmoid(X.squeeze(), 0.5)
-            pred = X / X.sum(axis=1, keepdims=True)
-        else:
-            pred = X
+            # pred = custom_sigmoid(pred.squeeze(), 0.5)
+            pred = F.sigmoid(pred.squeeze())
+            pred = pred / pred.sum(axis=1, keepdims=True)
 
         return pred
 

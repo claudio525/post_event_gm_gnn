@@ -89,7 +89,8 @@ def train_model(
         corr_dir=corr_dir,
     )
 
-    prob_model = sc_prob.create_model(hp_config, scalar_features, run_config)
+    # prob_model = sc_prob.create_IMmodel(hp_config, scalar_features, run_config)
+    prob_model = sc_prob.create_indRelModel(hp_config, scalar_features, run_config)
     prob_model.to(device)
 
     weight_model = sr.ml.models.WeightModel(
