@@ -1,4 +1,5 @@
 import os
+import tempfile as tmp
 from pathlib import Path
 from typing import List, Dict, Sequence
 from dataclasses import dataclass
@@ -688,19 +689,42 @@ def compute_loss(
     w_pred: torch.Tensor,
     run_config: prob.RunParamsConfig,
 ):
-    # Compute the loss per sample
-    sample_loss = einops.einsum(
+    # p = pred[:, None, :, :] * scenario_mask[:, :]
+    # t = pred * w_pred[:, None, :]
+    # b = einops.einsum(t, scenario_mask.to(torch.float32),
+    #                   "sample rel im, sample scenario -> sample scenario rel im")
+    # a = einops.einsum(t, scenario_mask.to(torch.float32), "sample rel im, sample scenario -> scenario rel im")
+
+    # Computes the weighted scenario loss
+    # Note: w_pred has to already be normalised (i.e. sums to 1 for each scenario)
+    # L_{s,i,j} = \sum_{r} p_{r,i,j} w_{r, j} \delta_{r, s} M_{r, i, j}
+    # where
+    # - p_{r,i,j} is the predicted probability of the r-th observation site, i-th realisation and j-th IM
+    # - w_{r, j} is the weight of the r-th observation site and j-th IM
+    # - \delta_{r, s} is a boolean that shows if the r-th observation site is in the s-th scenario
+    # - M_{r, i, j} is the misfit score of the r-th observation site, i-th realisation and j-th IM
+    scenario_loss = einops.einsum(
         pred,
         w_pred,
-        im_misfit_score.to(run_config.device, dtype=torch.float32),
-        "n_samples n_rels n_ims,"
-        "n_samples n_ims,"
-        "n_samples n_rels n_ims -> n_samples",
+        scenario_mask.to(torch.float32),
+        im_misfit_score.to(run_config.device, torch.float32),
+        "obs rel im, obs im, obs scenario, obs rel im -> scenario im",
     )
-    scenario_loss = (sample_loss[:, None] * scenario_mask).sum(axis=0)
-    loss = scenario_loss.mean()
+    scenario_loss = scenario_loss
 
-    return sample_loss, scenario_loss, loss
+    # Compute the loss per sample
+    # sample_loss = einops.einsum(
+    #     pred,
+    #     w_pred,
+    #     im_misfit_score.to(run_config.device, dtype=torch.float32),
+    #     "n_samples n_rels n_ims,"
+    #     "n_samples n_ims,"
+    #     "n_samples n_rels n_ims -> n_samples",
+    # )
+    # scenario_loss = (sample_loss[:, None] * scenario_mask).sum(axis=0)
+    loss = scenario_loss.mean(axis=1).mean()
+
+    return scenario_loss, loss
 
 
 def get_weight_prediction(
@@ -752,6 +776,22 @@ def train(
         val_dataset, hp_config.batch_size, True, shuffle_rels=False
     )
 
+    def save_grad(grad: torch.Tensor):
+        grad_df.loc[len(grad_df)] = {
+            "epoch": epoch_ix,
+            "shape": str(tuple(grad.shape)),
+            "min": torch.abs(grad).min().item(),
+            "max": torch.abs(grad).max().item(),
+            "norm": grad.norm().item(),
+        }
+
+    if run_config.debug:
+        grad_df = pd.DataFrame(
+            columns=["epoch", "shape", "min", "max", "norm"]
+        )
+        for param in prob_model.parameters():
+            param.register_hook(save_grad)
+
     lr_ix = 0
     for epoch_ix in range(hp_config.n_epochs):
         if lr_ix < len(hp_config.lr_epochs) and epoch_ix == hp_config.lr_epochs[lr_ix]:
@@ -795,6 +835,17 @@ def train(
                 hp_config,
             )
 
+            if pred.isnan().any():
+                print("NaNs in model predictions, Quitting!")
+                if run_config.debug:
+                    with tmp.TemporaryDirectory() as tmp_dir:
+                        grad_df.to_csv(
+                            Path(tmp_dir) / f"{mlt.utils.create_run_id()}_grads.csv",
+                            index=False,
+                        )
+                        print(f"Saved grads to {tmp_dir}")
+                exit()
+
             scenario_mask = get_scenario_mask(record_scenario_ids, scenario_ids)
             scenario_mask = scenario_mask.to(run_config.device)
 
@@ -807,7 +858,7 @@ def train(
             # Sum each scenario weights, and then remove scenario axis
             w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
 
-            sample_loss, scenario_loss, loss = compute_loss(
+            scenario_loss, loss = compute_loss(
                 scenario_mask,
                 pred,
                 im_misfit_score,
@@ -865,7 +916,7 @@ def train(
                 # Sum each scenario weights, and then remove scenario axis
                 w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
 
-                sample_loss, scenario_loss, loss = compute_loss(
+                scenario_loss, loss = compute_loss(
                     scenario_mask,
                     pred,
                     im_misfit_score,

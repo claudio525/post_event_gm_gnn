@@ -86,6 +86,7 @@ class ProbIndModel(ProbModel):
                 self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
             # self.fc_layers.append(nn.BatchNorm1d(self.fc_units[i]))
             self.fc_layers.append(nn.LeakyReLU())
+            # self.fc_layers.append(nn.SELU())
 
         if self.is_sub_model:
             # If the model is a sub-model the last number in fc_units

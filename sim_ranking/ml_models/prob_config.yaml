@@ -13,11 +13,7 @@ misfit_fn: "mse"
 
 # Model Params
 # Independent Model
-
-#ind_fc_units: [16, 16, 16]
 ind_fc_units: [16, 16]
-#ind_fc_units: [32, 32]
-#ind_fc_units: [64, 128, 64]
 
 #use_combined_model: True
 use_combined_model: False

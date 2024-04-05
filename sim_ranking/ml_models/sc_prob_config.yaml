@@ -1,14 +1,15 @@
 # Training Params
 batch_size: 64
 #lr: 0.001
-lr: [0.001, 0.0005, 0.0001]
-lr_epochs: [50, 75]
-#l2_reg: 0.005
-l2_reg: 0.001
+#lr: [0.001, 0.0005, 0.0001]
+lr: [0.01, 0.005, 0.001, 0.0001]
+lr_epochs: [50, 75, 100]
+#l2_reg: 0.01
+l2_reg: 0.0005
 
 misfit_fn: "mse"
 
-fc_units: [16, 16]
+fc_units: [64, 64]
 
 # IM features
 im_sim_site_obs: False

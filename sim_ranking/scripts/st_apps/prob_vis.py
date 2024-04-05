@@ -801,43 +801,44 @@ def create_pSA_dist_plot(
         )
     else:
         im_prob_cols = [f"{cur_im}_prob" for cur_im in sr.constants.PSA_KEYS]
+        assert np.allclose(results_df[im_prob_cols].sum(), 1.0)
+
         weighted_avg = einops.einsum(
             results_df[im_prob_cols].values,
-            np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
+            site_int_sims.loc[:, sr.constants.PSA_KEYS].values,
             "i j, i j -> j",
         )
         weighted_std = np.sqrt(
             einops.einsum(
                 results_df[im_prob_cols].values,
                 (
-                        np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
+                        site_int_sims.loc[:, sr.constants.PSA_KEYS].values
                         - weighted_avg
                 )
                 ** 2,
                 "i j, i j -> j",
             )
-            / np.sum(results_df[im_prob_cols].values)
         )
 
     ax.semilogx(
         sr.constants.PERIODS,
-        np.exp(weighted_avg),
+        weighted_avg,
         label="ML - Mean",
         c="blue",
     )
     ax.fill_between(
         sr.constants.PERIODS,
-        np.exp(weighted_avg + weighted_std),
-        np.exp(weighted_avg - weighted_std),
+        weighted_avg + weighted_std,
+        weighted_avg - weighted_std,
         alpha=0.4,
         label="ML +/- 1 Std",
         color="lightblue",
     )
     ax.semilogx(
-        sr.constants.PERIODS, np.exp(weighted_avg + weighted_std), c="lightblue"
+        sr.constants.PERIODS, weighted_avg + weighted_std, c="lightblue"
     )
     ax.semilogx(
-        sr.constants.PERIODS, np.exp(weighted_avg - weighted_std), c="lightblue"
+        sr.constants.PERIODS, weighted_avg - weighted_std, c="lightblue"
     )
 
     if high_rels is not None:
@@ -1015,7 +1016,7 @@ def create_dist_plot(
                 ax.legend(fontsize="small")
                 ax.set_title(f"{im} Distribution")
                 ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-                # fig.tight_layout()
+                fig.tight_layout()
 
                 st.pyplot(fig, use_container_width=True)
                 plt.close(fig)
@@ -1052,7 +1053,7 @@ def create_dist_plot(
                 ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
                 ax.set_ylim([-0.05, 1.05])
                 ax.set_xlim(-2, 2)
-                # fig.tight_layout()
+                fig.tight_layout()
 
                 st.pyplot(fig, use_container_width=True)
                 plt.close(fig)
@@ -1072,7 +1073,7 @@ def create_dist_plot(
                 ax.set_xlim(-2.0, 2.0)
                 ax.axvline(0.0, c="r")
                 ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-                # fig.tight_layout()
+                fig.tight_layout()
 
                 st.pyplot(fig, use_container_width=True)
                 plt.close(fig)
@@ -1227,7 +1228,6 @@ def agg_residuals(
     ax.set_ylim([-1.5, 1.5])
     ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
     ax.legend()
-    # fig.tight_layout()
 
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
@@ -1259,77 +1259,10 @@ def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_typ
     ax.set_xlabel(f"Top {n_probs} (summed) probabilities")
     ax.set_ylabel(f"Count")
     ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    # fig.tight_layout()
 
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
 
-
-def loss_dist(results_df: pd.DataFrame, title: str = "Loss Distribution"):
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    group_cols = (
-        ["event_id", "site_int", "site_obs"]
-        if "site_obs" in results_df.columns
-        else ["event_id", "site_int"]
-    )
-    groups = get_results_group(results_df, group_cols)
-
-    if "site_corr_weights" not in results_df.columns:
-        loss = groups.apply(lambda x: np.sum(x.misfit_score * x.prob))
-    else:
-        loss = groups.apply(
-            lambda x: np.sum(x.misfit_score * x.prob * x.site_corr_weights)
-        )
-
-    ax.hist(loss.values, bins=100)
-
-    ax.set_xlabel(f"Loss")
-    ax.set_ylabel(f"Count")
-    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    # ax.set_title(f"Loss Distribution")
-    fig.tight_layout()
-
-    st.pyplot(fig, use_container_width=False)
-    plt.close(fig)
-
-
-def run_agg_single(cur_results_dir: Path):
-
-    train_sample_results, val_sample_results = st_utils.ml_load_sample_results(
-        cur_results_dir
-    )
-
-    if "prob" not in train_sample_results.columns:
-        return
-
-    train_tab, val_tab = st.tabs(["Training", "Validation"])
-
-    with train_tab:
-        posterior_probs_inv(cur_results_dir, train_sample_results, "train_sample")
-        st.divider()
-
-        loss_dist(train_sample_results)
-        st.divider()
-
-        agg_residuals(
-            cur_results_dir,
-            train_sample_results,
-            "train_sample",
-        )
-
-    with val_tab:
-        posterior_probs_inv(cur_results_dir, val_sample_results, "val_sample")
-        st.divider()
-
-        loss_dist(val_sample_results)
-        st.divider()
-
-        agg_residuals(
-            cur_results_dir,
-            val_sample_results,
-            "val_sample",
-        )
 
 
 def agg_scenario_vis(cur_results_dir: Path, results_df: pd.DataFrame, tab_type: str):
@@ -1337,16 +1270,7 @@ def agg_scenario_vis(cur_results_dir: Path, results_df: pd.DataFrame, tab_type: 
         posterior_probs_inv(cur_results_dir, results_df, tab_type)
     st.divider()
 
-    with st.expander(
-        "Scenario Loss Distribution"
-        if "scenario" in tab_type
-        else "Sample Loss Distribution"
-    ):
-        loss_dist(results_df)
-    st.divider()
-
-    # with st.expander("Weighted Residuals"):
-    #     agg_residuals(cur_results_dir, results_df, tab_type)
+    return
 
 
 def run_agg_scenario(cur_results_dir: Path):
@@ -1358,33 +1282,11 @@ def run_agg_scenario(cur_results_dir: Path):
 
     with train_tab:
         agg_scenario_vis(cur_results_dir, train_scenario_results, "train_scenario")
-        # with st.expander("Posterior Probabilities"):
-        #     posterior_probs_inv(cur_results_dir, train_scenario_results, "train_scenario")
-        #     st.divider()
-        #
-        # loss_dist(train_scenario_results)
-        # st.divider()
-        #
-        # agg_residuals(
-        #     cur_results_dir,
-        #     train_scenario_results,
-        #     "train_scenario",
-        # )
+
 
     with val_tab:
         agg_scenario_vis(cur_results_dir, val_scenario_results, "val_scenario")
-        # with st.expander("Posterior Probabilities"):
-        #     posterior_probs_inv(cur_results_dir, val_scenario_results, "val_scenario")
-        #     st.divider()
-        #
-        # loss_dist(val_scenario_results)
-        # st.divider()
-        #
-        # agg_residuals(
-        #     cur_results_dir,
-        #     val_scenario_results,
-        #     "val_scenario",
-        # )
+
 
 
 def main(
@@ -1456,10 +1358,6 @@ def main(
             gen_gm_params_ffp=gen_gm_params_ffp,
             syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
         )
-
-    with agg_single_tab:
-        # pass
-        run_agg_single(cur_results_dir)
 
     with agg_scenario_tab:
         # pass

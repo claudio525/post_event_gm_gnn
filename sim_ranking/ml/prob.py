@@ -475,7 +475,7 @@ class ProbDataset(Dataset):
     def __len__(self):
         return int(np.sum(self.n_samples_event))
 
-    def get_metadata(self, batch_ind: Sequence[int]):
+    def get_metadata(self, batch_ind: np.ndarray, rel_ind: np.ndarray):
         """Get the metadata"""
         (
             event_ind,
@@ -489,7 +489,7 @@ class ProbDataset(Dataset):
             self.events[event_ind],
             self.sites[record_site_int_ind],
             self.sites[record_site_obs_ind],
-            self.rels[event_ind],
+            self.rels[event_ind][rel_ind],
             self.residual[record_site_int_ind],
         )
 
@@ -519,7 +519,7 @@ class ProbDataset(Dataset):
             record_site_obs_ind,
         )
 
-    def get_batch(self, batch_ind: np.ndarray):
+    def get_batch(self, batch_ind: np.ndarray, shuffle_rels: bool = False):
         (
             event_ind,
             site_int_ind,
@@ -544,20 +544,24 @@ class ProbDataset(Dataset):
         im_site_corr_weights = self.site_corrs[batch_ind, :]
         site_corr_weights = self.site_corr_weights[batch_ind]
 
-        rel_shuffle_ind = np.random.permutation(self.n_rels)
+        if shuffle_rels:
+            rel_ind = np.random.permutation(self.n_rels)
+        else:
+            rel_ind = np.arange(self.n_rels)
 
         return (
             batch_ind,
-            site_int_norm_sim_ims[:, rel_shuffle_ind, :],
-            site_obs_norm_sim_ims[:, rel_shuffle_ind, :],
+            rel_ind,
+            site_int_norm_sim_ims[:, rel_ind, :],
+            site_obs_norm_sim_ims[:, rel_ind, :],
             site_obs_norm_obs_ims,
-            site_int_sim_ims[:, rel_shuffle_ind, :],
+            site_int_sim_ims[:, rel_ind, :],
             site_obs_sim_ims,
             site_obs_obs_ims,
             scalar_features,
-            obs_site_misfit_score[:, rel_shuffle_ind],
-            misfit_score[:, rel_shuffle_ind],
-            im_misfit_score[:, rel_shuffle_ind, :],
+            obs_site_misfit_score[:, rel_ind],
+            misfit_score[:, rel_ind],
+            im_misfit_score[:, rel_ind, :],
             site_corr_weights,
             im_site_corr_weights,
         )
@@ -609,78 +613,79 @@ def create_model(
     scalar_features: ml_data.ScalarFeatures,
     run_config: RunParamsConfig,
 ):
-    n_inputs = (run_config.n_rels * hp_config.n_im_features) + scalar_features.n_scalar_features
 
-    prob_model = models.ProbIMModel(
-        n_inputs, hp_config.ind_fc_units, run_config.n_rels
-    )
-
-    print(f"Model summary")
-    summary(
-        prob_model,
-        input_size=[
-            (hp_config.batch_size, n_inputs),
-        ],
-    )
-
-    return prob_model
-
-
-    # n_scalar_features = (
-    #     scalar_features.n_scalar_features + 1
-    #     if hp_config.use_obs_site_misfit_score
-    #     else scalar_features.n_scalar_features
+    ## IM Model
+    # n_inputs = (run_config.n_rels * hp_config.n_im_features) + scalar_features.n_scalar_features
+    #
+    # prob_model = models.ProbIMModel(
+    #     n_inputs, hp_config.ind_fc_units, run_config.n_rels
     # )
     #
-    # if hp_config.combined_model:
-    #     prob_model = models.ProbCombModel(
-    #         hp_config.ind_fc_units,
-    #         hp_config.comb_fc_units,
-    #         n_scalar_features,
-    #         len(run_config.ims),
-    #         hp_config.n_im_features,
-    #         run_config.per_im_prob,
-    #     )
-    #
-    #     print(f"Model summary")
-    #     summary(
-    #         prob_model,
-    #         input_size=[
-    #             (
-    #                 hp_config.batch_size,
-    #                 hp_config.n_im_features,
-    #                 run_config.n_rels,
-    #                 len(run_config.ims),
-    #             ),
-    #             (hp_config.batch_size, run_config.n_rels, n_scalar_features),
-    #         ],
-    #     )
-    #
-    # else:
-    #     prob_model = models.ProbIndModel(
-    #         hp_config.ind_fc_units,
-    #         n_scalar_features,
-    #         len(run_config.ims),
-    #         hp_config.n_im_features,
-    #         is_sub_model=False,
-    #         per_im_prob=run_config.per_im_prob,
-    #     )
-    #
-    #     print(f"Model summary")
-    #     summary(
-    #         prob_model,
-    #         input_size=[
-    #             (
-    #                 hp_config.batch_size,
-    #                 hp_config.n_im_features,
-    #                 run_config.n_rels,
-    #                 len(run_config.ims),
-    #             ),
-    #             (hp_config.batch_size, run_config.n_rels, n_scalar_features),
-    #         ],
-    #     )
+    # print(f"Model summary")
+    # summary(
+    #     prob_model,
+    #     input_size=[
+    #         (hp_config.batch_size, n_inputs),
+    #     ],
+    # )
     #
     # return prob_model
+
+    n_scalar_features = (
+        scalar_features.n_scalar_features + 1
+        if hp_config.use_obs_site_misfit_score
+        else scalar_features.n_scalar_features
+    )
+
+    if hp_config.combined_model:
+        prob_model = models.ProbCombModel(
+            hp_config.ind_fc_units,
+            hp_config.comb_fc_units,
+            n_scalar_features,
+            len(run_config.ims),
+            hp_config.n_im_features,
+            run_config.per_im_prob,
+        )
+
+        print(f"Model summary")
+        summary(
+            prob_model,
+            input_size=[
+                (
+                    hp_config.batch_size,
+                    hp_config.n_im_features,
+                    run_config.n_rels,
+                    len(run_config.ims),
+                ),
+                (hp_config.batch_size, run_config.n_rels, n_scalar_features),
+            ],
+        )
+
+    else:
+        prob_model = models.ProbIndModel(
+            hp_config.ind_fc_units,
+            n_scalar_features,
+            len(run_config.ims),
+            hp_config.n_im_features,
+            is_sub_model=False,
+            per_im_prob=run_config.per_im_prob,
+        )
+
+        print(f"Model summary")
+        summary(
+            prob_model,
+            input_size=[
+                (
+                    hp_config.batch_size,
+                    hp_config.n_im_features,
+                    run_config.n_rels,
+                    len(run_config.ims),
+                ),
+                (hp_config.batch_size, run_config.n_rels, n_scalar_features),
+            ],
+        )
+
+    return prob_model
 
 
 def train(
@@ -706,9 +711,9 @@ def train(
     lr_ix = 0
 
     train_dataloader = CustomTabularDataLoader(
-        train_dataset, hp_config.batch_size, True
+        train_dataset, hp_config.batch_size, True, shuffle_rels=False
     )
-    val_dataloader = CustomTabularDataLoader(val_dataset, hp_config.batch_size, True)
+    val_dataloader = CustomTabularDataLoader(val_dataset, hp_config.batch_size, True, shuffle_rels=False)
 
     for epoch_ix in range(hp_config.n_epochs):
         if lr_ix < len(hp_config.lr_epochs) and epoch_ix == hp_config.lr_epochs[lr_ix]:
@@ -726,6 +731,7 @@ def train(
         iter_loop.set_description(f"Epoch {epoch_ix}/{hp_config.n_epochs}")
         for i, (
             _,
+            __,
             site_int_norm_sim_ims,
             site_obs_norm_sim_ims,
             site_obs_norm_obs_ims,
@@ -748,7 +754,6 @@ def train(
                 site_int_sim_ims,
                 site_obs_sim_ims,
                 scalar_features,
-                obs_site_misfit_score,
                 run_config,
                 hp_config,
             )
@@ -780,6 +785,7 @@ def train(
             prob_model.eval()
             for i, (
                 _,
+                __,
                 site_int_norm_sim_ims,
                 site_obs_norm_sim_ims,
                 site_obs_norm_obs_ims,
@@ -802,7 +808,6 @@ def train(
                     site_int_sim_ims,
                     site_obs_sim_ims,
                     scalar_features,
-                    obs_site_misfit_score,
                     run_config,
                     hp_config,
                 )
@@ -868,7 +873,7 @@ def compute_im_loss(
 
 
 def get_prediction(
-    prob_model: models.ProbIMModel,
+    prob_model: nn.Module,
     site_obs_norm_obs_ims: torch.Tensor,
     site_int_norm_sim_ims: torch.Tensor,
     site_obs_norm_sim_ims: torch.Tensor,
@@ -946,7 +951,7 @@ def get_dataset_predictions(
     hp_config: HyperParamsConfig,
 ):
     pred_dataloader = CustomTabularDataLoader(
-        dataset, hp_config.batch_size, shuffle=False
+        dataset, hp_config.batch_size, shuffle=False, shuffle_rels=False,
     )
 
     columns = [
@@ -994,6 +999,7 @@ def get_dataset_predictions(
         prob_model.eval()
         for i, (
             batch_ind,
+            rel_ind,
             site_int_norm_sim_ims,
             site_obs_norm_sim_ims,
             site_obs_norm_obs_ims,
@@ -1021,7 +1027,7 @@ def get_dataset_predictions(
                 hp_config,
             )
 
-            events, site_int, site_obs, rels, residual = dataset.get_metadata(batch_ind)
+            events, site_int, site_obs, rels, residual = dataset.get_metadata(batch_ind, rel_ind)
 
             cur_start_ix = i * hp_config.batch_size * run_config.n_rels
             cur_end_ix = cur_start_ix + pred.shape[0] * run_config.n_rels - 1
@@ -1232,9 +1238,6 @@ def _im_weighted_mean(
 
     return agg_im_probs
 
-    #     yield np.sum(prob[cur_mask] * weights[cur_mask], axis=0)
-    # pass
-
 
 def compute_scenario_distribution(
     sample_results: pd.DataFrame, run_config: RunParamsConfig, im_site_weights_suffix: str = "_site_corr_weights"
@@ -1244,7 +1247,7 @@ def compute_scenario_distribution(
     """
     string_to_int = np.vectorize(lambda x: hash(x))
     im_prob_cols = np.char.add(run_config.ims, "_prob")
-    im_site_corr_weight_cols = np.char.add(run_config.ims, im_site_weights_suffix)
+    im_site_weight_cols = np.char.add(run_config.ims, im_site_weights_suffix)
     im_res_cols = np.char.add(run_config.ims, "_residual")
     im_misfit_cols = np.char.add(run_config.ims, "_misfit")
 
@@ -1254,35 +1257,38 @@ def compute_scenario_distribution(
     for (cur_event, cur_site_int), cur_group in iter_loop:
         cur_rel_group = cur_group.groupby("rel_id", observed=True)
         if run_config.per_im_prob:
-            cur_group["rel_int_id"] = string_to_int(cur_group.rel_id.values)
-
-            cur_result = pd.DataFrame(
-                data=_im_weighted_mean(
-                    # Have to pass this, as np.unique sorts the result
-                    cur_group.rel_int_id.values[: run_config.n_rels],
-                    cur_group.rel_int_id.values,
-                    cur_group[im_prob_cols].values,
-                    cur_group[im_site_corr_weight_cols].values,
-                ),
-                index=cur_group.rel_id.values[: run_config.n_rels],
-                columns=im_prob_cols,
-            )
-
-            # cur_result[im_prob_cols]=  cur_rel_group.apply(wm)
-            # t = pd.DataFrame(index=cur_rel_group.first().index)
-            # for cur_im in run_config.ims:
-            #     cur_wm = lambda x: np.sum(
-            #         x[f"{cur_im}_prob"].values
-            #         * (
-            #             x[f"{cur_im}_site_corr_weights"].values
-            #             / x[f"{cur_im}_site_corr_weights"].values.sum()
-            #         )
-            #     )
-            #     t[f"{cur_im}_prob"] = cur_rel_group.apply(cur_wm)
+            # cur_group["rel_int_id"] = string_to_int(cur_group.rel_id.values)
             #
-            # print(f"wtf")
-        else:
+            # cur_result = pd.DataFrame(
+            #     data=_im_weighted_mean(
+            #         # Have to pass this, as np.unique sorts the result
+            #         cur_group.rel_int_id.values[: run_config.n_rels],
+            #         cur_group.rel_int_id.values,
+            #         cur_group[im_prob_cols].values,
+            #         cur_group[im_site_weight_cols].values,
+            #     ),
+            #     index=cur_group.rel_id.values[: run_config.n_rels],
+            #     columns=im_prob_cols,
+            # )
+            #
+            # results = []
+            # cur_rels = np.unique(cur_group.rel_id.values)
+            # for cur_rel in cur_rels:
+            #     results.append(np.sum(cur_group.loc[cur_group.rel_id == cur_rel, im_prob_cols].values * cur_group.loc[cur_group.rel_id == cur_rel, im_site_weight_cols].values, axis=0))
+            # results = np.stack(results, axis=0)
+            # t2 = pd.DataFrame(index=cur_rels, columns=im_prob_cols, data=results)
 
+            cur_group = cur_group.sort_values(["site_obs", "rel_id"])
+            cur_rels = np.unique(cur_group.rel_id.values)
+            assert np.all(cur_group.rel_id[:run_config.n_rels] == cur_rels)
+
+            cur_im_prob_values = einops.rearrange(cur_group[im_prob_cols].values, "(o r) im -> o r im", r=run_config.n_rels)
+            cur_im_site_weight = einops.rearrange(cur_group[im_site_weight_cols].values, "(o r) im -> o r im", r=run_config.n_rels)
+            cur_agg_probs = einops.einsum(cur_im_site_weight, cur_im_prob_values, "o r im, o r im -> r im")
+            assert np.allclose(cur_agg_probs.sum(axis=0), 1.0)
+
+            cur_result = pd.DataFrame(index=cur_rels, columns=im_prob_cols, data=cur_agg_probs)
+        else:
             wm = lambda x: np.sum(
                 x.prob.values
                 * (x.site_corr_weights.values / x.site_corr_weights.values.sum())
