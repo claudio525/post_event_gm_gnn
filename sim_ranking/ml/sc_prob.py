@@ -689,14 +689,15 @@ def compute_loss(
     w_pred: torch.Tensor,
     run_config: prob.RunParamsConfig,
 ):
-    # p = pred[:, None, :, :] * scenario_mask[:, :]
     # t = pred * w_pred[:, None, :]
-    # b = einops.einsum(t, scenario_mask.to(torch.float32),
-    #                   "sample rel im, sample scenario -> sample scenario rel im")
-    # a = einops.einsum(t, scenario_mask.to(torch.float32), "sample rel im, sample scenario -> scenario rel im")
+    # t = t[:, None, ...] * scenario_mask[:, :, None, None] * im_misfit_score[:, None, :, :]
+    # t = torch.sum(t, axis=(0, 2))
 
+    ## Scenario Loss
+    # Note I: w_pred has to already be normalised (i.e. sums to 1 for each scenario)
+    # Note II: This operation requires a large amount of memory due to the
+    #         broadcasting performed by einops.einsum
     # Computes the weighted scenario loss
-    # Note: w_pred has to already be normalised (i.e. sums to 1 for each scenario)
     # L_{s,i,j} = \sum_{r} p_{r,i,j} w_{r, j} \delta_{r, s} M_{r, i, j}
     # where
     # - p_{r,i,j} is the predicted probability of the r-th observation site, i-th realisation and j-th IM
@@ -710,7 +711,6 @@ def compute_loss(
         im_misfit_score.to(run_config.device, torch.float32),
         "obs rel im, obs im, obs scenario, obs rel im -> scenario im",
     )
-    scenario_loss = scenario_loss
 
     # Compute the loss per sample
     # sample_loss = einops.einsum(

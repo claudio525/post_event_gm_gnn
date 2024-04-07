@@ -84,7 +84,7 @@ class ProbIndModel(ProbModel):
                 self.fc_layers.append(nn.Linear(self.input_size, fc_units[i]))
             else:
                 self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
-            # self.fc_layers.append(nn.BatchNorm1d(self.fc_units[i]))
+            self.fc_layers.append(nn.BatchNorm1d(self.fc_units[i]))
             self.fc_layers.append(nn.LeakyReLU())
             # self.fc_layers.append(nn.SELU())
 

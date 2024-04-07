@@ -21,6 +21,7 @@ import ml_tools as mlt
 
 import st_utils
 
+
 @st.cache_data
 def load_training_metrics(results_dir: Path):
     metrics = pd.read_pickle(results_dir / "metrics.pickle")
@@ -59,7 +60,9 @@ def run_general_tab(results_dir: Path):
     plt.close(fig)
 
     ### Scenario loss
-    train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(results_dir)
+    train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(
+        results_dir
+    )
     if "prob" in train_scenario_results.columns:
         train_scenario_loss = sr.ml.prob.compute_scenario_loss(train_scenario_results)
         val_scenario_loss = sr.ml.prob.compute_scenario_loss(val_scenario_results)
@@ -312,10 +315,7 @@ def _scenario_viewer(
         .set_index("rel_id")
         .sort_index()
     )
-    cur_event_rels = (
-        cur_scenario_df.index.unique()
-        .astype(str)
-    )
+    cur_event_rels = cur_scenario_df.index.unique().astype(str)
     site_int_obs = (
         obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_int)]
         .iloc[0][sr.constants.PSA_KEYS]
@@ -368,29 +368,37 @@ def _scenario_viewer(
     st.divider()
 
     st.text(f"Number of Observation sites: {cur_scenario_df.n_obs_sites.iloc[0]}")
-    st.text(f"Distance to closest observation site: {cur_scenario_df.min_distance.iloc[0]}")
+    st.text(
+        f"Distance to closest observation site: {cur_scenario_df.min_distance.iloc[0]}"
+    )
 
     # Get the observation sites (sorted by distance)
     cur_obs_sites_df = cur_sample_results.groupby("site_obs", observed=True).first()
-    cur_obs_sites = cur_obs_sites_df[
-        "s2s_distance"].sort_values().index.values.astype(str)
+    cur_obs_sites = (
+        cur_obs_sites_df["s2s_distance"].sort_values().index.values.astype(str)
+    )
 
-    weight_cols = mlt.array_utils.numpy_str_join("_", sr.constants.PSA_KEYS, "site_weights")
+    weight_cols = mlt.array_utils.numpy_str_join(
+        "_", sr.constants.PSA_KEYS, "site_weights"
+    )
     for cur_obs_site in cur_obs_sites:
         with st.expander(cur_obs_site):
-            st.text(f"Observation site: {cur_obs_site}, "
-                    f"distance {cur_obs_sites_df.loc[cur_obs_site, 's2s_distance']:.2f}")
+            st.text(
+                f"Observation site: {cur_obs_site}, "
+                f"distance {cur_obs_sites_df.loc[cur_obs_site, 's2s_distance']:.2f}"
+            )
             st.dataframe(cur_obs_sites_df.loc[cur_obs_site, weight_cols].to_frame().T)
             create_pSA_dist_plot(
                 cur_sample_results.loc[cur_sample_results.site_obs == cur_obs_site],
                 site_int_sims,
                 site_int_obs,
                 high_rels=high_rels if len(high_rels) > 0 else None,
-                site_obs_obs=obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == cur_obs_site)],
+                site_obs_obs=obs_df.loc[
+                    (obs_df.event_id == event) & (obs_df.site_id == cur_obs_site)
+                ],
                 # gen_gm_params=cur_gen_gm_params if show_gen_dist else None,
                 # syn_obs_gm_params=cur_syn_obs_gm_params if show_obs_dist else None,
             )
-
 
     if "prob" in cur_scenario_df.columns:
         col1, col2, col3 = st.columns([0.2, 0.6, 0.2])
@@ -444,7 +452,9 @@ def _scenario_viewer(
                 ],
             )
         with col2:
-            n_bins = st.number_input("Number of Bins", 5, 100, 10, key=f"{tab_type}_n_bins")
+            n_bins = st.number_input(
+                "Number of Bins", 5, 100, 10, key=f"{tab_type}_n_bins"
+            )
         with col3:
             cdf = st.checkbox("CDF", value=False, key=f"{tab_type}_cdf")
 
@@ -626,7 +636,9 @@ def _sample_viewer(
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        show_gen_dist = st.checkbox("Show generation distribution", value=False, key=f"{tab_type}_show_gen")
+        show_gen_dist = st.checkbox(
+            "Show generation distribution", value=False, key=f"{tab_type}_show_gen"
+        )
     with col2:
         show_obs_dist = st.checkbox(
             "Show synthetic observation distribution",
@@ -634,7 +646,9 @@ def _sample_viewer(
             key=f"{tab_type}_show_syn_obs",
         )
     with col3:
-        show_obs_site = st.checkbox("Show observation site", value=True, key=f"{tab_type}_show_obs")
+        show_obs_site = st.checkbox(
+            "Show observation site", value=True, key=f"{tab_type}_show_obs"
+        )
 
     create_pSA_dist_plot(
         cur_results_df,
@@ -791,8 +805,8 @@ def create_pSA_dist_plot(
             einops.einsum(
                 results_df.prob.values,
                 (
-                        np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
-                        - weighted_avg
+                    np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
+                    - weighted_avg
                 )
                 ** 2,
                 "i, i j -> j",
@@ -811,10 +825,7 @@ def create_pSA_dist_plot(
         weighted_std = np.sqrt(
             einops.einsum(
                 results_df[im_prob_cols].values,
-                (
-                        site_int_sims.loc[:, sr.constants.PSA_KEYS].values
-                        - weighted_avg
-                )
+                (site_int_sims.loc[:, sr.constants.PSA_KEYS].values - weighted_avg)
                 ** 2,
                 "i j, i j -> j",
             )
@@ -834,12 +845,8 @@ def create_pSA_dist_plot(
         label="ML +/- 1 Std",
         color="lightblue",
     )
-    ax.semilogx(
-        sr.constants.PERIODS, weighted_avg + weighted_std, c="lightblue"
-    )
-    ax.semilogx(
-        sr.constants.PERIODS, weighted_avg - weighted_std, c="lightblue"
-    )
+    ax.semilogx(sr.constants.PERIODS, weighted_avg + weighted_std, c="lightblue")
+    ax.semilogx(sr.constants.PERIODS, weighted_avg - weighted_std, c="lightblue")
 
     if high_rels is not None:
         colors = sns.color_palette("dark", len(high_rels))
@@ -1081,17 +1088,18 @@ def create_dist_plot(
 
 def run_ind_samples(
     results_dir: Path,
+    sample_results: Tuple[pd.DataFrame, pd.DataFrame],
     gen_gm_params_ffp: Path = None,
     syn_obs_gm_params_ffp: Path = None,
 ):
-    train_sample_results, val_sample_results = st_utils.ml_load_sample_results(
-        results_dir
-    )
+    train_sample_results, val_sample_results = sample_results
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     gen_gm_params = (
-        st_utils.load_gm_params(gen_gm_params_ffp) if gen_gm_params_ffp is not None else None
+        st_utils.load_gm_params(gen_gm_params_ffp)
+        if gen_gm_params_ffp is not None
+        else None
     )
     syn_obs_gm_params = (
         st_utils.load_gm_params(syn_obs_gm_params_ffp)
@@ -1120,18 +1128,20 @@ def run_ind_samples(
 
 def run_ind_scenario(
     results_dir: Path,
+    sample_results: Tuple[pd.DataFrame, pd.DataFrame],
+    scenario_results: Tuple[pd.DataFrame, pd.DataFrame],
     gen_gm_params_ffp: Path = None,
     syn_obs_gm_params_ffp: Path = None,
 ):
-    train_sample_results, val_sample_results = st_utils.ml_load_sample_results(
-        results_dir
-    )
-    train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(results_dir)
+    train_sample_results, val_sample_results = sample_results
+    train_scenario_results, val_scenario_results = scenario_results
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     gen_gm_params = (
-        st_utils.load_gm_params(gen_gm_params_ffp) if gen_gm_params_ffp is not None else None
+        st_utils.load_gm_params(gen_gm_params_ffp)
+        if gen_gm_params_ffp is not None
+        else None
     )
     syn_obs_gm_params = (
         st_utils.load_gm_params(syn_obs_gm_params_ffp)
@@ -1237,8 +1247,11 @@ def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_typ
     if "prob" in results_df.columns:
         prob_key = "prob"
     else:
-        prob_key = st.selectbox("Probability Key", [cur_c for cur_c in results_df.columns if "_prob" in cur_c],
-                                key=f"{tab_type}_prob_key")
+        prob_key = st.selectbox(
+            "Probability Key",
+            [cur_c for cur_c in results_df.columns if "_prob" in cur_c],
+            key=f"{tab_type}_prob_key",
+        )
 
     n_probs = st.number_input(
         "Number of Probabilities", 1, 100, 2, key=f"{tab_type}_n_probs"
@@ -1264,29 +1277,194 @@ def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_typ
     plt.close(fig)
 
 
-
-def agg_scenario_vis(cur_results_dir: Path, results_df: pd.DataFrame, tab_type: str):
+def agg_scenario_vis(cur_results_dir: Path, sc_results_df: pd.DataFrame, sample_results_df: pd.DataFrame, tab_type: str):
     with st.expander("Posterior Probabilities"):
-        posterior_probs_inv(cur_results_dir, results_df, tab_type)
+        posterior_probs_inv(cur_results_dir, sc_results_df, tab_type)
     st.divider()
+
+    im = st.selectbox("IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_scenario_im")
+    with st.expander("Misfit"):
+        misfit_hist(sc_results_df, im if f"{im}_misfit" in sc_results_df.columns else None)
+
+    # Setup
+    mean_sample_misfit = sum_result_df(sample_results_df, ["event_id", "site_int", "site_obs"])
+    mean_scenario_misfit = sum_result_df(sc_results_df, ["event_id", "site_int"])
+    group = mean_sample_misfit.sort_values(["event_id", "site_int"]).groupby(
+        ["event_id", "site_int"], observed=True)
+    group_keys = list(group.groups.keys())
+    mean_scenario_misfit = mean_scenario_misfit.sort_values(["event_id", "site_int"])
+    assert np.all(np.asarray(group_keys) == mean_scenario_misfit[["event_id", "site_int"]].values)
+
+    sc_n_obs = group.size().values
+    sc_min_dist = group["s2s_distance"].min().values
+    sc_misfit = mean_scenario_misfit[f"{im}_misfit"].values
+
+    with st.expander("Misfit vs Minimum Distance"):
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+
+        ax1.scatter(sc_min_dist, sc_misfit, s=5, alpha=0.5)
+        ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        ax1.set_xlabel("Minimum distance")
+        ax1.set_ylabel("Misfit")
+
+        ax1.set_ylim(0, np.quantile(sc_misfit, 0.95))
+        ax1.set_xlim(0, None)
+
+        fig.tight_layout()
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+    with st.expander("Misfit vs Number of Observations"):
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+
+        ax1.scatter(sc_n_obs +  np.random.uniform(-0.4, 0.4, sc_n_obs.size), sc_misfit, s=5, alpha=0.5)
+        ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        ax1.set_xlabel("Number of observations")
+        ax1.set_ylabel("Misfit")
+
+        ax1.set_ylim(0, np.quantile(sc_misfit, 0.95))
+        ax1.set_xlim(0, None)
+
+
+        fig.tight_layout()
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+    with st.expander("Number of Observations vs Minimum Distance"):
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+
+        cm = ax1.scatter(sc_n_obs + np.random.uniform(-0.4, 0.4, sc_n_obs.size), sc_min_dist, c=sc_misfit, s=5, alpha=0.5)
+        ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        ax1.set_xlabel("Number of observations")
+        ax1.set_ylabel("Minimum distance")
+
+        fig.colorbar(cm, ax=ax1, label="Misfit", pad=0)
+
+        fig.tight_layout()
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
 
     return
 
 
-def run_agg_scenario(cur_results_dir: Path):
-    train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(
-        cur_results_dir
+def sum_result_df(df: pd.DataFrame, group_keys=Sequence[str]):
+    """
+    Computes the mean misfit
+    """
+    ims = sr.constants.PSA_KEYS
+    prob_cols = mlt.array_utils.numpy_str_join("_", ims, "prob")
+    misfit_cols = mlt.array_utils.numpy_str_join("_", ims, "misfit")
+    weight_cols = mlt.array_utils.numpy_str_join("_", ims, "site_weights")
+
+    result_df = pd.DataFrame(
+        data=df[prob_cols].values * df[misfit_cols].values,
+        index=df.index,
+        columns=misfit_cols,
     )
+    result_df[group_keys] = df[group_keys]
+    result_df = result_df.groupby(group_keys, observed=True).mean()
+
+    if weight_cols[0] in df.columns:
+        result_df[weight_cols] = df.groupby(group_keys, observed=True)[weight_cols].first()
+    if "s2s_distance" in df.columns:
+        result_df["s2s_distance"] = df.groupby(group_keys, observed=True)["s2s_distance"].first()
+
+    return result_df.reset_index()
+
+def run_agg_scenario(cur_results_dir: Path, sample_results: Tuple[pd.DataFrame, pd.DataFrame],
+                     scenario_results: Tuple[pd.DataFrame, pd.DataFrame]):
+    train_scenario_results, val_scenario_results = scenario_results
+    train_sample_results, val_sample_results = sample_results
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
-        agg_scenario_vis(cur_results_dir, train_scenario_results, "train_scenario")
-
+        agg_scenario_vis(cur_results_dir, train_scenario_results, train_sample_results, "train_scenario")
 
     with val_tab:
-        agg_scenario_vis(cur_results_dir, val_scenario_results, "val_scenario")
+        agg_scenario_vis(cur_results_dir, val_scenario_results, val_sample_results, "val_scenario")
 
+
+def agg_single_viewer(results_df: pd.DataFrame, tab_type: str):
+    im = st.selectbox("IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_single_im")
+
+    with st.expander("Site Weights Histogram"):
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        ax.hist(results_df[f"{im}_site_weights"], bins=20, range=(0, 1))
+        ax.set_title(f"{im}")
+        ax.set_ylabel("Number of Samples")
+        ax.set_xlabel(f"{im} Site Weights")
+        ax.set_xlim([0, 1])
+        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+        fig.tight_layout()
+        st.pyplot(fig, use_container_width=False)
+
+    with st.expander("Sample Misfit"):
+        misfit_hist(results_df, im if f"{im}_misfit" in results_df.columns else None)
+
+    with st.expander("Misfit vs Site Weights"):
+        misfit_vs_site_weights(results_df, im)
+
+
+def misfit_vs_site_weights(results_df: pd.DataFrame, im: str):
+    hist_range = ((0.0, 1.0), (0.0, 0.1))
+    bins = (20, 20)
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    *_, cm = plt.hist2d(
+        results_df[f"{im}_site_weights"],
+        results_df[f"{im}_misfit"],
+        bins=bins,
+        range=hist_range,
+        cmap="Blues",
+        vmin=0,
+        # vmax = 10_000
+    )
+
+    ax.set_xlabel(f"{im} Site Weights")
+    ax.set_ylabel(f"{im} Misfit Score")
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+    fig.colorbar(cm, ax=ax, pad=0, label="Number of Samples")
+
+    fig.tight_layout()
+    st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
+
+
+def misfit_hist(results_df: pd.DataFrame, im: str):
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    if im is not None:
+        ax.hist(results_df[f"{im}_misfit"], bins=20, range=(0, 1), label="Unweighted")
+        ax.set_xlabel(f"{im} Misfit Score")
+    else:
+        ax.hist(results_df["misfit_score"], bins=20)
+        ax.set_xlabel(f"Misfit Score")
+
+    ax.legend()
+    ax.set_xlim([0, 1])
+    ax.set_ylabel("Number of Samples")
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+    fig.tight_layout()
+    st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
+
+
+def run_agg_single(cur_results_dir: Path, sample_results: Tuple[pd.DataFrame, pd.DataFrame]):
+    train_tab, val_tab = st.tabs(["Training", "Validation"])
+
+    train_results_df, val_results_df = sample_results
+
+    with train_tab:
+        agg_single_viewer(train_results_df, "train")
+
+    with val_tab:
+        agg_single_viewer(val_results_df, "val")
 
 
 def main(
@@ -1339,6 +1517,9 @@ def main(
         else None
     )
 
+    sample_results = st_utils.ml_load_sample_results(cur_results_dir)
+    scenario_results = st_utils.ml_load_scenario_results(cur_results_dir)
+
     with general_tab:
         # pass
         run_general_tab(cur_results_dir)
@@ -1347,6 +1528,7 @@ def main(
         # pass
         run_ind_samples(
             cur_results_dir,
+            sample_results,
             gen_gm_params_ffp=gen_gm_params_ffp,
             syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
         )
@@ -1355,13 +1537,18 @@ def main(
         # pass
         run_ind_scenario(
             cur_results_dir,
+            sample_results,
+            scenario_results,
             gen_gm_params_ffp=gen_gm_params_ffp,
             syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
         )
 
+    with agg_single_tab:
+        run_agg_single(cur_results_dir, sample_results)
+
     with agg_scenario_tab:
         # pass
-        run_agg_scenario(cur_results_dir)
+        run_agg_scenario(cur_results_dir, sample_results, scenario_results)
 
 
 if __name__ == "__main__":
