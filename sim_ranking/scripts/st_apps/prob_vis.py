@@ -378,8 +378,10 @@ def _scenario_viewer(
         cur_obs_sites_df["s2s_distance"].sort_values().index.values.astype(str)
     )
 
-    weight_cols = mlt.array_utils.numpy_str_join(
-        "_", sr.constants.PSA_KEYS, "site_weights"
+    weight_cols = (
+        "site_weights"
+        if "site_weights" in cur_sample_results.columns
+        else mlt.array_utils.numpy_str_join("_", sr.constants.PSA_KEYS, "site_weights")
     )
     for cur_obs_site in cur_obs_sites:
         with st.expander(cur_obs_site):
@@ -387,7 +389,11 @@ def _scenario_viewer(
                 f"Observation site: {cur_obs_site}, "
                 f"distance {cur_obs_sites_df.loc[cur_obs_site, 's2s_distance']:.2f}"
             )
-            st.dataframe(cur_obs_sites_df.loc[cur_obs_site, weight_cols].to_frame().T)
+            if isinstance(weight_cols, str):
+                st.text(f"Site weight: {cur_obs_sites_df.loc[cur_obs_site, weight_cols]}")
+            else:
+                st.dataframe(cur_obs_sites_df.loc[cur_obs_site, weight_cols].to_frame().T)
+
             create_pSA_dist_plot(
                 cur_sample_results.loc[cur_sample_results.site_obs == cur_obs_site],
                 site_int_sims,
@@ -428,8 +434,8 @@ def _scenario_viewer(
 
         st.dataframe(
             cur_sample_results.groupby("site_obs", observed=True)
-            .first()[["site_corr_weights", "s2s_distance", "angular_distance"]]
-            .sort_values("site_corr_weights", ascending=False)
+            .first()[["site_weights", "s2s_distance", "angular_distance"]]
+            .sort_values("site_weights", ascending=False)
             .T
         )
 
@@ -796,22 +802,22 @@ def create_pSA_dist_plot(
         )
 
     if "prob" in results_df.columns:
+        assert np.isclose(np.sum(results_df.prob.values), 1.0)
         weighted_avg = einops.einsum(
             results_df.prob.values,
-            np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
+            site_int_sims.loc[:, sr.constants.PSA_KEYS].values,
             "i, i j -> j",
         )
         weighted_std = np.sqrt(
             einops.einsum(
                 results_df.prob.values,
                 (
-                    np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
+                    site_int_sims.loc[:, sr.constants.PSA_KEYS].values
                     - weighted_avg
                 )
                 ** 2,
                 "i, i j -> j",
             )
-            / np.sum(results_df.prob.values)
         )
     else:
         im_prob_cols = [f"{cur_im}_prob" for cur_im in sr.constants.PSA_KEYS]
@@ -836,6 +842,7 @@ def create_pSA_dist_plot(
         weighted_avg,
         label="ML - Mean",
         c="blue",
+        marker=".",
     )
     ax.fill_between(
         sr.constants.PERIODS,
@@ -1069,12 +1076,12 @@ def create_dist_plot(
                 fig, ax = plt.subplots(figsize=(6, 4))
 
                 ax.hist(
-                    result_df.loc[:, im],
+                    result_df.loc[:, f"{im}_residual"],
                     weights=result_df.loc[site_int_sims.index, "prob"].values,
                     bins=n_bins,
                     label="Model distribution",
                 )
-                sns.rugplot(x=result_df.loc[:, im], ax=ax, color="k")
+                sns.rugplot(x=result_df.loc[:, f"{im}_residual"], ax=ax, color="k")
 
                 ax.set_title(f"{im} Residual Distribution")
                 ax.set_xlim(-2.0, 2.0)
@@ -1277,27 +1284,43 @@ def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_typ
     plt.close(fig)
 
 
-def agg_scenario_vis(cur_results_dir: Path, sc_results_df: pd.DataFrame, sample_results_df: pd.DataFrame, tab_type: str):
+def agg_scenario_vis(
+    cur_results_dir: Path,
+    sc_results_df: pd.DataFrame,
+    sample_results_df: pd.DataFrame,
+    tab_type: str,
+):
     with st.expander("Posterior Probabilities"):
         posterior_probs_inv(cur_results_dir, sc_results_df, tab_type)
     st.divider()
 
-    im = st.selectbox("IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_scenario_im")
+    if "prob" in sc_results_df.columns:
+        im = None
+    else:
+        im = st.selectbox("IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_scenario_im")
+
     with st.expander("Misfit"):
-        misfit_hist(sc_results_df, im if f"{im}_misfit" in sc_results_df.columns else None)
+        misfit_hist(
+            sc_results_df, im if f"{im}_misfit" in sc_results_df.columns else None
+        )
 
     # Setup
-    mean_sample_misfit = sum_result_df(sample_results_df, ["event_id", "site_int", "site_obs"])
+    mean_sample_misfit = sum_result_df(
+        sample_results_df, ["event_id", "site_int", "site_obs"]
+    )
     mean_scenario_misfit = sum_result_df(sc_results_df, ["event_id", "site_int"])
     group = mean_sample_misfit.sort_values(["event_id", "site_int"]).groupby(
-        ["event_id", "site_int"], observed=True)
+        ["event_id", "site_int"], observed=True
+    )
     group_keys = list(group.groups.keys())
     mean_scenario_misfit = mean_scenario_misfit.sort_values(["event_id", "site_int"])
-    assert np.all(np.asarray(group_keys) == mean_scenario_misfit[["event_id", "site_int"]].values)
+    assert np.all(
+        np.asarray(group_keys) == mean_scenario_misfit[["event_id", "site_int"]].values
+    )
 
     sc_n_obs = group.size().values
     sc_min_dist = group["s2s_distance"].min().values
-    sc_misfit = mean_scenario_misfit[f"{im}_misfit"].values
+    sc_misfit = mean_scenario_misfit["misfit_score" if im is None else f"{im}_misfit"].values
 
     with st.expander("Misfit vs Minimum Distance"):
         fig, ax1 = plt.subplots(figsize=(12, 6))
@@ -1317,14 +1340,18 @@ def agg_scenario_vis(cur_results_dir: Path, sc_results_df: pd.DataFrame, sample_
     with st.expander("Misfit vs Number of Observations"):
         fig, ax1 = plt.subplots(figsize=(12, 6))
 
-        ax1.scatter(sc_n_obs +  np.random.uniform(-0.4, 0.4, sc_n_obs.size), sc_misfit, s=5, alpha=0.5)
+        ax1.scatter(
+            sc_n_obs + np.random.uniform(-0.4, 0.4, sc_n_obs.size),
+            sc_misfit,
+            s=5,
+            alpha=0.5,
+        )
         ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
         ax1.set_xlabel("Number of observations")
         ax1.set_ylabel("Misfit")
 
         ax1.set_ylim(0, np.quantile(sc_misfit, 0.95))
         ax1.set_xlim(0, None)
-
 
         fig.tight_layout()
         st.pyplot(fig, use_container_width=False)
@@ -1333,7 +1360,13 @@ def agg_scenario_vis(cur_results_dir: Path, sc_results_df: pd.DataFrame, sample_
     with st.expander("Number of Observations vs Minimum Distance"):
         fig, ax1 = plt.subplots(figsize=(12, 6))
 
-        cm = ax1.scatter(sc_n_obs + np.random.uniform(-0.4, 0.4, sc_n_obs.size), sc_min_dist, c=sc_misfit, s=5, alpha=0.5)
+        cm = ax1.scatter(
+            sc_n_obs + np.random.uniform(-0.4, 0.4, sc_n_obs.size),
+            sc_min_dist,
+            c=sc_misfit,
+            s=5,
+            alpha=0.5,
+        )
         ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
         ax1.set_xlabel("Number of observations")
         ax1.set_ylabel("Minimum distance")
@@ -1344,7 +1377,6 @@ def agg_scenario_vis(cur_results_dir: Path, sc_results_df: pd.DataFrame, sample_
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
 
-
     return
 
 
@@ -1352,47 +1384,77 @@ def sum_result_df(df: pd.DataFrame, group_keys=Sequence[str]):
     """
     Computes the mean misfit
     """
-    ims = sr.constants.PSA_KEYS
-    prob_cols = mlt.array_utils.numpy_str_join("_", ims, "prob")
-    misfit_cols = mlt.array_utils.numpy_str_join("_", ims, "misfit")
-    weight_cols = mlt.array_utils.numpy_str_join("_", ims, "site_weights")
+    if "prob" in df.columns:
+        im = None
+        weight_cols = "site_weights"
 
-    result_df = pd.DataFrame(
-        data=df[prob_cols].values * df[misfit_cols].values,
-        index=df.index,
-        columns=misfit_cols,
-    )
+        result_df = pd.Series(
+            data=df["prob"].values * df["misfit_score"].values,
+            index=df.index,
+            name="misfit_score",
+        ).to_frame()
+
+    else:
+        ims = sr.constants.PSA_KEYS
+        prob_cols = mlt.array_utils.numpy_str_join("_", ims, "prob")
+        misfit_cols = mlt.array_utils.numpy_str_join("_", ims, "misfit")
+        weight_cols = mlt.array_utils.numpy_str_join("_", ims, "site_weights")
+
+        result_df = pd.DataFrame(
+            data=df[prob_cols].values * df[misfit_cols].values,
+            index=df.index,
+            columns=misfit_cols,
+        )
+
     result_df[group_keys] = df[group_keys]
     result_df = result_df.groupby(group_keys, observed=True).mean()
 
-    if weight_cols[0] in df.columns:
-        result_df[weight_cols] = df.groupby(group_keys, observed=True)[weight_cols].first()
+    if weight_cols[0] in df.columns or weight_cols in df.columns:
+        result_df[weight_cols] = df.groupby(group_keys, observed=True)[
+            weight_cols
+        ].first()
     if "s2s_distance" in df.columns:
-        result_df["s2s_distance"] = df.groupby(group_keys, observed=True)["s2s_distance"].first()
+        result_df["s2s_distance"] = df.groupby(group_keys, observed=True)[
+            "s2s_distance"
+        ].first()
 
     return result_df.reset_index()
 
-def run_agg_scenario(cur_results_dir: Path, sample_results: Tuple[pd.DataFrame, pd.DataFrame],
-                     scenario_results: Tuple[pd.DataFrame, pd.DataFrame]):
+
+def run_agg_scenario(
+    cur_results_dir: Path,
+    sample_results: Tuple[pd.DataFrame, pd.DataFrame],
+    scenario_results: Tuple[pd.DataFrame, pd.DataFrame],
+):
     train_scenario_results, val_scenario_results = scenario_results
     train_sample_results, val_sample_results = sample_results
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
-        agg_scenario_vis(cur_results_dir, train_scenario_results, train_sample_results, "train_scenario")
+        agg_scenario_vis(
+            cur_results_dir,
+            train_scenario_results,
+            train_sample_results,
+            "train_scenario",
+        )
 
     with val_tab:
-        agg_scenario_vis(cur_results_dir, val_scenario_results, val_sample_results, "val_scenario")
+        agg_scenario_vis(
+            cur_results_dir, val_scenario_results, val_sample_results, "val_scenario"
+        )
 
 
 def agg_single_viewer(results_df: pd.DataFrame, tab_type: str):
-    im = st.selectbox("IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_single_im")
+    if "site_weights" in results_df.columns:
+        im = None
+    else:
+        im = st.selectbox("IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_single_im")
 
     with st.expander("Site Weights Histogram"):
         fig, ax = plt.subplots(figsize=(12, 6))
 
-        ax.hist(results_df[f"{im}_site_weights"], bins=20, range=(0, 1))
+        ax.hist(results_df[f"{im}_site_weights" if im is not None else "site_weights"], bins=20, range=(0, 1))
         ax.set_title(f"{im}")
         ax.set_ylabel("Number of Samples")
         ax.set_xlabel(f"{im} Site Weights")
@@ -1403,7 +1465,7 @@ def agg_single_viewer(results_df: pd.DataFrame, tab_type: str):
         st.pyplot(fig, use_container_width=False)
 
     with st.expander("Sample Misfit"):
-        misfit_hist(results_df, im if f"{im}_misfit" in results_df.columns else None)
+        misfit_hist(results_df, im)
 
     with st.expander("Misfit vs Site Weights"):
         misfit_vs_site_weights(results_df, im)
@@ -1415,8 +1477,8 @@ def misfit_vs_site_weights(results_df: pd.DataFrame, im: str):
     fig, ax = plt.subplots(figsize=(12, 6))
 
     *_, cm = plt.hist2d(
-        results_df[f"{im}_site_weights"],
-        results_df[f"{im}_misfit"],
+        results_df[f"{im}_site_weights" if im is not None else "site_weights"],
+        results_df[f"{im}_misfit" if im is not None else "misfit_score"],
         bins=bins,
         range=hist_range,
         cmap="Blues",
@@ -1424,8 +1486,8 @@ def misfit_vs_site_weights(results_df: pd.DataFrame, im: str):
         # vmax = 10_000
     )
 
-    ax.set_xlabel(f"{im} Site Weights")
-    ax.set_ylabel(f"{im} Misfit Score")
+    ax.set_xlabel(f"{im} Site Weights" if im is not None else "Site Weights")
+    ax.set_ylabel(f"{im} Misfit Score" if im is not None else "Misfit Score")
     ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
 
     fig.colorbar(cm, ax=ax, pad=0, label="Number of Samples")
@@ -1455,7 +1517,9 @@ def misfit_hist(results_df: pd.DataFrame, im: str):
     plt.close(fig)
 
 
-def run_agg_single(cur_results_dir: Path, sample_results: Tuple[pd.DataFrame, pd.DataFrame]):
+def run_agg_single(
+    cur_results_dir: Path, sample_results: Tuple[pd.DataFrame, pd.DataFrame]
+):
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     train_results_df, val_results_df = sample_results
@@ -1517,12 +1581,13 @@ def main(
         else None
     )
 
-    sample_results = st_utils.ml_load_sample_results(cur_results_dir)
-    scenario_results = st_utils.ml_load_scenario_results(cur_results_dir)
 
     with general_tab:
         # pass
         run_general_tab(cur_results_dir)
+
+    sample_results = st_utils.ml_load_sample_results(cur_results_dir)
+    scenario_results = st_utils.ml_load_scenario_results(cur_results_dir)
 
     with ind_sample_tab:
         # pass
