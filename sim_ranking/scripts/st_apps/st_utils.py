@@ -85,9 +85,12 @@ def ml_get_event_angular_distances(results_dir: Path):
 @st.cache_data
 def ml_load_scenario_results(results_dir: Path):
     train_results = pd.read_parquet(results_dir / "train_scenario_results.parquet")
-    val_results = pd.read_parquet(results_dir / "val_scenario_results.parquet")
+    train_sum_results = pd.read_parquet(results_dir / "train_scenario_summary.parquet")
 
-    return train_results, val_results
+    val_results = pd.read_parquet(results_dir / "val_scenario_results.parquet")
+    val_sum_results = pd.read_parquet(results_dir / "val_scenario_summary.parquet")
+
+    return train_results, train_sum_results, val_results, val_sum_results
 
 
 @st.cache_data

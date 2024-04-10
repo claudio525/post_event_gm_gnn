@@ -60,12 +60,15 @@ def run_general_tab(results_dir: Path):
     plt.close(fig)
 
     ### Scenario loss
-    train_scenario_results, val_scenario_results = st_utils.ml_load_scenario_results(
-        results_dir
-    )
-    if "prob" in train_scenario_results.columns:
-        train_scenario_loss = sr.ml.prob.compute_scenario_loss(train_scenario_results)
-        val_scenario_loss = sr.ml.prob.compute_scenario_loss(val_scenario_results)
+    (
+        train_sc_results,
+        train_sc_sum_df,
+        val_sc_results,
+        val_sc_sum_df,
+    ) = st_utils.ml_load_scenario_results(results_dir)
+    if "prob" in train_sc_results.columns:
+        train_scenario_loss = sr.ml.prob.compute_scenario_loss(train_sc_results)
+        val_scenario_loss = sr.ml.prob.compute_scenario_loss(val_sc_results)
 
         st.markdown(
             f"#### Mean train scenario loss: {train_scenario_loss.scenario_loss.mean():.4f}"
@@ -243,6 +246,7 @@ def _create_event_map(
 def _scenario_viewer(
     results_dir: Path,
     scenario_results: pd.DataFrame,
+    sc_sum_df: pd.DataFrame,
     sample_results: pd.DataFrame,
     tab_type: str,
     gen_gm_params: pd.DataFrame = None,
@@ -315,6 +319,11 @@ def _scenario_viewer(
         .set_index("rel_id")
         .sort_index()
     )
+    cur_sc_sum_df = sc_sum_df.loc[
+        (sc_sum_df.event_id == event) & (sc_sum_df.site_int == site_int)
+    ].squeeze()
+    st.text("Scenario Loss: {:.4f}".format(cur_sc_sum_df.loss))
+
     cur_event_rels = cur_scenario_df.index.unique().astype(str)
     site_int_obs = (
         obs_df.loc[(obs_df.event_id == event) & (obs_df.site_id == site_int)]
@@ -367,10 +376,8 @@ def _scenario_viewer(
 
     st.divider()
 
-    st.text(f"Number of Observation sites: {cur_scenario_df.n_obs_sites.iloc[0]}")
-    st.text(
-        f"Distance to closest observation site: {cur_scenario_df.min_distance.iloc[0]}"
-    )
+    st.text(f"Number of Observation sites: {cur_sc_sum_df.n_sites}")
+    st.text(f"Distance to closest observation site: {cur_sc_sum_df.min_s2s_distance}")
 
     # Get the observation sites (sorted by distance)
     cur_obs_sites_df = cur_sample_results.groupby("site_obs", observed=True).first()
@@ -390,9 +397,13 @@ def _scenario_viewer(
                 f"distance {cur_obs_sites_df.loc[cur_obs_site, 's2s_distance']:.2f}"
             )
             if isinstance(weight_cols, str):
-                st.text(f"Site weight: {cur_obs_sites_df.loc[cur_obs_site, weight_cols]}")
+                st.text(
+                    f"Site weight: {cur_obs_sites_df.loc[cur_obs_site, weight_cols]}"
+                )
             else:
-                st.dataframe(cur_obs_sites_df.loc[cur_obs_site, weight_cols].to_frame().T)
+                st.dataframe(
+                    cur_obs_sites_df.loc[cur_obs_site, weight_cols].to_frame().T
+                )
 
             create_pSA_dist_plot(
                 cur_sample_results.loc[cur_sample_results.site_obs == cur_obs_site],
@@ -811,10 +822,7 @@ def create_pSA_dist_plot(
         weighted_std = np.sqrt(
             einops.einsum(
                 results_df.prob.values,
-                (
-                    site_int_sims.loc[:, sr.constants.PSA_KEYS].values
-                    - weighted_avg
-                )
+                (site_int_sims.loc[:, sr.constants.PSA_KEYS].values - weighted_avg)
                 ** 2,
                 "i, i j -> j",
             )
@@ -1141,7 +1149,7 @@ def run_ind_scenario(
     syn_obs_gm_params_ffp: Path = None,
 ):
     train_sample_results, val_sample_results = sample_results
-    train_scenario_results, val_scenario_results = scenario_results
+    train_sc_results, train_sc_sum_df, val_sc_results, val_sc_sum_df = scenario_results
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
@@ -1159,7 +1167,8 @@ def run_ind_scenario(
     with train_tab:
         _scenario_viewer(
             results_dir,
-            train_scenario_results,
+            train_sc_results,
+            train_sc_sum_df,
             train_sample_results,
             "train_scenario",
             gen_gm_params,
@@ -1169,7 +1178,8 @@ def run_ind_scenario(
     with val_tab:
         _scenario_viewer(
             results_dir,
-            val_scenario_results,
+            val_sc_results,
+            val_sc_sum_df,
             val_sample_results,
             "val_scenario",
             gen_gm_params,
@@ -1297,7 +1307,9 @@ def agg_scenario_vis(
     if "prob" in sc_results_df.columns:
         im = None
     else:
-        im = st.selectbox("IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_scenario_im")
+        im = st.selectbox(
+            "IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_scenario_im"
+        )
 
     with st.expander("Misfit"):
         misfit_hist(
@@ -1320,7 +1332,9 @@ def agg_scenario_vis(
 
     sc_n_obs = group.size().values
     sc_min_dist = group["s2s_distance"].min().values
-    sc_misfit = mean_scenario_misfit["misfit_score" if im is None else f"{im}_misfit"].values
+    sc_misfit = mean_scenario_misfit[
+        "misfit_score" if im is None else f"{im}_misfit"
+    ].values
 
     with st.expander("Misfit vs Minimum Distance"):
         fig, ax1 = plt.subplots(figsize=(12, 6))
@@ -1409,7 +1423,7 @@ def sum_result_df(df: pd.DataFrame, group_keys=Sequence[str]):
     result_df[group_keys] = df[group_keys]
     result_df = result_df.groupby(group_keys, observed=True).mean()
 
-    if weight_cols[0] in df.columns or weight_cols in df.columns:
+    if weight_cols[0] in df.columns or np.all(np.isin(weight_cols, df.columns)):
         result_df[weight_cols] = df.groupby(group_keys, observed=True)[
             weight_cols
         ].first()
@@ -1426,7 +1440,7 @@ def run_agg_scenario(
     sample_results: Tuple[pd.DataFrame, pd.DataFrame],
     scenario_results: Tuple[pd.DataFrame, pd.DataFrame],
 ):
-    train_scenario_results, val_scenario_results = scenario_results
+    train_sc_results, train_sc_sum_df, val_sc_results, val_sc_sum_df = scenario_results
     train_sample_results, val_sample_results = sample_results
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
@@ -1434,14 +1448,14 @@ def run_agg_scenario(
     with train_tab:
         agg_scenario_vis(
             cur_results_dir,
-            train_scenario_results,
+            train_sc_results,
             train_sample_results,
             "train_scenario",
         )
 
     with val_tab:
         agg_scenario_vis(
-            cur_results_dir, val_scenario_results, val_sample_results, "val_scenario"
+            cur_results_dir, val_sc_results, val_sample_results, "val_scenario"
         )
 
 
@@ -1454,7 +1468,11 @@ def agg_single_viewer(results_df: pd.DataFrame, tab_type: str):
     with st.expander("Site Weights Histogram"):
         fig, ax = plt.subplots(figsize=(12, 6))
 
-        ax.hist(results_df[f"{im}_site_weights" if im is not None else "site_weights"], bins=20, range=(0, 1))
+        ax.hist(
+            results_df[f"{im}_site_weights" if im is not None else "site_weights"],
+            bins=20,
+            range=(0, 1),
+        )
         ax.set_title(f"{im}")
         ax.set_ylabel("Number of Samples")
         ax.set_xlabel(f"{im} Site Weights")
@@ -1531,6 +1549,26 @@ def run_agg_single(
         agg_single_viewer(val_results_df, "val")
 
 
+def _scenario_explorer(sc_sum_df: pd.DataFrame):
+    st.dataframe(sc_sum_df)
+
+
+def run_sc_explorer(
+    cur_results_dir: Path,
+    scenario_results: Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame],
+):
+
+    train_sc_results, train_sc_sum_df, val_sc_results, val_sc_sum_df = scenario_results
+
+    train_tab, val_tab = st.tabs(["Training", "Validation"])
+
+    with train_tab:
+        _scenario_explorer(train_sc_sum_df)
+
+    with val_tab:
+        _scenario_explorer(val_sc_sum_df)
+
+
 def main(
     results_dir: Path,
     gen_gm_params_ffp: Path = typer.Option(
@@ -1561,6 +1599,7 @@ def main(
         ind_scenario_tab,
         agg_single_tab,
         agg_scenario_tab,
+        sc_explorer_tab,
     ) = st.tabs(
         [
             "General",
@@ -1568,6 +1607,7 @@ def main(
             "Individual Scenario",
             "Aggregate Sample",
             "Aggregate Scenario",
+            "Scenario Explorer",
         ]
     )
 
@@ -1580,7 +1620,6 @@ def main(
         ).exists()
         else None
     )
-
 
     with general_tab:
         # pass
@@ -1614,6 +1653,9 @@ def main(
     with agg_scenario_tab:
         # pass
         run_agg_scenario(cur_results_dir, sample_results, scenario_results)
+
+    with sc_explorer_tab:
+        run_sc_explorer(cur_results_dir, scenario_results)
 
 
 if __name__ == "__main__":

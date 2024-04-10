@@ -1,7 +1,7 @@
 import os
 import tempfile as tmp
 from pathlib import Path
-from typing import List, Dict, Sequence
+from typing import List, Dict, Sequence, Union
 from dataclasses import dataclass
 
 import einops
@@ -139,7 +139,10 @@ def data_prep(
         station_df, SITE_FEATURE_KEYS
     )
     event_features_df = event_df.loc[events, EVENT_FEATURE_KEYS]
-    event_features_df[EVENT_FEATURE_KEYS] = (event_df.loc[events, EVENT_FEATURE_KEYS] - event_df.loc[events, EVENT_FEATURE_KEYS].mean()) / event_df.loc[events, EVENT_FEATURE_KEYS].std()
+    event_features_df[EVENT_FEATURE_KEYS] = (
+        event_df.loc[events, EVENT_FEATURE_KEYS]
+        - event_df.loc[events, EVENT_FEATURE_KEYS].mean()
+    ) / event_df.loc[events, EVENT_FEATURE_KEYS].std()
 
     # Compute the site-to-site features
     print(f"Computing scalar features")
@@ -492,11 +495,14 @@ class SCProbDataset(Dataset):
         )
 
         n_records = self.n_sites_scenario[batch_ind].sum()
-        site_int_ind = np.full(n_records, fill_value=-1, dtype=int)
-        site_obs_ind = np.full(n_records, fill_value=-1, dtype=int)
+        n_scenarios = len(batch_ind)
+        site_int_ind = np.full(n_scenarios, fill_value=-1, dtype=int)
+        site_obs_ind = np.full(n_scenarios, fill_value=-1, dtype=int)
+        record_site_int_ind = np.full(n_records, fill_value=-1, dtype=int)
+        record_site_obs_ind = np.full(n_records, fill_value=-1, dtype=int)
         record_ind = np.full(n_records, fill_value=-1, dtype=int)
         i_counter = 0
-        for i in range(len(batch_ind)):
+        for i in range(n_scenarios):
             cur_b_ix, cur_ev_ix = batch_ind[i], event_ind[i]
             if cur_b_ix == 0:
                 cur_record_ind = np.arange(0, self.cum_n_sites_scenario[cur_b_ix])
@@ -521,23 +527,40 @@ class SCProbDataset(Dataset):
 
             record_ind[i_counter : i_counter + cur_record_ind.size] = cur_record_ind
 
-            site_int_ind[i_counter : i_counter + cur_record_ind.size] = cur_site_int_ind
-            site_obs_ind[i_counter : i_counter + cur_record_ind.size] = cur_site_obs_ind
+            record_site_int_ind[
+                i_counter : i_counter + cur_record_ind.size
+            ] = cur_site_int_ind
+            record_site_obs_ind[
+                i_counter : i_counter + cur_record_ind.size
+            ] = cur_site_obs_ind
+
+            site_int_ind[i] = cur_site_int_ind[0]
+            site_obs_ind[i] = cur_site_obs_ind[0]
 
             i_counter += cur_record_ind.size
 
         assert (
-            np.all(site_int_ind >= 0)
-            and np.all(site_obs_ind >= 0)
+            np.all(record_site_int_ind >= 0)
+            and np.all(record_site_obs_ind >= 0)
             and np.all(record_ind >= 0)
         )
 
-        return event_ind, scenario_ind, record_ind, site_int_ind, site_obs_ind
+        return (
+            event_ind,
+            scenario_ind,
+            site_int_ind,
+            site_obs_ind,
+            record_ind,
+            record_site_int_ind,
+            record_site_obs_ind,
+        )
 
     def get_metadata(self, batch_ind: np.ndarray, rel_shuffle_ind: np.ndarray):
         (
             event_ind,
             scenario_ind,
+            site_int_ind,
+            site_obs_ind,
             record_ind,
             record_site_int_ind,
             record_site_obs_ind,
@@ -556,7 +579,9 @@ class SCProbDataset(Dataset):
     def get_batch(self, batch_ind: np.ndarray, shuffle_rels: bool):
         (
             event_ind,
-            scenario_ind,
+            sc_scenario_ind,
+            sc_site_int_ind,
+            sc_site_obs_ind,
             record_ind,
             record_site_int_ind,
             record_site_obs_ind,
@@ -571,7 +596,7 @@ class SCProbDataset(Dataset):
         site_obs_obs_ims = self.obs_ims[record_site_obs_ind, :]
 
         scalar_features = self.scalar_features_values[record_ind]
-        im_misfit_score = self.im_misfit_score[record_site_int_ind]
+        record_im_misfit_score = self.im_misfit_score[record_site_int_ind]
 
         im_site_corrs = self.im_site_corrs[record_ind, :]
 
@@ -585,6 +610,7 @@ class SCProbDataset(Dataset):
             batch_ind,
             rel_shuffle_ind,
             self.scenario_ids[batch_ind],
+            self.im_misfit_score[sc_site_int_ind][:, rel_shuffle_ind, :],
             self.record_scenario_ids[record_ind],
             site_int_norm_sim_ims[:, rel_shuffle_ind, :],
             site_obs_norm_sim_ims[:, rel_shuffle_ind, :],
@@ -593,7 +619,7 @@ class SCProbDataset(Dataset):
             site_obs_sim_ims,
             site_obs_obs_ims,
             scalar_features,
-            im_misfit_score[:, rel_shuffle_ind, :],
+            record_im_misfit_score[:, rel_shuffle_ind, :],
             im_site_corrs,
         )
 
@@ -691,29 +717,25 @@ def get_scenario_mask(record_scenario_ids: torch.Tensor, scenario_ids: torch.Ten
 
 
 def compute_single_loss(
-    scenario_mask: torch.Tensor,
-    pred: torch.Tensor,
-    im_misfit_score: torch.Tensor,
-    w_pred: torch.Tensor,
-    run_config: prob.RunParamsConfig,
+    agg_probs: Union[torch.Tensor, np.ndarray],
+    im_misfit_score: Union[torch.Tensor, np.ndarray],
+    im_weights: Union[torch.Tensor, np.ndarray],
 ):
     """
-    Same as compute_multi_loss, but for the single-IM model
+    Computes the scenario loss for the single-prob model
     i.e. gives P(R_i)
-
-    Note: This operation requires a large amount of memory due to the
-    broadcasting performed by einops.einsum
 
     Parameters
     ----------
-    scenario_mask: torch.Tensor
-    pred: torch.Tensor
-        Shape - [n_samples, n_rels]
-    im_misfit_score: torch.Tensor
-        Shape - [n_samples, n_rels, n_ims]
-    w_pred: torch.Tensor
-        Shape - [n_samples] or [n_samples, n_ims]
-    run_config: prob.RunParamsConfig
+    agg_probs: array of floats
+        The aggregated probability for each scenario
+        Shape: [n_scenarios, n_rels]
+    im_misfit_score: array of floats
+        The misfit score for each scenario, realisation and IM
+        Shape: [n_scenarios, n_rels, n_ims]
+    im_weights: array of floats
+        IM weights
+        Shape - [n_ims]
 
     Returns
     -------
@@ -723,105 +745,172 @@ def compute_single_loss(
     loss: torch.Tensor
         The average loss across all scenarios
     """
-    assert np.isclose(np.sum(run_config.im_weights), 1.0)
-    im_weights = torch.from_numpy(run_config.im_weights).to(
-        run_config.device, torch.float32
-    )
-
-    # Compute the IM-weighted misfit score
-    misfit_score = einops.einsum(
-        im_misfit_score.to(run_config.device, torch.float32),
-        im_weights,
-        "obs rel im, im -> obs rel",
-    )
-
-    # Compute the IM-weighted site weights
-    if len(w_pred.shape) == 2:
-        w_pred = einops.einsum(w_pred, im_weights, "obs im, im -> obs")
-
-    ## Scenario Loss
-    # Computes the weighted scenario loss
-    # L_{s,i,j} = \sum_{r} p_{r,i,j} w_{r, j} \delta_{r, s} M_{r, i, j}
+    # Computes the scenario loss
+    # L_{s} = \sum_{i} p_{i} \sum_{j} w_j M_{i, j}
     # where
-    # - p_{r,i} is the predicted probability of the r-th observation site, i-th realisation
-    # - w_{r} is the weight of the r-th observation site
-    # - \delta_{r, s} is a boolean that shows if the r-th observation site is in the s-th scenario
-    # - M_{r, i} is the misfit score of the r-th observation site, i-th realisation
+    # - p_{i} is the aggregated probability for the i-th realisation
+    # - M_{i, i} is the misfit score of the i-th realisation and j-th IM
     scenario_loss = einops.einsum(
-        pred,
-        w_pred,
-        scenario_mask.to(torch.float32),
-        misfit_score,
-        "obs rel, obs, obs scenario, obs rel -> scenario",
+        agg_probs,
+        im_weights,
+        im_misfit_score,
+        "scenario rel, im, scenario rel im -> scenario",
     )
     loss = scenario_loss.mean()
     return scenario_loss, loss
 
 
-def compute_multi_loss(
-    scenario_mask: torch.Tensor,
-    pred: torch.Tensor,
-    im_misfit_score: torch.Tensor,
-    w_pred: torch.Tensor,
-    run_config: prob.RunParamsConfig,
+def compute_single_agg_prob(
+    scenario_mask: Union[torch.Tensor, np.ndarray],
+    pred: Union[torch.Tensor, np.ndarray],
+    w_pred: Union[torch.Tensor, np.ndarray],
+    im_weights: Union[torch.Tensor, np.ndarray],
 ):
     """
-    Computes the loss for the multi-IM model
-    (i.e. gives P(R_i | IM_j))
-
-    Note: This operation requires a large amount of memory due to the
-        broadcasting performed by einops.einsum
+    Computes the aggregated probability for
+    the single-prob model
 
     Parameters
     ----------
-    scenario_mask: torch.Tensor
+    scenario_mask: array of floats
         Mask of shape [n_samples, n_scenarios]
         that shows which scenario each sample belongs to
-    pred: torch.Tensor
+    pred: array of floats
+        Probability predictions of shape [n_samples, n_rels]
+        Sum to 1.0 across realisations
+        i.e. np.allclose(np.sum(pred, axis=1), 1.0)
+    w_pred: array of floats
+        Site-weights for each observation site and IM
+        If the weight model only gives one weight
+        (across all IMs) repeat this weight for each IM
+        These have to be already normalised such that for a single
+        scenario the site-weights sum to 1.0
+        Shape: [n_samples, n_ims]
+    im_weights: array of floats
+        IM weights
+        Shape - [n_ims]
+
+    Returns
+    -------
+    agg_prob: torch.Tensor
+        The aggregated probability for each scenario
+        Shape: [n_scenarios, n_rels]
+    """
+    ### Aggregated probability for single scenario
+    # P(R_i) = \sum_{r} p_{r,i} \sum_{j} w_{j} \rho_{r, j} \delta_{r, s}
+    # where
+    # - p_{r,i} is the predicted probability of the r-th observation site, i-th realisation
+    # - rho_{r, j} is the site-weight of the r-th observation site and j-th im
+    # - w_{j} is the weight of the j-th IM
+    # - \delta_{r, s} is a boolean that shows if the r-th observation site is in the s-th scenario
+    agg_prob = einops.einsum(
+        pred,
+        w_pred,
+        im_weights,
+        scenario_mask,
+        "obs rel, obs im, im, obs scenario -> scenario rel",
+    )
+    return agg_prob
+
+
+def compute_multi_agg_prob(
+    scenario_mask: Union[torch.Tensor, np.ndarray],
+    pred: Union[torch.Tensor, np.ndarray],
+    w_pred: Union[torch.Tensor, np.ndarray],
+    im_weights: Union[torch.Tensor, np.ndarray],
+):
+    """
+    Computes the aggregated probability for
+    the single-prob model
+
+    Parameters
+    ----------
+    scenario_mask: array of floats
+        Mask of shape [n_samples, n_scenarios]
+        that shows which scenario each sample belongs to
+    pred: array of floats
         Probability predictions of shape [n_samples, n_rels, n_ims]
         Sum to 1.0 across realisations
         i.e. np.allclose(np.sum(pred, axis=1), 1.0)
-    im_misfit_score: torch.Tensor
-        The misfit score for each realisation and IM
-        Shape: [n_samples, n_rels, n_ims]
-    w_pred: torch.Tensor
+    w_pred: array of floats
         Site-weights for each observation site and IM
-        Shape: [n_samples, n_ims]
+        If the weight model only gives one weight
+        (across all IMs) repeat this weight for each IM
         These have to be already normalised such that for a single
         scenario the site-weights sum to 1.0
-    run_config: prob.RunParamsConfig
+        Shape: [n_samples, n_ims]
+    im_weights: array of floats
+        IM weights
+        Shape - [n_ims]
+
+    Returns
+    -------
+    agg_prob: torch.Tensor
+        The aggregated probability for each scenario
+        Shape: [n_scenarios, n_rels, n_ims]
+    """
+    # As this computation is per IM,
+    # the weights need to add up to the number of IMs
+    im_weights = im_weights * len(im_weights)
+
+    ### Aggregated probability for single scenario
+    # P(R_i) = \sum_{r} \sum_{j} p_{r,i, j} w_{j} \rho_{r, j} \delta_{r, s}
+    # where
+    # - p_{r,i} is the predicted probability of the r-th observation site, i-th realisation and j-th IM
+    # - rho_{r} is the site-weight of the r-th observation site and j-th im
+    # - w_{j} is the weight of the j-th IM
+    # - \delta_{r, s} is a boolean that shows if the r-th observation site is in the s-th scenario
+    agg_prob = einops.einsum(
+        pred,
+        w_pred,
+        im_weights,
+        scenario_mask,
+        "obs rel im, obs im, im, obs scenario -> scenario rel im",
+    )
+    return agg_prob
+
+
+def compute_multi_loss(
+    agg_probs: Union[torch.Tensor, np.ndarray],
+    im_misfit_score: Union[torch.Tensor, np.ndarray],
+    im_weights: Union[torch.Tensor, np.ndarray],
+):
+    """
+    Computes the scenario loss for the single-prob model
+    i.e. gives P(R_i|IM_j)
+
+    Parameters
+    ----------
+    agg_probs: array of floats
+        The aggregated probability for each scenario
+        Shape: [n_scenarios, n_rels, n_ims]
+    im_misfit_score: array of floats
+        The misfit score for each scenario, realisation and IM
+        Shape: [n_scenarios, n_rels, n_ims]
+    im_weights: array of floats
+        IM weights
+        Shape - [n_ims]
 
     Returns
     -------
     scenario_loss: torch.Tensor
-        The loss for each scenario and IM
-        Shape: [n_scenarios, n_ims]
+        The loss for each scenario and
+        Shape: [n_scenarios]
     loss: torch.Tensor
-        The average loss across all scenarios and IMs
+        The average loss across all scenarios
     """
-
-    # t = pred * w_pred[:, None, :]
-    # t = t[:, None, ...] * scenario_mask[:, :, None, None] * im_misfit_score[:, None, :, :]
-    # t = torch.sum(t, axis=(0, 2))
-
-    ## Scenario Loss
-
-    # Computes the weighted scenario loss
-    # L_{s,i,j} = \sum_{r} p_{r,i,j} w_{r, j} \delta_{r, s} M_{r, i, j}
+    # Computes the scenario loss
+    # L_{s} = \sum_{i} \sum_{j} p_{i, j}  w_j M_{i, j}
     # where
-    # - p_{r,i,j} is the predicted probability of the r-th observation site, i-th realisation and j-th IM
-    # - w_{r, j} is the weight of the r-th observation site and j-th IM
-    # - \delta_{r, s} is a boolean that shows if the r-th observation site is in the s-th scenario
-    # - M_{r, i, j} is the misfit score of the r-th observation site, i-th realisation and j-th IM
+    # - p_{i, j} is the aggregated probability for the i-th realisation and j-th IM
+    # - M_{i, i} is the misfit score of the i-th realisation and j-th IM
     scenario_loss = einops.einsum(
-        pred,
-        w_pred,
-        scenario_mask.to(torch.float32),
-        im_misfit_score.to(run_config.device, torch.float32),
-        "obs rel im, obs im, obs scenario, obs rel im -> scenario im",
+        agg_probs,
+        im_weights,
+        im_misfit_score,
+        "scenario rel im, im, scenario rel im -> scenario",
     )
-
-    loss = scenario_loss.mean(axis=1).mean()
+    loss = scenario_loss.mean()
     return scenario_loss, loss
 
 
@@ -839,6 +928,40 @@ def get_weight_prediction(
     ### Normalize weight predictions
     # Apply the scenario mask
     w_pred = w_pred[:, None, :] * scenario_mask[..., None]
+    # Sum each scenario weights, and then remove scenario axis
+    w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
+
+    return w_pred
+
+
+def get_loth_weights(
+    im_site_corrs: Union[torch.Tensor, np.ndarray],
+    scenario_mask: Union[torch.Tensor, np.ndarray],
+):
+    """
+    Normalises the loth & baker site-correlations
+    such that they sum to one for each scenario
+
+    Parameters
+    ----------
+    im_site_corrs: array of floats
+        The loth & baker site-correlations
+        [n_samples, n_ims]
+    scenario_mask: array of bools
+        Mask that defines which scenario
+        each sample belongs to
+        [n_samples, n_scenarios]
+
+    Returns
+    -------
+    w_pred: array of floats
+        Normalised loth & baker site-correlations
+        [n_samples, n_ims]
+    """
+
+    w_pred = im_site_corrs
+    w_pred = w_pred[:, None, :] * scenario_mask[..., None]
+
     # Sum each scenario weights, and then remove scenario axis
     w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
 
@@ -888,6 +1011,10 @@ def train(
         for param in prob_model.parameters():
             param.register_hook(save_grad)
 
+    im_weights = torch.from_numpy(run_config.im_weights).to(
+        run_config.device, torch.float32
+    )
+
     lr_ix = 0
     for epoch_ix in range(hp_config.n_epochs):
         if lr_ix < len(hp_config.lr_epochs) and epoch_ix == hp_config.lr_epochs[lr_ix]:
@@ -906,7 +1033,8 @@ def train(
         for i, (
             batch_ind,
             rel_shuffle_ind,
-            scenario_ids,
+            sc_ids,
+            sc_im_misfit_score,
             record_scenario_ids,
             site_int_norm_sim_ims,
             site_obs_norm_sim_ims,
@@ -942,33 +1070,36 @@ def train(
                         print(f"Saved grads to {tmp_dir}")
                 exit()
 
-            scenario_mask = get_scenario_mask(record_scenario_ids, scenario_ids)
-            scenario_mask = scenario_mask.to(run_config.device)
+            scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
+            scenario_mask = scenario_mask.to(run_config.device, torch.float32)
 
             # w_pred = get_weight_prediction(
             #     weight_model, scalar_features, scenario_mask, run_config)
 
-            ## TMP
-            w_pred = im_site_corrs.to(run_config.device, dtype=torch.float32)
-            w_pred = w_pred[:, None, :] * scenario_mask[..., None]
-            # Sum each scenario weights, and then remove scenario axis
-            w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
+            w_pred = get_loth_weights(
+                im_site_corrs.to(run_config.device, dtype=torch.float32), scenario_mask
+            )
 
             if run_config.per_im_prob:
+                agg_probs = compute_multi_agg_prob(
+                    scenario_mask, pred, w_pred, im_weights
+                )
                 scenario_loss, loss = compute_multi_loss(
-                    scenario_mask,
-                    pred,
-                    im_misfit_score,
-                    w_pred,
-                    run_config,
+                    agg_probs,
+                    sc_im_misfit_score.to(run_config.device, torch.float32),
+                    im_weights,
                 )
             else:
-                scenario_loss, loss = compute_single_loss(
+                agg_probs = compute_single_agg_prob(
                     scenario_mask,
                     pred,
-                    im_misfit_score,
                     w_pred,
-                    run_config,
+                    im_weights,
+                )
+                scenario_loss, loss = compute_single_loss(
+                    agg_probs,
+                    sc_im_misfit_score.to(run_config.device, torch.float32),
+                    im_weights,
                 )
 
             optimizer.zero_grad()
@@ -984,7 +1115,8 @@ def train(
             for i, (
                 batch_ind,
                 rel_shuffle_ind,
-                scenario_ids,
+                sc_ids,
+                sc_im_misfit_score,
                 record_scenario_ids,
                 site_int_norm_sim_ims,
                 site_obs_norm_sim_ims,
@@ -1009,33 +1141,37 @@ def train(
                     hp_config,
                 )
 
-                scenario_mask = get_scenario_mask(record_scenario_ids, scenario_ids)
-                scenario_mask = scenario_mask.to(run_config.device)
+                scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
+                scenario_mask = scenario_mask.to(run_config.device, torch.float32)
 
                 # w_pred = get_weight_prediction(
                 #     weight_model, scalar_features, scenario_mask, run_config)
 
-                ## TMP
-                w_pred = im_site_corrs.to(run_config.device, dtype=torch.float32)
-                w_pred = w_pred[:, None, :] * scenario_mask[..., None]
-                # Sum each scenario weights, and then remove scenario axis
-                w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
+                w_pred = get_loth_weights(
+                    im_site_corrs.to(run_config.device, dtype=torch.float32),
+                    scenario_mask,
+                )
 
                 if run_config.per_im_prob:
+                    agg_probs = compute_multi_agg_prob(
+                        scenario_mask, pred, w_pred, im_weights
+                    )
                     scenario_loss, loss = compute_multi_loss(
-                        scenario_mask,
-                        pred,
-                        im_misfit_score,
-                        w_pred,
-                        run_config,
+                        agg_probs,
+                        sc_im_misfit_score.to(run_config.device, torch.float32),
+                        im_weights,
                     )
                 else:
-                    scenario_loss, loss = compute_single_loss(
+                    agg_probs = compute_single_agg_prob(
                         scenario_mask,
                         pred,
-                        im_misfit_score,
                         w_pred,
-                        run_config,
+                        im_weights,
+                    )
+                    scenario_loss, loss = compute_single_loss(
+                        agg_probs,
+                        sc_im_misfit_score.to(run_config.device, torch.float32),
+                        im_weights,
                     )
 
                 metrics["loss_hist_val"][epoch_ix] += loss.item()
@@ -1074,15 +1210,15 @@ def get_dataset_prediction(
         "s2s_distance",
     ]
     im_res_cols = np.char.add(run_config.ims, "_residual").tolist()
-    columns += im_res_cols
+    im_site_weights_cols = np.char.add(run_config.ims, "_site_weights").tolist()
+    im_misfit_cols = np.char.add(run_config.ims, "_misfit").tolist()
+    columns += im_res_cols + im_site_weights_cols + im_misfit_cols
 
     if run_config.per_im_prob:
-        im_site_weights_cols = np.char.add(run_config.ims, "_site_weights").tolist()
-        im_misfit_cols = np.char.add(run_config.ims, "_misfit").tolist()
         prob_cols = np.char.add(run_config.ims, "_prob").tolist()
-        columns += prob_cols + im_misfit_cols
+        columns += prob_cols
     else:
-        columns += ["prob", "misfit_score", "site_weights"]
+        columns += ["prob"]
 
     results_df = pd.DataFrame(
         index=np.arange(dataset.n_sites_scenario.sum() * run_config.n_rels),
@@ -1115,7 +1251,8 @@ def get_dataset_prediction(
         for i, (
             batch_ind,
             rel_shuffle_ind,
-            scenario_ids,
+            sc_ids,
+            sc_im_misfit_score,
             record_scenario_ids,
             site_int_norm_sim_ims,
             site_obs_norm_sim_ims,
@@ -1140,17 +1277,15 @@ def get_dataset_prediction(
                 hp_config,
             )
 
-            scenario_mask = get_scenario_mask(record_scenario_ids, scenario_ids)
-            scenario_mask = scenario_mask.to(run_config.device)
+            scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
+            scenario_mask = scenario_mask.to(run_config.device, torch.float32)
 
             # w_pred = get_weight_prediction(
             #     weight_model, scalar_features, scenario_mask, run_config)
 
-            ## TMP
-            w_pred = im_site_corrs.to(run_config.device, dtype=torch.float32)
-            w_pred = w_pred[:, None, :] * scenario_mask[..., None]
-            # Sum each scenario weights, and then remove scenario axis
-            w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
+            w_pred = get_loth_weights(
+                im_site_corrs.to(run_config.device, dtype=torch.float32), scenario_mask
+            )
 
             (
                 events,
@@ -1197,59 +1332,22 @@ def get_dataset_prediction(
                 )
 
             # Misfit score
-            if run_config.per_im_prob:
-                results_df.loc[start_ix:end_ix, im_misfit_cols] = (
-                    einops.rearrange(im_misfit_score, "batch rel im -> (batch rel) im")
-                    .numpy(force=True)
-                    .astype(np.float32)
-                )
-            else:
-                results_df.loc[start_ix:end_ix, "misfit_score"] = (
-                    einops.rearrange(
-                        einops.einsum(
-                            im_misfit_score,
-                            im_weights,
-                            "obs rel im, im -> obs rel",
-                        ),
-                        "obs rel -> (obs rel)",
-                    )
-                    .numpy(force=True)
-                    .astype(np.float32)
-                )
+            results_df.loc[start_ix:end_ix, im_misfit_cols] = (
+                einops.rearrange(im_misfit_score, "batch rel im -> (batch rel) im")
+                .numpy(force=True)
+                .astype(np.float32)
+            )
 
             # Site weights
-            if run_config.per_im_prob:
-                results_df.loc[start_ix:end_ix, im_site_weights_cols] = (
-                    einops.repeat(
-                        w_pred,
-                        "batch im -> (batch rel) im",
-                        rel=pred.shape[1],
-                    )
-                    .numpy(force=True)
-                    .astype(np.float32)
+            results_df.loc[start_ix:end_ix, im_site_weights_cols] = (
+                einops.repeat(
+                    w_pred,
+                    "batch im -> (batch rel) im",
+                    rel=pred.shape[1],
                 )
-            else:
-                if len(w_pred.shape) == 2:
-                    # Compute the IM-weighted site weights
-                    results_df.loc[start_ix:end_ix, "site_weights"] = (
-                        einops.repeat(
-                            einops.einsum(
-                                w_pred.to("cpu", torch.float64),
-                                im_weights,
-                                "obs im, im -> obs",
-                            ),
-                            "obs -> (obs rel)",
-                            rel=pred.shape[1],
-                        )
-                        .numpy(force=True)
-                        .astype(np.float32)
-                    )
-                else:
-                    results_df.loc[start_ix:end_ix, "site_weights"] = (
-                        einops.repeat(w_pred, "batch -> (batch rel)", rel=pred.shape[1])
-                        .numpy(force=True)
-                        .astype(np.float32)
-                    )
+                .numpy(force=True)
+                .astype(np.float32)
+            )
 
             # IM residuals
             results_df.loc[start_ix:end_ix, im_res_cols] = einops.rearrange(
@@ -1320,16 +1418,19 @@ def post_processing(
     ### Scenario
     print(f"Computing scenario distributions")
     print("Training dataset")
-    train_scenario_results = prob.compute_scenario_distribution(
+    train_sum_sc_df, train_sc_results = compute_scenario_distribution(
         train_sample_results, run_config, "_site_weights"
     )
     print("Validation dataset")
-    val_scenario_results = prob.compute_scenario_distribution(
+    val_sum_sc_df, val_sc_results = compute_scenario_distribution(
         val_sample_results, run_config, "_site_weights"
     )
 
-    train_scenario_results.to_parquet(cur_out_dir / "train_scenario_results.parquet")
-    val_scenario_results.to_parquet(cur_out_dir / "val_scenario_results.parquet")
+    train_sc_results.to_parquet(cur_out_dir / "train_scenario_results.parquet")
+    train_sum_sc_df.to_parquet(cur_out_dir / "train_scenario_summary.parquet")
+
+    val_sc_results.to_parquet(cur_out_dir / "val_scenario_results.parquet")
+    val_sum_sc_df.to_parquet(cur_out_dir / "val_scenario_summary.parquet")
 
     # Save loss history
     pd.to_pickle(metrics, cur_out_dir / "metrics.pickle")
@@ -1370,3 +1471,114 @@ def post_processing(
         save_graph=True,
         directory=str(cur_out_dir),
     )
+
+
+def compute_scenario_distribution(
+    sample_results: pd.DataFrame,
+    run_config: prob.RunParamsConfig,
+    im_site_weights_suffix: str = "_site_corr_weights",
+):
+    """
+    Computes the realisation distribution for each scenario
+    """
+    im_prob_cols = np.char.add(run_config.ims, "_prob")
+    im_site_weight_cols = np.char.add(run_config.ims, im_site_weights_suffix)
+    im_res_cols = np.char.add(run_config.ims, "_residual")
+    im_misfit_cols = np.char.add(run_config.ims, "_misfit")
+
+    scenario_results = []
+    scenario_sum_results = []
+    groups = sample_results.groupby(["event_id", "site_int"], observed=True)
+    iter_loop = tqdm(groups, desc="Processing scenarios")
+    for (cur_event, cur_site_int), cur_group in iter_loop:
+        cur_group = cur_group.sort_values(["site_obs", "rel_id"])
+
+        cur_rels = cur_group.rel_id[: run_config.n_rels].values.astype(str)
+        cur_scenario_mask = np.ones(
+            (cur_group.shape[0] // run_config.n_rels, 1), dtype=float
+        )
+        cur_im_site_weights = cur_group[im_site_weight_cols][
+            :: run_config.n_rels
+        ].values
+        assert np.allclose(cur_im_site_weights.sum(axis=0), 1.0)
+
+        # Compute the scenario probabilities & loss
+        if run_config.per_im_prob:
+            cur_agg_prob = compute_multi_agg_prob(
+                cur_scenario_mask,
+                einops.rearrange(
+                    cur_group[im_prob_cols].values,
+                    "(obs rel) im -> obs rel im",
+                    rel=run_config.n_rels,
+                ),
+                cur_im_site_weights,
+                run_config.im_weights,
+            ).squeeze()
+            assert np.allclose(cur_agg_prob.sum(axis=0), 1.0)
+            cur_result = pd.DataFrame(
+                index=cur_rels, columns=im_prob_cols, data=cur_agg_prob
+            )
+
+            scenario_loss, loss = compute_multi_loss(
+                cur_agg_prob[None, ...],
+                cur_group[im_misfit_cols].values[: run_config.n_rels][None, ...],
+                run_config.im_weights,
+            )
+        else:
+            cur_agg_prob = compute_single_agg_prob(
+                cur_scenario_mask,
+                einops.rearrange(
+                    cur_group.prob.values, "(obs rel) -> obs rel", rel=run_config.n_rels
+                ),
+                cur_im_site_weights,
+                run_config.im_weights,
+            ).squeeze()
+            assert np.isclose(cur_agg_prob.sum(), 1.0)
+            cur_result = pd.DataFrame(
+                index=cur_rels, columns=["prob"], data=cur_agg_prob
+            )
+
+            scenario_loss, loss = compute_single_loss(
+                cur_agg_prob[None, ...],
+                cur_group[im_misfit_cols].values[: run_config.n_rels][None, ...],
+                run_config.im_weights,
+            )
+
+        cur_result["event_id"] = cur_event
+        cur_result["site_int"] = cur_site_int
+        cur_result["rel_id"] = cur_result.index
+
+        cur_rel_group = cur_group.groupby("rel_id", observed=True)
+        assert np.all(cur_rel_group.first().index == cur_result.index)
+        if run_config.per_im_prob:
+            cur_result[im_misfit_cols] = cur_rel_group.first()[im_misfit_cols]
+        else:
+            cur_result["misfit_score"] = cur_rel_group.first().misfit_score
+
+        cur_residuals = cur_rel_group.first().loc[:, im_res_cols]
+        assert np.all(cur_residuals.index == cur_result.rel_id)
+        cur_result.loc[:, im_res_cols] = cur_residuals.values
+
+        cur_result.index = mlt.array_utils.numpy_str_join(
+            "_", cur_event, cur_site_int, cur_result.index.values.astype(str)
+        )
+
+        scenario_results.append(cur_result)
+
+        # Scenario summary details
+        scenario_sum_results.append(
+            (
+                cur_event,
+                cur_site_int,
+                scenario_loss[0],
+                cur_group.site_obs.nunique(),
+                cur_group.s2s_distance.min(),
+            )
+        )
+
+    scenario_df = pd.concat(scenario_results, axis=0)
+    scenario_sum_df = pd.DataFrame(
+        data=scenario_sum_results,
+        columns=["event_id", "site_int", "loss", "n_sites", "min_s2s_distance"],
+    )
+    return scenario_sum_df, scenario_df

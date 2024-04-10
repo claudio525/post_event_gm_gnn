@@ -56,6 +56,7 @@ class RunParamsConfig:
             "n_rels": self.n_rels,
             "ims": self.ims,
             "im_weights": self.im_weights.tolist(),
+            "per_im_prob": self.per_im_prob,
             "debug": self.debug,
             "device": self.device,
         }
@@ -1239,97 +1240,7 @@ def _im_weighted_mean(
     return agg_im_probs
 
 
-def compute_scenario_distribution(
-    sample_results: pd.DataFrame, run_config: RunParamsConfig, im_site_weights_suffix: str = "_site_corr_weights"
-):
-    """
-    Computes the realisation distribution for each scenario
-    """
-    string_to_int = np.vectorize(lambda x: hash(x))
-    im_prob_cols = np.char.add(run_config.ims, "_prob")
-    im_site_weight_cols = np.char.add(run_config.ims, im_site_weights_suffix)
-    im_res_cols = np.char.add(run_config.ims, "_residual")
-    im_misfit_cols = np.char.add(run_config.ims, "_misfit")
 
-    scenario_results = []
-    groups = sample_results.groupby(["event_id", "site_int"], observed=True)
-    iter_loop = tqdm(groups, desc="Processing scenarios")
-    for (cur_event, cur_site_int), cur_group in iter_loop:
-        cur_rel_group = cur_group.groupby("rel_id", observed=True)
-        if run_config.per_im_prob:
-            # cur_group["rel_int_id"] = string_to_int(cur_group.rel_id.values)
-            #
-            # cur_result = pd.DataFrame(
-            #     data=_im_weighted_mean(
-            #         # Have to pass this, as np.unique sorts the result
-            #         cur_group.rel_int_id.values[: run_config.n_rels],
-            #         cur_group.rel_int_id.values,
-            #         cur_group[im_prob_cols].values,
-            #         cur_group[im_site_weight_cols].values,
-            #     ),
-            #     index=cur_group.rel_id.values[: run_config.n_rels],
-            #     columns=im_prob_cols,
-            # )
-            #
-            # results = []
-            # cur_rels = np.unique(cur_group.rel_id.values)
-            # for cur_rel in cur_rels:
-            #     results.append(np.sum(cur_group.loc[cur_group.rel_id == cur_rel, im_prob_cols].values * cur_group.loc[cur_group.rel_id == cur_rel, im_site_weight_cols].values, axis=0))
-            # results = np.stack(results, axis=0)
-            # t2 = pd.DataFrame(index=cur_rels, columns=im_prob_cols, data=results)
-
-            cur_group = cur_group.sort_values(["site_obs", "rel_id"])
-            cur_rels = np.unique(cur_group.rel_id.values)
-            assert np.all(cur_group.rel_id[:run_config.n_rels] == cur_rels)
-
-            cur_im_prob_values = einops.rearrange(cur_group[im_prob_cols].values, "(o r) im -> o r im", r=run_config.n_rels)
-            cur_im_site_weight = einops.rearrange(cur_group[im_site_weight_cols].values, "(o r) im -> o r im", r=run_config.n_rels)
-            cur_agg_probs = einops.einsum(cur_im_site_weight, cur_im_prob_values, "o r im, o r im -> r im")
-            assert np.allclose(cur_agg_probs.sum(axis=0), 1.0)
-
-            cur_result = pd.DataFrame(index=cur_rels, columns=im_prob_cols, data=cur_agg_probs)
-        else:
-            wm = lambda x: np.sum(
-                x.prob.values
-                * (x.site_weights.values / x.site_weights.values.sum())
-            )
-            cur_result = cur_rel_group.apply(wm).to_frame("prob")
-
-        cur_result["event_id"] = cur_event
-        cur_result["site_int"] = cur_site_int
-        cur_result["rel_id"] = cur_result.index
-
-        cur_result["n_obs_sites"] = cur_group.site_obs.nunique()
-        cur_result["min_distance"] = cur_group.s2s_distance.min()
-        cur_result["max_distance"] = cur_group.s2s_distance.max()
-
-        # cur_site_obs_first = cur_group.groupby("site_obs", observed=True).first()
-        # cur_result["weighted_mean_distance"] = (
-        #     np.sum(
-        #         cur_site_obs_first.s2s_distance.values
-        #         * cur_site_obs_first.site_corr_weights.values
-        #     )
-        #     / cur_site_obs_first.site_corr_weights.values.sum()
-        # )
-
-        assert np.all(cur_rel_group.first().index == cur_result.index)
-        if run_config.per_im_prob:
-            cur_result[im_misfit_cols] = cur_rel_group.first()[im_misfit_cols]
-        else:
-            cur_result["misfit_score"] = cur_rel_group.first().misfit_score
-
-        cur_residuals = cur_rel_group.first().loc[:, im_res_cols]
-        assert np.all(cur_residuals.index == cur_result.rel_id)
-        cur_result.loc[:, im_res_cols] = cur_residuals.values
-
-        cur_result.index = mlt.array_utils.numpy_str_join(
-            "_", cur_event, cur_site_int, cur_result.index.values.astype(str)
-        )
-
-        scenario_results.append(cur_result)
-
-    scenario_df = pd.concat(scenario_results, axis=0)
-    return scenario_df
 
 
 def compute_scenario_loss(scenario_rel_results: pd.DataFrame):
