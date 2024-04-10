@@ -1550,10 +1550,7 @@ def compute_scenario_distribution(
 
         cur_rel_group = cur_group.groupby("rel_id", observed=True)
         assert np.all(cur_rel_group.first().index == cur_result.index)
-        if run_config.per_im_prob:
-            cur_result[im_misfit_cols] = cur_rel_group.first()[im_misfit_cols]
-        else:
-            cur_result["misfit_score"] = cur_rel_group.first().misfit_score
+        cur_result[im_misfit_cols] = cur_rel_group.first()[im_misfit_cols]
 
         cur_residuals = cur_rel_group.first().loc[:, im_res_cols]
         assert np.all(cur_residuals.index == cur_result.rel_id)
