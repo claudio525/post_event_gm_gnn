@@ -1239,29 +1239,3 @@ def _im_weighted_mean(
 
     return agg_im_probs
 
-
-
-
-
-def compute_scenario_loss(scenario_rel_results: pd.DataFrame):
-    """
-    Computes the scenario loss for each scenario
-    """
-    scenario_loss = (
-        scenario_rel_results.groupby(["event_id", "site_int"])
-        .apply(lambda g: np.sum(g.prob * g.misfit_score))
-        .to_frame("scenario_loss")
-    )
-    scenario_loss["event_id"] = scenario_loss.index.get_level_values(0).values.astype(
-        str
-    )
-    scenario_loss["site_int"] = scenario_loss.index.get_level_values(1).values.astype(
-        str
-    )
-    scenario_loss.index = mlt.array_utils.numpy_str_join(
-        "_",
-        scenario_loss.event_id.values.astype(str),
-        scenario_loss.site_int.values.astype(str),
-    )
-
-    return scenario_loss

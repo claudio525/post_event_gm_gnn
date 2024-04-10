@@ -67,14 +67,11 @@ def run_general_tab(results_dir: Path):
         val_sc_sum_df,
     ) = st_utils.ml_load_scenario_results(results_dir)
     if "prob" in train_sc_results.columns:
-        train_scenario_loss = sr.ml.prob.compute_scenario_loss(train_sc_results)
-        val_scenario_loss = sr.ml.prob.compute_scenario_loss(val_sc_results)
-
         st.markdown(
-            f"#### Mean train scenario loss: {train_scenario_loss.scenario_loss.mean():.4f}"
+            f"#### Mean train scenario loss: {train_sc_sum_df.loss.mean():.4f}"
         )
         st.write(
-            f"#### Mean val scenario loss: {val_scenario_loss.scenario_loss.mean():.4f}"
+            f"#### Mean val scenario loss: {val_sc_sum_df.loss.mean():.4f}"
         )
 
     # Model visualization
@@ -344,7 +341,7 @@ def _scenario_viewer(
 
     if "prob" in cur_scenario_df.columns:
         st.markdown(
-            f"**Scenario loss: {sr.ml.prob.compute_scenario_loss(cur_scenario_df).scenario_loss.iloc[0]:.4f}**"
+            f"**Scenario loss: {cur_sc_sum_df.loss:.4f}**"
         )
 
     assert np.all(site_int_sims.index == cur_scenario_df.index)
@@ -546,6 +543,11 @@ def _sample_viewer(
     obs_df = st_utils.ml_get_obs_df(results_dir)
 
     events = results_df.event_id.unique().astype("str")
+    meta = st_utils.ml_get_metadata(results_dir)
+
+    ims = meta["run_config"]["ims"]
+    im_misfit_cols = [f"{cur_im}_misfit" for cur_im in ims]
+    im_weights = np.asarray(meta["run_config"]["im_weights"])
 
     col1, col2 = st.columns([1, 6])
 
@@ -1587,6 +1589,8 @@ def main(
             ]
         ),
     )
+    result_id = "0410_1927_loth_baker_corrs_30_500_single"
+
     cur_results_dir = results_dir / result_id
 
     if st_utils.ml_get_metadata(cur_results_dir)["method_type"] not in [4, 5]:

@@ -8,7 +8,7 @@ import einops
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from tqdm import tqdm
 from torchinfo import summary
 from torchview import draw_graph
@@ -720,6 +720,7 @@ def compute_single_loss(
     agg_probs: Union[torch.Tensor, np.ndarray],
     im_misfit_score: Union[torch.Tensor, np.ndarray],
     im_weights: Union[torch.Tensor, np.ndarray],
+    sc_weights: Union[torch.Tensor, np.ndarray] = None,
 ):
     """
     Computes the scenario loss for the single-prob model
@@ -756,8 +757,12 @@ def compute_single_loss(
         im_misfit_score,
         "scenario rel, im, scenario rel im -> scenario",
     )
-    loss = scenario_loss.mean()
-    return scenario_loss, loss
+
+    if sc_weights is not None:
+        weighted_scenario_loss = sc_weights * scenario_loss
+        return scenario_loss, weighted_scenario_loss, weighted_scenario_loss.mean()
+    else:
+        return scenario_loss, None, scenario_loss.mean()
 
 
 def compute_single_agg_prob(
@@ -874,6 +879,7 @@ def compute_multi_loss(
     agg_probs: Union[torch.Tensor, np.ndarray],
     im_misfit_score: Union[torch.Tensor, np.ndarray],
     im_weights: Union[torch.Tensor, np.ndarray],
+    sc_weights: Union[torch.Tensor, np.ndarray] = None,
 ):
     """
     Computes the scenario loss for the single-prob model
@@ -910,8 +916,12 @@ def compute_multi_loss(
         im_misfit_score,
         "scenario rel im, im, scenario rel im -> scenario",
     )
-    loss = scenario_loss.mean()
-    return scenario_loss, loss
+
+    if sc_weights is not None:
+        weighted_scenario_loss = sc_weights * scenario_loss
+        return scenario_loss, weighted_scenario_loss, weighted_scenario_loss.mean()
+    else:
+        return scenario_loss, None, scenario_loss.mean()
 
 
 def get_weight_prediction(
@@ -966,6 +976,25 @@ def get_loth_weights(
     w_pred = (w_pred / w_pred.sum(axis=0)).sum(axis=1)
 
     return w_pred
+
+
+def compute_loth_baker_scenario_weights(
+    im_site_corrs: torch.Tensor,
+    scenario_mask: torch.Tensor,
+    im_weights: torch.Tensor,
+    min_weight: float,
+    max_weight: float,
+):
+    return torch.clamp(
+        einops.einsum(
+            im_site_corrs,
+            im_weights,
+            scenario_mask,
+            "obs im, im, obs scenario -> scenario",
+        ),
+        min_weight,
+        max_weight,
+    )
 
 
 def train(
@@ -1076,18 +1105,23 @@ def train(
             # w_pred = get_weight_prediction(
             #     weight_model, scalar_features, scenario_mask, run_config)
 
-            w_pred = get_loth_weights(
-                im_site_corrs.to(run_config.device, dtype=torch.float32), scenario_mask
+            im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
+
+            w_pred = get_loth_weights(im_site_corrs, scenario_mask)
+
+            scenario_weights = compute_loth_baker_scenario_weights(
+                im_site_corrs, scenario_mask, im_weights, 0.5, 2.0
             )
 
             if run_config.per_im_prob:
                 agg_probs = compute_multi_agg_prob(
                     scenario_mask, pred, w_pred, im_weights
                 )
-                scenario_loss, loss = compute_multi_loss(
+                scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
                     agg_probs,
                     sc_im_misfit_score.to(run_config.device, torch.float32),
                     im_weights,
+                    sc_weights=scenario_weights
                 )
             else:
                 agg_probs = compute_single_agg_prob(
@@ -1096,10 +1130,11 @@ def train(
                     w_pred,
                     im_weights,
                 )
-                scenario_loss, loss = compute_single_loss(
+                scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
                     agg_probs,
                     sc_im_misfit_score.to(run_config.device, torch.float32),
                     im_weights,
+                    sc_weights=scenario_weights
                 )
 
             optimizer.zero_grad()
@@ -1337,6 +1372,17 @@ def get_dataset_prediction(
                 .numpy(force=True)
                 .astype(np.float32)
             )
+            if not run_config.per_im_prob:
+                results_df.loc[start_ix:end_ix, "misfit_score"] = (
+                    einops.rearrange(
+                        einops.einsum(
+                            im_misfit_score, im_weights, "obs rel im, im -> obs rel"
+                        ),
+                        "obs rel -> (obs rel)",
+                    )
+                    .numpy(force=True)
+                    .astype(np.float32)
+                )
 
             # Site weights
             results_df.loc[start_ix:end_ix, im_site_weights_cols] = (
@@ -1519,7 +1565,7 @@ def compute_scenario_distribution(
                 index=cur_rels, columns=im_prob_cols, data=cur_agg_prob
             )
 
-            scenario_loss, loss = compute_multi_loss(
+            scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
                 cur_agg_prob[None, ...],
                 cur_group[im_misfit_cols].values[: run_config.n_rels][None, ...],
                 run_config.im_weights,
@@ -1538,7 +1584,7 @@ def compute_scenario_distribution(
                 index=cur_rels, columns=["prob"], data=cur_agg_prob
             )
 
-            scenario_loss, loss = compute_single_loss(
+            scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
                 cur_agg_prob[None, ...],
                 cur_group[im_misfit_cols].values[: run_config.n_rels][None, ...],
                 run_config.im_weights,
