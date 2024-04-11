@@ -67,12 +67,8 @@ def run_general_tab(results_dir: Path):
         val_sc_sum_df,
     ) = st_utils.ml_load_scenario_results(results_dir)
     if "prob" in train_sc_results.columns:
-        st.markdown(
-            f"#### Mean train scenario loss: {train_sc_sum_df.loss.mean():.4f}"
-        )
-        st.write(
-            f"#### Mean val scenario loss: {val_sc_sum_df.loss.mean():.4f}"
-        )
+        st.markdown(f"#### Mean train scenario loss: {train_sc_sum_df.loss.mean():.4f}")
+        st.write(f"#### Mean val scenario loss: {val_sc_sum_df.loss.mean():.4f}")
 
     # Model visualization
     col_1, col_2 = st.columns(2)
@@ -340,9 +336,7 @@ def _scenario_viewer(
     ]
 
     if "prob" in cur_scenario_df.columns:
-        st.markdown(
-            f"**Scenario loss: {cur_sc_sum_df.loss:.4f}**"
-        )
+        st.markdown(f"**Scenario loss: {cur_sc_sum_df.loss:.4f}**")
 
     assert np.all(site_int_sims.index == cur_scenario_df.index)
 
@@ -373,8 +367,14 @@ def _scenario_viewer(
 
     st.divider()
 
-    st.text(f"Number of Observation sites: {cur_sc_sum_df.n_sites}")
-    st.text(f"Distance to closest observation site: {cur_sc_sum_df.min_s2s_distance}")
+    st.text(
+        f"Number of Observation sites: "
+        f"{cur_sc_sum_df.n_sites if 'n_sites' in cur_sc_sum_df.index else cur_sc_sum_df.n_obs_sites}"
+    )
+    st.text(
+        f"Distance to closest observation site: "
+        f"{cur_sc_sum_df.min_s2s_distance if 'min_s2s_distance' in cur_sc_sum_df.index else cur_sc_sum_df.min_s2s_dist}"
+    )
 
     # Get the observation sites (sorted by distance)
     cur_obs_sites_df = cur_sample_results.groupby("site_obs", observed=True).first()
@@ -1382,6 +1382,8 @@ def agg_scenario_vis(
             c=sc_misfit,
             s=5,
             alpha=0.5,
+            vmin=0,
+            vmax=np.quantile(sc_misfit, 0.95),
         )
         ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
         ax1.set_xlabel("Number of observations")
@@ -1487,8 +1489,8 @@ def agg_single_viewer(results_df: pd.DataFrame, tab_type: str):
     with st.expander("Sample Misfit"):
         misfit_hist(results_df, im)
 
-    with st.expander("Misfit vs Site Weights"):
-        misfit_vs_site_weights(results_df, im)
+    # with st.expander("Misfit vs Site Weights"):
+        # misfit_vs_site_weights(results_df, im)
 
 
 def misfit_vs_site_weights(results_df: pd.DataFrame, im: str):
@@ -1589,7 +1591,7 @@ def main(
             ]
         ),
     )
-    result_id = "0410_1927_loth_baker_corrs_30_500_single"
+    # result_id = "0410_1420_loth_baker_corrs_30_500"
 
     cur_results_dir = results_dir / result_id
 

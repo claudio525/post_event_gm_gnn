@@ -569,9 +569,12 @@ class SCProbDataset(Dataset):
         return (
             self.events[event_ind],
             self.record_events[record_ind],
+            self.sites[site_int_ind],
             self.sites[record_site_int_ind],
+            self.sites[site_obs_ind],
             self.sites[record_site_obs_ind],
             self.rels[event_ind][:, rel_shuffle_ind],
+            self.residual[site_int_ind],
             self.residual[record_site_int_ind],
             self.n_sites_scenario[batch_ind],
         )
@@ -1102,11 +1105,10 @@ def train(
             scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
             scenario_mask = scenario_mask.to(run_config.device, torch.float32)
 
-            # w_pred = get_weight_prediction(
-            #     weight_model, scalar_features, scenario_mask, run_config)
-
             im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
 
+            # w_pred = get_weight_prediction(
+            #     weight_model, scalar_features, scenario_mask, run_config)
             w_pred = get_loth_weights(im_site_corrs, scenario_mask)
 
             scenario_weights = compute_loth_baker_scenario_weights(
@@ -1121,7 +1123,7 @@ def train(
                     agg_probs,
                     sc_im_misfit_score.to(run_config.device, torch.float32),
                     im_weights,
-                    sc_weights=scenario_weights
+                    sc_weights=scenario_weights,
                 )
             else:
                 agg_probs = compute_single_agg_prob(
@@ -1134,7 +1136,7 @@ def train(
                     agg_probs,
                     sc_im_misfit_score.to(run_config.device, torch.float32),
                     im_weights,
-                    sc_weights=scenario_weights
+                    sc_weights=scenario_weights,
                 )
 
             optimizer.zero_grad()
@@ -1179,22 +1181,28 @@ def train(
                 scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
                 scenario_mask = scenario_mask.to(run_config.device, torch.float32)
 
+                im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
+
                 # w_pred = get_weight_prediction(
                 #     weight_model, scalar_features, scenario_mask, run_config)
-
                 w_pred = get_loth_weights(
                     im_site_corrs.to(run_config.device, dtype=torch.float32),
                     scenario_mask,
+                )
+
+                scenario_weights = compute_loth_baker_scenario_weights(
+                    im_site_corrs, scenario_mask, im_weights, 0.5, 2.0
                 )
 
                 if run_config.per_im_prob:
                     agg_probs = compute_multi_agg_prob(
                         scenario_mask, pred, w_pred, im_weights
                     )
-                    scenario_loss, loss = compute_multi_loss(
+                    scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
                         agg_probs,
                         sc_im_misfit_score.to(run_config.device, torch.float32),
                         im_weights,
+                        sc_weights=scenario_weights,
                     )
                 else:
                     agg_probs = compute_single_agg_prob(
@@ -1203,10 +1211,11 @@ def train(
                         w_pred,
                         im_weights,
                     )
-                    scenario_loss, loss = compute_single_loss(
+                    scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
                         agg_probs,
                         sc_im_misfit_score.to(run_config.device, torch.float32),
                         im_weights,
+                        sc_weights=scenario_weights,
                     )
 
                 metrics["loss_hist_val"][epoch_ix] += loss.item()
@@ -1237,6 +1246,12 @@ def get_dataset_prediction(
         dataset, hp_config.batch_size, shuffle=False, shuffle_rels=False
     )
 
+    assert np.isclose(np.sum(run_config.im_weights), 1.0)
+    im_weights = torch.from_numpy(run_config.im_weights).to(
+        run_config.device, torch.float32
+    )
+
+    ### Sample setup
     columns = [
         "event_id",
         "site_int",
@@ -1255,31 +1270,30 @@ def get_dataset_prediction(
     else:
         columns += ["prob"]
 
-    results_df = pd.DataFrame(
+    sample_results_df = pd.DataFrame(
         index=np.arange(dataset.n_sites_scenario.sum() * run_config.n_rels),
         columns=columns,
     )
 
-    results_df = results_df.astype(
+    sample_results_df = sample_results_df.astype(
         dict(zip(columns[4:], len(columns[4:]) * [np.float32]))
     )
 
-    results_df["event_id"] = pd.Categorical(
-        categories=dataset.events, values=results_df.shape[0] * [pd.NA]
+    sample_results_df["event_id"] = pd.Categorical(
+        categories=dataset.events, values=sample_results_df.shape[0] * [pd.NA]
     )
-    results_df["site_int"] = pd.Categorical(
-        categories=np.unique(dataset.sites), values=results_df.shape[0] * [pd.NA]
+    sample_results_df["site_int"] = pd.Categorical(
+        categories=np.unique(dataset.sites), values=sample_results_df.shape[0] * [pd.NA]
     )
-    results_df["site_obs"] = pd.Categorical(
-        categories=np.unique(dataset.sites), values=results_df.shape[0] * [pd.NA]
+    sample_results_df["site_obs"] = pd.Categorical(
+        categories=np.unique(dataset.sites), values=sample_results_df.shape[0] * [pd.NA]
     )
-    results_df["rel_id"] = pd.Categorical(
-        categories=np.unique(dataset.rels), values=results_df.shape[0] * [pd.NA]
+    sample_results_df["rel_id"] = pd.Categorical(
+        categories=np.unique(dataset.rels), values=sample_results_df.shape[0] * [pd.NA]
     )
 
-    assert np.isclose(np.sum(run_config.im_weights), 1.0)
-    im_weights = torch.from_numpy(run_config.im_weights)
-
+    ### Iterate over dataset
+    sc_results, sc_sum_results = [], []
     with (torch.no_grad()):
         prob_model.eval()
         start_ix = 0
@@ -1299,6 +1313,21 @@ def get_dataset_prediction(
             im_misfit_score,
             im_site_corrs,
         ) in enumerate(tqdm(pred_dataloader)):
+            # Metadata
+            (
+                events,
+                record_events,
+                site_int,
+                record_site_int,
+                site_obs,
+                record_site_obs,
+                rels,
+                residual,
+                record_residual,
+                n_sites_scenario,
+            ) = dataset.get_metadata(batch_ind, rel_shuffle_ind)
+
+            # Predictions
             pred = prob.get_prediction(
                 prob_model,
                 site_obs_norm_obs_ims,
@@ -1312,71 +1341,68 @@ def get_dataset_prediction(
                 hp_config,
             )
 
+            # Scenario mask
             scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
             scenario_mask = scenario_mask.to(run_config.device, torch.float32)
 
+            # Site weights
             # w_pred = get_weight_prediction(
             #     weight_model, scalar_features, scenario_mask, run_config)
-
             w_pred = get_loth_weights(
                 im_site_corrs.to(run_config.device, dtype=torch.float32), scenario_mask
             )
 
-            (
-                events,
-                record_events,
-                site_int,
-                site_obs,
-                rels,
-                residual,
-                n_sites_scenario,
-            ) = dataset.get_metadata(batch_ind, rel_shuffle_ind)
-
             cur_n_samples = pred.shape[0]
             end_ix = start_ix + cur_n_samples * run_config.n_rels - 1
 
-            ### Store results
+            ### Store sample results
             # Event
-            results_df.loc[start_ix:end_ix, "event_id"] = einops.repeat(
+            sample_results_df.loc[start_ix:end_ix, "event_id"] = einops.repeat(
                 record_events, "batch -> (batch rel)", rel=pred.shape[1]
             )
             # Site of Interest
-            results_df.loc[start_ix:end_ix, "site_int"] = df_site_int = einops.repeat(
-                site_int, "batch -> (batch rel)", rel=pred.shape[1]
+            sample_results_df.loc[
+                start_ix:end_ix, "site_int"
+            ] = df_site_int = einops.repeat(
+                record_site_int, "batch -> (batch rel)", rel=pred.shape[1]
             )
             # Observation site
-            results_df.loc[start_ix:end_ix, "site_obs"] = df_site_obs = einops.repeat(
-                site_obs, "batch -> (batch rel)", rel=pred.shape[1]
+            sample_results_df.loc[
+                start_ix:end_ix, "site_obs"
+            ] = df_site_obs = einops.repeat(
+                record_site_obs, "batch -> (batch rel)", rel=pred.shape[1]
             )
             # Realisation
-            results_df.loc[start_ix:end_ix, "rel_id"] = einops.rearrange(
+            sample_results_df.loc[start_ix:end_ix, "rel_id"] = einops.rearrange(
                 np.repeat(rels, n_sites_scenario, axis=0), "batch rel -> (batch rel)"
             )
             # Probabilities
             if run_config.per_im_prob:
-                results_df.loc[start_ix:end_ix, prob_cols] = (
+                sample_results_df.loc[start_ix:end_ix, prob_cols] = (
                     einops.rearrange(pred, "batch rel im -> (batch rel) im")
                     .numpy(force=True)
                     .astype(np.float32)
                 )
             else:
-                results_df.loc[start_ix:end_ix, "prob"] = (
+                sample_results_df.loc[start_ix:end_ix, "prob"] = (
                     einops.rearrange(pred, "batch rel -> (batch rel)")
                     .numpy(force=True)
                     .astype(np.float32)
                 )
 
             # Misfit score
-            results_df.loc[start_ix:end_ix, im_misfit_cols] = (
+            sample_results_df.loc[start_ix:end_ix, im_misfit_cols] = (
                 einops.rearrange(im_misfit_score, "batch rel im -> (batch rel) im")
                 .numpy(force=True)
                 .astype(np.float32)
             )
             if not run_config.per_im_prob:
-                results_df.loc[start_ix:end_ix, "misfit_score"] = (
+                sample_results_df.loc[start_ix:end_ix, "misfit_score"] = (
                     einops.rearrange(
                         einops.einsum(
-                            im_misfit_score, im_weights, "obs rel im, im -> obs rel"
+                            im_misfit_score.to(run_config.device, torch.float32),
+                            im_weights,
+                            "obs rel im, im -> obs rel",
                         ),
                         "obs rel -> (obs rel)",
                     )
@@ -1385,7 +1411,7 @@ def get_dataset_prediction(
                 )
 
             # Site weights
-            results_df.loc[start_ix:end_ix, im_site_weights_cols] = (
+            sample_results_df.loc[start_ix:end_ix, im_site_weights_cols] = (
                 einops.repeat(
                     w_pred,
                     "batch im -> (batch rel) im",
@@ -1396,19 +1422,140 @@ def get_dataset_prediction(
             )
 
             # IM residuals
-            results_df.loc[start_ix:end_ix, im_res_cols] = einops.rearrange(
-                residual, "batch rel im -> (batch rel) im"
+            sample_results_df.loc[start_ix:end_ix, im_res_cols] = einops.rearrange(
+                record_residual, "batch rel im -> (batch rel) im"
             ).astype(np.float32)
 
             # Site-to-site distance
-            results_df.loc[start_ix:end_ix, "s2s_distance"] = dist_matrix.values[
+            sample_results_df.loc[start_ix:end_ix, "s2s_distance"] = dist_matrix.values[
                 dist_matrix.index.get_indexer_for(df_site_int),
                 dist_matrix.columns.get_indexer_for(df_site_obs),
             ].astype(np.float32)
 
+            sc_weights = compute_loth_baker_scenario_weights(
+                im_site_corrs.to(run_config.device, torch.float32),
+                scenario_mask,
+                im_weights,
+                0.5,
+                2.0,
+            )
+
+            ### Scenario results
+            # Compute the scenario probabilities & loss
+            cur_sc_result = pd.DataFrame(
+                index=["event_id", "site_int", "rel_id"],
+                data=[
+                    einops.repeat(events, "sc -> (sc rel)", rel=run_config.n_rels),
+                    einops.repeat(site_int, "sc -> (sc rel)", rel=run_config.n_rels),
+                    einops.rearrange(rels, "sc rel -> (sc rel)"),
+                ],
+            ).T
+
+            if run_config.per_im_prob:
+                cur_agg_prob = compute_multi_agg_prob(
+                    scenario_mask,
+                    pred,
+                    w_pred,
+                    im_weights,
+                )
+                assert np.allclose(cur_agg_prob.sum(axis=1).numpy(force=True), 1.0)
+
+                scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
+                    cur_agg_prob,
+                    sc_im_misfit_score.to(run_config.device, torch.float32),
+                    im_weights,
+                    sc_weights=sc_weights,
+                )
+
+                cur_sc_result[prob_cols] = einops.rearrange(
+                    cur_agg_prob.numpy(force=True), "sc rel im -> (sc rel) im"
+                )
+            else:
+                cur_agg_prob = compute_single_agg_prob(
+                    scenario_mask,
+                    pred,
+                    w_pred,
+                    im_weights,
+                )
+                assert np.allclose(cur_agg_prob.sum(axis=1).numpy(force=True), 1.0)
+
+                scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
+                    cur_agg_prob,
+                    sc_im_misfit_score.to(run_config.device, torch.float32),
+                    im_weights,
+                    sc_weights=sc_weights,
+                )
+
+                cur_sc_result["prob"] = einops.rearrange(
+                    cur_agg_prob.numpy(force=True), "sc rel -> (sc rel)"
+                )
+
+                cur_sc_result["misfit_score"] = einops.rearrange(
+                    einops.einsum(
+                        sc_im_misfit_score.to(run_config.device, torch.float32),
+                        im_weights,
+                        "sc rel im, im -> sc rel",
+                    )
+                    .numpy(force=True)
+                    .astype(np.float32),
+                    "sc rel -> (sc rel)",
+                )
+
+            cur_sc_result[im_misfit_cols] = (
+                einops.rearrange(sc_im_misfit_score, "sc rel im -> (sc rel) im")
+                .numpy(force=True)
+                .astype(np.float32)
+            )
+
+            cur_sc_result[im_res_cols] = einops.rearrange(
+                residual, "sc rel im -> (sc rel) im"
+            ).astype(np.float32)
+
+            ### Scenario Summary
+            sc_group = sample_results_df.loc[start_ix:end_ix].groupby(
+                ["event_id", "site_int"], observed=True
+            )
+            n_obs_sites = sc_group.site_obs.nunique()
+
+            cur_sc_sum = pd.DataFrame(
+                index=["event_id", "site_int", "loss", "w_loss", "weight"],
+                data=[
+                    events,
+                    site_int,
+                    scenario_loss.numpy(force=True),
+                    weighted_scenario_loss.numpy(force=True)
+                    if weighted_scenario_loss is not None
+                    else None,
+                    sc_weights.numpy(force=True),
+                ],
+            ).T
+
+            assert np.all(
+                n_obs_sites.index.get_level_values(0).values == cur_sc_sum.event_id
+            )
+            assert np.all(
+                n_obs_sites.index.get_level_values(1).values == cur_sc_sum.site_int
+            )
+            cur_sc_sum["n_obs_sites"] = n_obs_sites.values
+            cur_sc_sum["min_s2s_dist"] = sc_group["s2s_distance"].min().values
+
+            cur_sc_result.index = mlt.array_utils.numpy_str_join(
+                "_",
+                cur_sc_result.event_id.values.astype(str),
+                cur_sc_result.site_int.values.astype(str),
+                cur_sc_result.rel_id.values.astype(str),
+            )
+            cur_sc_sum.index = mlt.array_utils.numpy_str_join("_", events, site_int)
+
+            sc_results.append(cur_sc_result)
+            sc_sum_results.append(cur_sc_sum)
+
             start_ix = end_ix + 1
 
-        return results_df
+        sc_results = pd.concat(sc_results, axis=0)
+        sc_sum_results = pd.concat(sc_sum_results, axis=0)
+
+        return sample_results_df, sc_results, sc_sum_results
 
 
 def post_processing(
@@ -1444,14 +1591,18 @@ def post_processing(
     dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, station_df)
 
     ### Sample
-    print(f"Computing sample distributions")
-    train_sample_results = get_dataset_prediction(
+    print(f"Computing results")
+    (
+        train_sample_results,
+        train_sc_results,
+        train_sc_sum_results,
+    ) = get_dataset_prediction(
         train_dataset, prob_model, weight_model, run_config, dist_matrix, hp_config
     )
     print(
         f"\tTrain sample results - Memory usage: {train_sample_results.memory_usage(deep=True).sum() / 1e6} MB"
     )
-    val_sample_results = get_dataset_prediction(
+    val_sample_results, val_sc_results, val_sc_sum_results = get_dataset_prediction(
         val_dataset, prob_model, weight_model, run_config, dist_matrix, hp_config
     )
     print(
@@ -1459,24 +1610,12 @@ def post_processing(
     )
 
     train_sample_results.to_parquet(cur_out_dir / "train_sample_results.parquet")
-    val_sample_results.to_parquet(cur_out_dir / "val_sample_results.parquet")
-
-    ### Scenario
-    print(f"Computing scenario distributions")
-    print("Training dataset")
-    train_sum_sc_df, train_sc_results = compute_scenario_distribution(
-        train_sample_results, run_config, "_site_weights"
-    )
-    print("Validation dataset")
-    val_sum_sc_df, val_sc_results = compute_scenario_distribution(
-        val_sample_results, run_config, "_site_weights"
-    )
-
     train_sc_results.to_parquet(cur_out_dir / "train_scenario_results.parquet")
-    train_sum_sc_df.to_parquet(cur_out_dir / "train_scenario_summary.parquet")
+    train_sc_sum_results.to_parquet(cur_out_dir / "train_scenario_summary.parquet")
 
+    val_sample_results.to_parquet(cur_out_dir / "val_sample_results.parquet")
     val_sc_results.to_parquet(cur_out_dir / "val_scenario_results.parquet")
-    val_sum_sc_df.to_parquet(cur_out_dir / "val_scenario_summary.parquet")
+    val_sc_sum_results.to_parquet(cur_out_dir / "val_scenario_summary.parquet")
 
     # Save loss history
     pd.to_pickle(metrics, cur_out_dir / "metrics.pickle")
