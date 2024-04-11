@@ -440,12 +440,12 @@ def _scenario_viewer(
                 .head(10)
             )
 
-        st.dataframe(
-            cur_sample_results.groupby("site_obs", observed=True)
-            .first()[["site_weights", "s2s_distance", "angular_distance"]]
-            .sort_values("site_weights", ascending=False)
-            .T
-        )
+        # st.dataframe(
+        #     cur_sample_results.groupby("site_obs", observed=True)
+        #     .first()[["site_weights", "s2s_distance", "angular_distance"]]
+        #     .sort_values("site_weights", ascending=False)
+        #     .T
+        # )
 
         create_misfit_dist_plot(cur_scenario_df, tab_type)
 
@@ -1304,6 +1304,10 @@ def agg_scenario_vis(
 ):
     with st.expander("Posterior Probabilities"):
         posterior_probs_inv(cur_results_dir, sc_results_df, tab_type)
+    st.divider()
+
+    print(f"wtf")
+
     st.divider()
 
     if "prob" in sc_results_df.columns:

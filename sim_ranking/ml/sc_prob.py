@@ -1012,6 +1012,8 @@ def train(
     metrics = {
         "loss_hist_train": torch.zeros(hp_config.n_epochs),
         "loss_hist_val": torch.zeros(hp_config.n_epochs),
+        "unweighted_loss_hist_train": torch.zeros(hp_config.n_epochs),
+        "unweighted_loss_hist_val": torch.zeros(hp_config.n_epochs),
     }
 
     best_epoch_key = "loss_hist_val"
@@ -1111,9 +1113,11 @@ def train(
             #     weight_model, scalar_features, scenario_mask, run_config)
             w_pred = get_loth_weights(im_site_corrs, scenario_mask)
 
-            scenario_weights = compute_loth_baker_scenario_weights(
-                im_site_corrs, scenario_mask, im_weights, 0.5, 2.0
-            )
+            scenario_weights = None
+            if run_config.apply_sc_weighting:
+                scenario_weights = compute_loth_baker_scenario_weights(
+                        im_site_corrs, scenario_mask, im_weights, 0.5, 2.0
+                    )
 
             if run_config.per_im_prob:
                 agg_probs = compute_multi_agg_prob(
@@ -1144,8 +1148,10 @@ def train(
             optimizer.step()
 
             metrics["loss_hist_train"][epoch_ix] += loss.item()
+            metrics["unweighted_loss_hist_train"][epoch_ix] += scenario_loss.mean().item()
 
         metrics["loss_hist_train"][epoch_ix] /= len(train_dataloader)
+        metrics["unweighted_loss_hist_train"][epoch_ix] /= len(train_dataloader)
 
         prob_model.eval()
         with torch.no_grad():
@@ -1190,9 +1196,11 @@ def train(
                     scenario_mask,
                 )
 
-                scenario_weights = compute_loth_baker_scenario_weights(
-                    im_site_corrs, scenario_mask, im_weights, 0.5, 2.0
-                )
+                scenario_weights = None
+                if run_config.apply_sc_weighting:
+                    scenario_weights = compute_loth_baker_scenario_weights(
+                        im_site_corrs, scenario_mask, im_weights, 0.5, 2.0
+                    )
 
                 if run_config.per_im_prob:
                     agg_probs = compute_multi_agg_prob(
@@ -1219,8 +1227,10 @@ def train(
                     )
 
                 metrics["loss_hist_val"][epoch_ix] += loss.item()
+                metrics["unweighted_loss_hist_val"][epoch_ix] += scenario_loss.mean().item()
 
             metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
+            metrics["unweighted_loss_hist_val"][epoch_ix] /= len(val_dataloader)
 
             if metrics["loss_hist_val"][epoch_ix] < best_val_loss:
                 best_val_loss = metrics["loss_hist_val"][epoch_ix]
@@ -1432,13 +1442,15 @@ def get_dataset_prediction(
                 dist_matrix.columns.get_indexer_for(df_site_obs),
             ].astype(np.float32)
 
-            sc_weights = compute_loth_baker_scenario_weights(
-                im_site_corrs.to(run_config.device, torch.float32),
-                scenario_mask,
-                im_weights,
-                0.5,
-                2.0,
-            )
+            sc_weights = None
+            if run_config.apply_sc_weighting:
+                sc_weights = compute_loth_baker_scenario_weights(
+                    im_site_corrs.to(run_config.device, torch.float32),
+                    scenario_mask,
+                    im_weights,
+                    0.5,
+                    2.0,
+                )
 
             ### Scenario results
             # Compute the scenario probabilities & loss
@@ -1518,17 +1530,15 @@ def get_dataset_prediction(
             n_obs_sites = sc_group.site_obs.nunique()
 
             cur_sc_sum = pd.DataFrame(
-                index=["event_id", "site_int", "loss", "w_loss", "weight"],
+                index=["event_id", "site_int", "loss"],
                 data=[
                     events,
                     site_int,
                     scenario_loss.numpy(force=True),
-                    weighted_scenario_loss.numpy(force=True)
-                    if weighted_scenario_loss is not None
-                    else None,
-                    sc_weights.numpy(force=True),
                 ],
             ).T
+            cur_sc_sum["w_loss"] = weighted_scenario_loss.numpy(force=True) if weighted_scenario_loss is not None else np.nan
+            cur_sc_sum["weight"] = sc_weights.numpy(force=True) if sc_weights is not None else np.nan
 
             assert np.all(
                 n_obs_sites.index.get_level_values(0).values == cur_sc_sum.event_id

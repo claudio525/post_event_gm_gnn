@@ -37,6 +37,8 @@ class RunParamsConfig:
     # output P(R_i|X) for each IM independently
     per_im_prob: bool
 
+    apply_sc_weighting: bool
+
     debug: bool
     device: str
 
@@ -57,6 +59,7 @@ class RunParamsConfig:
             "ims": self.ims,
             "im_weights": self.im_weights.tolist(),
             "per_im_prob": self.per_im_prob,
+            "apply_sc_weighting": self.apply_sc_weighting,
             "debug": self.debug,
             "device": self.device,
         }

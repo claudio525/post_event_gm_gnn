@@ -31,6 +31,7 @@ def train_model(
     data_source: str = None,
     im_set: str = "all",
     quiet: bool = False,
+    apply_sc_weighting: bool = False,
     seed: int = None,
     out_dir: Path = None,
 ):
@@ -40,6 +41,7 @@ def train_model(
         sr.constants.IM_SETS[im_set],
         sr.constants.IM_WEIGTHS_SETS[im_set],
         per_im_prob,
+        apply_sc_weighting,
         debug,
         device,
         results_dir=out_dir,
