@@ -1352,6 +1352,25 @@ def agg_scenario_vis(
     im_std_cols = get_im_cols(cur_results_dir, "wstd")
     sc_sum_df["std_avg"] = np.mean(sc_sum_df[im_std_cols].values, axis=1)
 
+    # Filtering
+    st.markdown("### Filtering")
+    with st.form(key=f"{tab_type}_filter_form"):
+        apply_filtering = st.checkbox("Apply Filtering", value=False, key=f"{tab_type}_filter")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.text("Number of Observation Sites")
+            min_obs_sites = st.number_input(
+                "Minimum", 1, 1000, 1, key=f"{tab_type}_min_obs_sites", disabled=apply_filtering
+            )
+        with c2:
+            st.text("Minimum S2S Distance")
+            max_s2s_dist = st.number_input(
+                "Maximum", 0.0, 1000.0, 100.0, key=f"{tab_type}_max_s2s_dist", disabled=apply_filtering
+            )
+        if st.form_submit_button():
+            sc_sum_df = sc_sum_df.loc[
+                (sc_sum_df.n_obs_sites >= min_obs_sites) & (sc_sum_df.min_s2s_dist <= max_s2s_dist)]
+
     axis_cols = ["loss", "n_obs_sites", "min_s2s_dist", "std_avg"]
     if not np.any(sc_sum_df["weight"].isna()):
         axis_cols.extend(["weight", "w_loss"])
