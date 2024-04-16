@@ -38,6 +38,8 @@ class RunParamsConfig:
     per_im_prob: bool
 
     apply_sc_weighting: bool
+    min_sc_weight: float
+    max_sc_weight: float
 
     debug: bool
     device: str
@@ -60,6 +62,8 @@ class RunParamsConfig:
             "im_weights": self.im_weights.tolist(),
             "per_im_prob": self.per_im_prob,
             "apply_sc_weighting": self.apply_sc_weighting,
+            "min_sc_weight": self.min_sc_weight,
+            "max_sc_weight": self.max_sc_weight,
             "debug": self.debug,
             "device": self.device,
         }

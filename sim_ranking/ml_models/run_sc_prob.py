@@ -32,6 +32,8 @@ def train_model(
     im_set: str = "all",
     quiet: bool = False,
     apply_sc_weighting: bool = False,
+    min_sc_weight: float = 0.5,
+    max_sc_weight: float = 2.0,
     seed: int = None,
     out_dir: Path = None,
 ):
@@ -42,6 +44,8 @@ def train_model(
         sr.constants.IM_WEIGTHS_SETS[im_set],
         per_im_prob,
         apply_sc_weighting,
+        min_sc_weight,
+        max_sc_weight,
         debug,
         device,
         results_dir=out_dir,

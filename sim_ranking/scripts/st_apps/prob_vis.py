@@ -16,6 +16,7 @@ import scipy.stats as stats
 
 import sha_calc as sha
 import spatial_hazard as sh
+
 import sim_ranking as sr
 import ml_tools as mlt
 
@@ -28,6 +29,11 @@ def load_training_metrics(results_dir: Path):
 
     return metrics
 
+
+@st.cache_data
+def get_im_cols(results_dir: Path, suffix: str):
+    ims = st_utils.ml_get_metadata(results_dir)
+    return mlt.array_utils.numpy_str_join("_", ims["run_config"]["ims"], suffix)
 
 @st.cache_data
 def get_results_group(
@@ -241,6 +247,7 @@ def _scenario_viewer(
     scenario_results: pd.DataFrame,
     sc_sum_df: pd.DataFrame,
     sample_results: pd.DataFrame,
+    sample_sum_results: pd.DataFrame,
     tab_type: str,
     gen_gm_params: pd.DataFrame = None,
     syn_obs_gm_params: pd.DataFrame = None,
@@ -334,6 +341,8 @@ def _scenario_viewer(
     cur_sample_results = sample_results.loc[
         (sample_results.event_id == event) & (sample_results.site_int == site_int)
     ]
+    cur_sample_sum_results = sample_sum_results.loc[
+        (sample_sum_results.event_id == event) & (sample_sum_results.site_int == site_int)]
 
     if "prob" in cur_scenario_df.columns:
         st.markdown(f"**Scenario loss: {cur_sc_sum_df.loss:.4f}**")
@@ -357,7 +366,9 @@ def _scenario_viewer(
     )
 
     create_pSA_dist_plot(
+        results_dir,
         cur_scenario_df,
+        cur_sc_sum_df,
         site_int_sims,
         site_int_obs,
         high_rels=high_rels if len(high_rels) > 0 else None,
@@ -403,7 +414,9 @@ def _scenario_viewer(
                 )
 
             create_pSA_dist_plot(
+                results_dir,
                 cur_sample_results.loc[cur_sample_results.site_obs == cur_obs_site],
+                cur_sample_sum_results.loc[cur_sample_sum_results.site_obs == cur_obs_site].squeeze(),
                 site_int_sims,
                 site_int_obs,
                 high_rels=high_rels if len(high_rels) > 0 else None,
@@ -534,6 +547,7 @@ def create_misfit_dist_plot(results_df: pd.DataFrame, tab_type: str):
 def _sample_viewer(
     results_dir: Path,
     results_df: pd.DataFrame,
+    sum_results_df: pd.DataFrame,
     tab_type: str,
     gen_gm_params: pd.DataFrame = None,
     syn_obs_gm_params: pd.DataFrame = None,
@@ -632,6 +646,11 @@ def _sample_viewer(
         .set_index("rel_id")
         .sort_index()
     )
+    cur_sum_results_df = sum_results_df.loc[
+        (sum_results_df.event_id == event)
+        & (sum_results_df.site_int == site_int)
+        & (sum_results_df.site_obs == site_obs)
+    ].squeeze()
 
     assert np.all(site_int_sims.index == cur_results_df.index)
 
@@ -670,7 +689,9 @@ def _sample_viewer(
         )
 
     create_pSA_dist_plot(
+        results_dir,
         cur_results_df,
+        cur_sum_results_df,
         site_int_sims,
         site_int_obs,
         high_rels=high_rels if len(high_rels) > 0 else None,
@@ -734,7 +755,9 @@ def _sample_viewer(
 
 
 def create_pSA_dist_plot(
+    result_dir: Path,
     results_df: pd.DataFrame,
+    results_sum_df: pd.Series,
     site_int_sims: pd.DataFrame,
     site_int_obs: pd.DataFrame,
     high_rels: List[str] = None,
@@ -814,56 +837,61 @@ def create_pSA_dist_plot(
             linewidth=1.0,
         )
 
-    if "prob" in results_df.columns:
-        assert np.isclose(np.sum(results_df.prob.values), 1.0)
-        weighted_avg = einops.einsum(
-            results_df.prob.values,
-            site_int_sims.loc[:, sr.constants.PSA_KEYS].values,
-            "i, i j -> j",
-        )
-        weighted_std = np.sqrt(
-            einops.einsum(
-                results_df.prob.values,
-                (site_int_sims.loc[:, sr.constants.PSA_KEYS].values - weighted_avg)
-                ** 2,
-                "i, i j -> j",
-            )
-        )
-    else:
-        im_prob_cols = [f"{cur_im}_prob" for cur_im in sr.constants.PSA_KEYS]
-        assert np.allclose(results_df[im_prob_cols].sum(), 1.0)
+    im_wavg_cols = get_im_cols(result_dir, "wavg")
+    im_wstd_cols = get_im_cols(result_dir, "wstd")
+    weighted_avg_ln = results_sum_df[im_wavg_cols].values.astype(float)
+    weighted_std_ln = results_sum_df[im_wstd_cols].values.astype(float)
 
-        weighted_avg = einops.einsum(
-            results_df[im_prob_cols].values,
-            site_int_sims.loc[:, sr.constants.PSA_KEYS].values,
-            "i j, i j -> j",
-        )
-        weighted_std = np.sqrt(
-            einops.einsum(
-                results_df[im_prob_cols].values,
-                (site_int_sims.loc[:, sr.constants.PSA_KEYS].values - weighted_avg)
-                ** 2,
-                "i j, i j -> j",
-            )
-        )
+    # if "prob" in results_df.columns:
+    #     assert np.isclose(np.sum(results_df.prob.values), 1.0)
+    #     weighted_avg = einops.einsum(
+    #         results_df.prob.values,
+    #         site_int_sims.loc[:, sr.constants.PSA_KEYS].values,
+    #         "i, i j -> j",
+    #     )
+    #     weighted_std = np.sqrt(
+    #         einops.einsum(
+    #             results_df.prob.values,
+    #             (site_int_sims.loc[:, sr.constants.PSA_KEYS].values - weighted_avg)
+    #             ** 2,
+    #             "i, i j -> j",
+    #         )
+    #     )
+    # else:
+    #     im_prob_cols = [f"{cur_im}_prob" for cur_im in sr.constants.PSA_KEYS]
+    #     assert np.allclose(results_df[im_prob_cols].sum(), 1.0)
+    #
+    #     weighted_avg = einops.einsum(
+    #         results_df[im_prob_cols].values,
+    #         site_int_sims.loc[:, sr.constants.PSA_KEYS].values,
+    #         "i j, i j -> j",
+    #     )
+    #     weighted_std = np.sqrt(
+    #         einops.einsum(
+    #             results_df[im_prob_cols].values,
+    #             (site_int_sims.loc[:, sr.constants.PSA_KEYS].values - weighted_avg)
+    #             ** 2,
+    #             "i j, i j -> j",
+    #         )
+    #     )
 
     ax.semilogx(
         sr.constants.PERIODS,
-        weighted_avg,
+        np.exp(weighted_avg_ln),
         label="ML - Mean",
         c="blue",
         marker=".",
     )
     ax.fill_between(
         sr.constants.PERIODS,
-        weighted_avg + weighted_std,
-        weighted_avg - weighted_std,
+        np.exp(weighted_avg_ln + weighted_std_ln),
+        np.exp(weighted_avg_ln - weighted_std_ln),
         alpha=0.4,
         label="ML +/- 1 Std",
         color="lightblue",
     )
-    ax.semilogx(sr.constants.PERIODS, weighted_avg + weighted_std, c="lightblue")
-    ax.semilogx(sr.constants.PERIODS, weighted_avg - weighted_std, c="lightblue")
+    ax.semilogx(sr.constants.PERIODS, np.exp(weighted_avg_ln + weighted_std_ln), c="lightblue")
+    ax.semilogx(sr.constants.PERIODS, np.exp(weighted_avg_ln - weighted_std_ln), c="lightblue")
 
     if high_rels is not None:
         colors = sns.color_palette("dark", len(high_rels))
@@ -1109,7 +1137,12 @@ def run_ind_samples(
     gen_gm_params_ffp: Path = None,
     syn_obs_gm_params_ffp: Path = None,
 ):
-    train_sample_results, val_sample_results = sample_results
+    (
+        train_sample_results,
+        train_sample_sum_results,
+        val_sample_results,
+        val_sample_sum_results,
+    ) = sample_results
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
@@ -1128,6 +1161,7 @@ def run_ind_samples(
         _sample_viewer(
             results_dir,
             train_sample_results,
+            train_sample_sum_results,
             "train_sample",
             gen_gm_params,
             syn_obs_gm_params,
@@ -1137,6 +1171,7 @@ def run_ind_samples(
         _sample_viewer(
             results_dir,
             val_sample_results,
+            val_sample_sum_results,
             "val_sample",
             gen_gm_params,
             syn_obs_gm_params,
@@ -1150,7 +1185,12 @@ def run_ind_scenario(
     gen_gm_params_ffp: Path = None,
     syn_obs_gm_params_ffp: Path = None,
 ):
-    train_sample_results, val_sample_results = sample_results
+    (
+        train_sample_results,
+        train_sample_sum_results,
+        val_sample_results,
+        val_sample_sum_results,
+    ) = sample_results
     train_sc_results, train_sc_sum_df, val_sc_results, val_sc_sum_df = scenario_results
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
@@ -1172,6 +1212,7 @@ def run_ind_scenario(
             train_sc_results,
             train_sc_sum_df,
             train_sample_results,
+            train_sample_sum_results,
             "train_scenario",
             gen_gm_params,
             syn_obs_gm_params,
@@ -1183,6 +1224,7 @@ def run_ind_scenario(
             val_sc_results,
             val_sc_sum_df,
             val_sample_results,
+            val_sample_sum_results,
             "val_scenario",
             gen_gm_params,
             syn_obs_gm_params,
@@ -1299,149 +1341,282 @@ def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_typ
 def agg_scenario_vis(
     cur_results_dir: Path,
     sc_results_df: pd.DataFrame,
+    sc_sum_df: pd.DataFrame,
     sample_results_df: pd.DataFrame,
     tab_type: str,
 ):
-    with st.expander("Posterior Probabilities"):
-        posterior_probs_inv(cur_results_dir, sc_results_df, tab_type)
+    # with st.expander("Posterior Probabilities"):
+    #     posterior_probs_inv(cur_results_dir, sc_results_df, tab_type)
     st.divider()
 
-    print(f"wtf")
+    im_std_cols = get_im_cols(cur_results_dir, "wstd")
+    sc_sum_df["std_avg"] = np.mean(sc_sum_df[im_std_cols].values, axis=1)
 
-    st.divider()
+    axis_cols = ["loss", "n_obs_sites", "min_s2s_dist", "std_avg"]
+    if not np.any(sc_sum_df["weight"].isna()):
+        axis_cols.extend(["weight", "w_loss"])
 
-    if "prob" in sc_results_df.columns:
-        im = None
-    else:
-        im = st.selectbox(
-            "IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_scenario_im"
+    st.markdown("### Loss trends")
+    st.text("Note: Loss always refers to unweighted loss in these plots!!")
+    with st.expander("Loss vs Minimum Distance"):
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "min_s2s_dist",
+                "loss",
+                x_min=0.0,
+                y_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.95,
+                use_fixed_color=False,
+                color_axis="n_obs_sites",
+                cmap="Blues",
+                vmin=0.0,
+                vmax=10.0,
+                alpha=0.9,
+                show_trend_mean_line=True,
+            )
         )
-
-    with st.expander("Misfit"):
-        misfit_hist(
-            sc_results_df, im if f"{im}_misfit" in sc_results_df.columns else None
-        )
-
-    # Setup
-    mean_sample_misfit = sum_result_df(
-        sample_results_df, ["event_id", "site_int", "site_obs"]
-    )
-    mean_scenario_misfit = sum_result_df(sc_results_df, ["event_id", "site_int"])
-    group = mean_sample_misfit.sort_values(["event_id", "site_int"]).groupby(
-        ["event_id", "site_int"], observed=True
-    )
-    group_keys = list(group.groups.keys())
-    mean_scenario_misfit = mean_scenario_misfit.sort_values(["event_id", "site_int"])
-    assert np.all(
-        np.asarray(group_keys) == mean_scenario_misfit[["event_id", "site_int"]].values
-    )
-
-    sc_n_obs = group.size().values
-    sc_min_dist = group["s2s_distance"].min().values
-    sc_misfit = mean_scenario_misfit[
-        "misfit_score" if im is None else f"{im}_misfit"
-    ].values
-
-    with st.expander("Misfit vs Minimum Distance"):
-        fig, ax1 = plt.subplots(figsize=(12, 6))
-
-        ax1.scatter(sc_min_dist, sc_misfit, s=5, alpha=0.5)
-        ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-        ax1.set_xlabel("Minimum distance")
-        ax1.set_ylabel("Misfit")
-
-        ax1.set_ylim(0, np.quantile(sc_misfit, 0.95))
-        ax1.set_xlim(0, None)
-
-        fig.tight_layout()
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
 
-    with st.expander("Misfit vs Number of Observations"):
-        fig, ax1 = plt.subplots(figsize=(12, 6))
-
-        ax1.scatter(
-            sc_n_obs + np.random.uniform(-0.4, 0.4, sc_n_obs.size),
-            sc_misfit,
-            s=5,
-            alpha=0.5,
+    with st.expander("Loss vs Number of Observations"):
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "n_obs_sites",
+                "loss",
+                x_min=0.0,
+                y_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.95,
+                use_fixed_color=False,
+                color_axis="min_s2s_dist",
+                cmap="Blues_r",
+                vmin=None,
+                vmax=None,
+                alpha=0.9,
+                show_trend_mean_line=True,
+            )
         )
-        ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-        ax1.set_xlabel("Number of observations")
-        ax1.set_ylabel("Misfit")
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
 
-        ax1.set_ylim(0, np.quantile(sc_misfit, 0.95))
-        ax1.set_xlim(0, None)
+    with st.expander("Loss vs Average Std"):
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "std_avg",
+                "loss",
+                x_min_use_qt=True,
+                x_min=0.01,
+                x_max_use_qt=True,
+                x_max=0.99,
+                y_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.95,
+                use_fixed_color=False,
+                color_axis="n_obs_sites",
+                cmap="Blues",
+                vmin=0,
+                vmax=10,
+                alpha=0.9,
+                show_trend_mean_line=True,
+            )
+        )
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
 
-        fig.tight_layout()
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "std_avg",
+                "loss",
+                x_min_use_qt=True,
+                x_min=0.01,
+                x_max_use_qt=True,
+                x_max=0.99,
+                y_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.95,
+                use_fixed_color=False,
+                color_axis="min_s2s_dist",
+                cmap="Blues_r",
+                vmin=0,
+                alpha=0.9,
+                show_trend_mean_line=True,
+            )
+        )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
 
     with st.expander("Number of Observations vs Minimum Distance"):
-        fig, ax1 = plt.subplots(figsize=(12, 6))
-
-        cm = ax1.scatter(
-            sc_n_obs + np.random.uniform(-0.4, 0.4, sc_n_obs.size),
-            sc_min_dist,
-            c=sc_misfit,
-            s=5,
-            alpha=0.5,
-            vmin=0,
-            vmax=np.quantile(sc_misfit, 0.95),
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "n_obs_sites",
+                "min_s2s_dist",
+                x_min=0.0,
+                y_min=0.0,
+                use_fixed_color=False,
+                color_axis="loss",
+                cmap="Blues",
+                vmin=0,
+                vmax_use_qt=True,
+                vmax=0.95,
+                alpha=0.9,
+                show_trend_mean_line=False
+            )
         )
-        ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-        ax1.set_xlabel("Number of observations")
-        ax1.set_ylabel("Minimum distance")
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
 
-        fig.colorbar(cm, ax=ax1, label="Misfit", pad=0)
+    st.divider()
 
-        fig.tight_layout()
+    st.markdown("### Average Std trends")
+    with st.expander("Average Sigma vs Minimum Distance"):
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "min_s2s_dist",
+                "std_avg",
+                x_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.99,
+                use_fixed_color=False,
+                color_axis="n_obs_sites",
+                cmap="Blues",
+                vmin=0,
+                vmax=10,
+                alpha=0.9,
+                show_trend_mean_line=True,
+            )
+        )
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "min_s2s_dist",
+                "std_avg",
+                x_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.99,
+                use_fixed_color=False,
+                color_axis="loss",
+                cmap="Blues",
+                vmin=0,
+                vmax_use_qt=True,
+                vmax=0.95,
+                alpha=0.9,
+                show_trend_mean_line=True,
+            )
+        )
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+    with st.expander("Average Sigma vs Number of Observations"):
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "n_obs_sites",
+                "std_avg",
+                x_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.99,
+                use_fixed_color=False,
+                color_axis="min_s2s_dist",
+                cmap="Blues_r",
+                vmin=0,
+                alpha=0.9,
+                show_trend_mean_line=True,
+            )
+        )
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "n_obs_sites",
+                "std_avg",
+                x_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.99,
+                use_fixed_color=False,
+                color_axis="loss",
+                cmap="Blues",
+                vmin=0,
+                vmax_use_qt=True,
+                vmax=0.95,
+                alpha=0.9,
+                show_trend_mean_line=True,
+            )
+        )
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+    with st.expander("Average Sigma vs Loss"):
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "loss",
+                "std_avg",
+                x_min_use_qt=True,
+                x_min=0.01,
+                x_max_use_qt=True,
+                x_max=0.99,
+                y_min_use_qt=True,
+                y_min=0.01,
+                y_max_use_qt=True,
+                y_max=0.99,
+                use_fixed_color=False,
+                color_axis="min_s2s_dist",
+                cmap="Blues_r",
+                vmin=0,
+                alpha=0.9,
+                show_trend_mean_line=True,
+            )
+        )
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "loss",
+                "std_avg",
+                x_min_use_qt=True,
+                x_min=0.01,
+                x_max_use_qt=True,
+                x_max=0.99,
+                y_max_use_qt=True,
+                y_max=0.99,
+                y_min_use_qt=True,
+                y_min=0.01,
+                use_fixed_color=False,
+                color_axis="n_obs_sites",
+                cmap="Blues",
+                vmin=0,
+                vmax=10,
+                alpha=0.9,
+                show_trend_mean_line=True,
+            )
+        )
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+    st.divider()
+
+    st.markdown("### Custom")
+    scatter_options = st_utils.scatter_options_form(sc_sum_df, axis_cols, tab_type)
+    if scatter_options is not None:
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(sc_sum_df, scatter_options)
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
 
     return
-
-
-def sum_result_df(df: pd.DataFrame, group_keys=Sequence[str]):
-    """
-    Computes the mean misfit
-    """
-    if "prob" in df.columns:
-        im = None
-        weight_cols = "site_weights"
-
-        result_df = pd.Series(
-            data=df["prob"].values * df["misfit_score"].values,
-            index=df.index,
-            name="misfit_score",
-        ).to_frame()
-
-    else:
-        ims = sr.constants.PSA_KEYS
-        prob_cols = mlt.array_utils.numpy_str_join("_", ims, "prob")
-        misfit_cols = mlt.array_utils.numpy_str_join("_", ims, "misfit")
-        weight_cols = mlt.array_utils.numpy_str_join("_", ims, "site_weights")
-
-        result_df = pd.DataFrame(
-            data=df[prob_cols].values * df[misfit_cols].values,
-            index=df.index,
-            columns=misfit_cols,
-        )
-
-    result_df[group_keys] = df[group_keys]
-    result_df = result_df.groupby(group_keys, observed=True).mean()
-
-    if weight_cols[0] in df.columns or np.all(np.isin(weight_cols, df.columns)):
-        result_df[weight_cols] = df.groupby(group_keys, observed=True)[
-            weight_cols
-        ].first()
-    if "s2s_distance" in df.columns:
-        result_df["s2s_distance"] = df.groupby(group_keys, observed=True)[
-            "s2s_distance"
-        ].first()
-
-    return result_df.reset_index()
-
 
 def run_agg_scenario(
     cur_results_dir: Path,
@@ -1449,21 +1624,33 @@ def run_agg_scenario(
     scenario_results: Tuple[pd.DataFrame, pd.DataFrame],
 ):
     train_sc_results, train_sc_sum_df, val_sc_results, val_sc_sum_df = scenario_results
-    train_sample_results, val_sample_results = sample_results
+    (
+        train_sample_results,
+        train_sample_sum_results,
+        val_sample_results,
+        val_sample_sum_results,
+    ) = sample_results
 
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
+        start_time = time.time()
         agg_scenario_vis(
             cur_results_dir,
             train_sc_results,
+            train_sc_sum_df,
             train_sample_results,
             "train_scenario",
         )
+        print(f"Took {time.time() - start_time} to run train_scenario")
 
     with val_tab:
         agg_scenario_vis(
-            cur_results_dir, val_sc_results, val_sample_results, "val_scenario"
+            cur_results_dir,
+            val_sc_results,
+            val_sc_sum_df,
+            val_sample_results,
+            "val_scenario",
         )
 
 
@@ -1494,7 +1681,7 @@ def agg_single_viewer(results_df: pd.DataFrame, tab_type: str):
         misfit_hist(results_df, im)
 
     # with st.expander("Misfit vs Site Weights"):
-        # misfit_vs_site_weights(results_df, im)
+    # misfit_vs_site_weights(results_df, im)
 
 
 def misfit_vs_site_weights(results_df: pd.DataFrame, im: str):
@@ -1548,13 +1735,18 @@ def run_agg_single(
 ):
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
-    train_results_df, val_results_df = sample_results
+    (
+        train_sample_results,
+        train_sample_sum_results,
+        val_sample_results,
+        val_sample_sum_results,
+    ) = sample_results
 
     with train_tab:
-        agg_single_viewer(train_results_df, "train")
+        agg_single_viewer(train_sample_results, "train")
 
     with val_tab:
-        agg_single_viewer(val_results_df, "val")
+        agg_single_viewer(val_sample_results, "val")
 
 
 def _scenario_explorer(sc_sum_df: pd.DataFrame):
@@ -1633,22 +1825,27 @@ def main(
 
     with general_tab:
         # pass
+        start_time = time.time()
         run_general_tab(cur_results_dir)
+        print(f"Took {time.time() - start_time} to run general tab")
 
     sample_results = st_utils.ml_load_sample_results(cur_results_dir)
     scenario_results = st_utils.ml_load_scenario_results(cur_results_dir)
 
     with ind_sample_tab:
         # pass
+        start_time = time.time()
         run_ind_samples(
             cur_results_dir,
             sample_results,
             gen_gm_params_ffp=gen_gm_params_ffp,
             syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
         )
+        print(f"Took {time.time() - start_time} to run ind sample tab")
 
     with ind_scenario_tab:
         # pass
+        start_time = time.time()
         run_ind_scenario(
             cur_results_dir,
             sample_results,
@@ -1656,16 +1853,20 @@ def main(
             gen_gm_params_ffp=gen_gm_params_ffp,
             syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
         )
-
-    with agg_single_tab:
-        run_agg_single(cur_results_dir, sample_results)
+        print(f"Took {time.time() - start_time} to run ind scenario tab")
+    # with agg_single_tab:
+    #     run_agg_single(cur_results_dir, sample_results)
 
     with agg_scenario_tab:
         # pass
+        start_time = time.time()
         run_agg_scenario(cur_results_dir, sample_results, scenario_results)
+        print(f"Took {time.time() - start_time} to run agg scenario tab")
 
     with sc_explorer_tab:
+        start_time = time.time()
         run_sc_explorer(cur_results_dir, scenario_results)
+        print(f"Took {time.time() - start_time} to run sc explorer tab")
 
 
 if __name__ == "__main__":

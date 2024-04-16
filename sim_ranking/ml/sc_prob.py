@@ -579,6 +579,32 @@ class SCProbDataset(Dataset):
             self.n_sites_scenario[batch_ind],
         )
 
+    def get_sc_site_int_obs(self, batch_ind: np.ndarray):
+        (
+            event_ind,
+            sc_scenario_ind,
+            sc_site_int_ind,
+            sc_site_obs_ind,
+            record_ind,
+            record_site_int_ind,
+            record_site_obs_ind,
+        ) = self.get_indices(batch_ind)
+
+        return self.obs_ims[sc_site_int_ind]
+
+    def get_sc_site_int_sim(self, batch_ind: np.ndarray, rel_shuffle_ind: np.ndarray):
+        (
+            event_ind,
+            sc_scenario_ind,
+            sc_site_int_ind,
+            sc_site_obs_ind,
+            record_ind,
+            record_site_int_ind,
+            record_site_obs_ind,
+        ) = self.get_indices(batch_ind)
+
+        return self.sim_ims[sc_site_int_ind, :, :][:, rel_shuffle_ind, :]
+
     def get_batch(self, batch_ind: np.ndarray, shuffle_rels: bool):
         (
             event_ind,
@@ -1116,8 +1142,12 @@ def train(
             scenario_weights = None
             if run_config.apply_sc_weighting:
                 scenario_weights = compute_loth_baker_scenario_weights(
-                        im_site_corrs, scenario_mask, im_weights, 0.5, 2.0
-                    )
+                    im_site_corrs,
+                    scenario_mask,
+                    im_weights,
+                    run_config.min_sc_weight,
+                    run_config.max_sc_weight,
+                )
 
             if run_config.per_im_prob:
                 agg_probs = compute_multi_agg_prob(
@@ -1148,7 +1178,9 @@ def train(
             optimizer.step()
 
             metrics["loss_hist_train"][epoch_ix] += loss.item()
-            metrics["unweighted_loss_hist_train"][epoch_ix] += scenario_loss.mean().item()
+            metrics["unweighted_loss_hist_train"][
+                epoch_ix
+            ] += scenario_loss.mean().item()
 
         metrics["loss_hist_train"][epoch_ix] /= len(train_dataloader)
         metrics["unweighted_loss_hist_train"][epoch_ix] /= len(train_dataloader)
@@ -1199,7 +1231,11 @@ def train(
                 scenario_weights = None
                 if run_config.apply_sc_weighting:
                     scenario_weights = compute_loth_baker_scenario_weights(
-                        im_site_corrs, scenario_mask, im_weights, 0.5, 2.0
+                        im_site_corrs,
+                        scenario_mask,
+                        im_weights,
+                        run_config.min_sc_weight,
+                        run_config.max_sc_weight,
                     )
 
                 if run_config.per_im_prob:
@@ -1227,7 +1263,9 @@ def train(
                     )
 
                 metrics["loss_hist_val"][epoch_ix] += loss.item()
-                metrics["unweighted_loss_hist_val"][epoch_ix] += scenario_loss.mean().item()
+                metrics["unweighted_loss_hist_val"][
+                    epoch_ix
+                ] += scenario_loss.mean().item()
 
             metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
             metrics["unweighted_loss_hist_val"][epoch_ix] /= len(val_dataloader)
@@ -1302,8 +1340,13 @@ def get_dataset_prediction(
         categories=np.unique(dataset.rels), values=sample_results_df.shape[0] * [pd.NA]
     )
 
+    # Mean & Std columns
+    im_wavg_cols = np.char.add(run_config.ims, "_wavg")
+    im_wstd_cols = np.char.add(run_config.ims, "_wstd")
+
     ### Iterate over dataset
     sc_results, sc_sum_results = [], []
+    sample_sum_results = []
     with (torch.no_grad()):
         prob_model.eval()
         start_ix = 0
@@ -1442,18 +1485,65 @@ def get_dataset_prediction(
                 dist_matrix.columns.get_indexer_for(df_site_obs),
             ].astype(np.float32)
 
+            # Sample summary
+            cur_sample_sum = pd.DataFrame(
+                index=["event_id", "site_int", "site_obs"],
+                data=[record_events, record_site_int, record_site_obs],
+            ).T.astype("category")
+            cur_sample_sum["s2s_distance"] = dist_matrix.values[
+                dist_matrix.index.get_indexer_for(record_site_int),
+                dist_matrix.columns.get_indexer_for(record_site_obs),
+            ].astype(np.float32)
+            cur_sample_sum[im_site_weights_cols] = w_pred.numpy(force=True).astype(
+                np.float32
+            )
+            site_int_sim_ims_gpu = site_int_sim_ims.to(run_config.device, torch.float32)
+            if run_config.per_im_prob:
+                cur_sample_wavg = einops.einsum(
+                    pred,
+                    site_int_sim_ims_gpu,
+                    "sample rel im, sample rel im -> sample im",
+                )
+                cur_sample_wstd = einops.einsum(
+                    pred,
+                    (site_int_sim_ims_gpu - cur_sample_wavg[:, None, :]) ** 2,
+                    "sample rel im, sample rel im -> sample im",
+                )
+            else:
+                cur_sample_wavg = einops.einsum(
+                    pred,
+                    site_int_sim_ims_gpu,
+                    "sample rel, sample rel im -> sample im",
+                )
+                cur_sample_wstd = torch.sqrt(
+                    einops.einsum(
+                        pred,
+                        (site_int_sim_ims_gpu - cur_sample_wavg[:, None, :]) ** 2,
+                        "sample rel, sample rel im -> sample im",
+                    )
+                )
+
+            cur_sample_sum[im_wavg_cols] = cur_sample_wavg.numpy(force=True).astype(
+                np.float32
+            )
+            cur_sample_sum[im_wstd_cols] = cur_sample_wstd.numpy(force=True).astype(
+                np.float32
+            )
+
+            sample_sum_results.append(cur_sample_sum)
+
+            ### Scenario results
+            # Scenario weights
             sc_weights = None
             if run_config.apply_sc_weighting:
                 sc_weights = compute_loth_baker_scenario_weights(
                     im_site_corrs.to(run_config.device, torch.float32),
                     scenario_mask,
                     im_weights,
-                    0.5,
-                    2.0,
+                    run_config.min_sc_weight,
+                    run_config.max_sc_weight,
                 )
 
-            ### Scenario results
-            # Compute the scenario probabilities & loss
             cur_sc_result = pd.DataFrame(
                 index=["event_id", "site_int", "rel_id"],
                 data=[
@@ -1463,6 +1553,7 @@ def get_dataset_prediction(
                 ],
             ).T
 
+            # Compute the scenario probabilities & loss
             if run_config.per_im_prob:
                 cur_agg_prob = compute_multi_agg_prob(
                     scenario_mask,
@@ -1513,12 +1604,14 @@ def get_dataset_prediction(
                     "sc rel -> (sc rel)",
                 )
 
+            # SC - Misfit
             cur_sc_result[im_misfit_cols] = (
                 einops.rearrange(sc_im_misfit_score, "sc rel im -> (sc rel) im")
                 .numpy(force=True)
                 .astype(np.float32)
             )
 
+            # SC - Residual
             cur_sc_result[im_res_cols] = einops.rearrange(
                 residual, "sc rel im -> (sc rel) im"
             ).astype(np.float32)
@@ -1530,15 +1623,24 @@ def get_dataset_prediction(
             n_obs_sites = sc_group.site_obs.nunique()
 
             cur_sc_sum = pd.DataFrame(
-                index=["event_id", "site_int", "loss"],
+                index=["event_id", "site_int"],
                 data=[
                     events,
                     site_int,
-                    scenario_loss.numpy(force=True),
                 ],
             ).T
-            cur_sc_sum["w_loss"] = weighted_scenario_loss.numpy(force=True) if weighted_scenario_loss is not None else np.nan
-            cur_sc_sum["weight"] = sc_weights.numpy(force=True) if sc_weights is not None else np.nan
+            # SC - Loss
+            cur_sc_sum["loss"] = scenario_loss.numpy(force=True).astype(np.float32)
+            # SC - Weight
+            cur_sc_sum["weight"] = (
+                sc_weights.numpy(force=True) if sc_weights is not None else np.nan
+            )
+            # SC - Weighted Loss
+            cur_sc_sum["w_loss"] = (
+                weighted_scenario_loss.numpy(force=True)
+                if weighted_scenario_loss is not None
+                else np.nan
+            )
 
             assert np.all(
                 n_obs_sites.index.get_level_values(0).values == cur_sc_sum.event_id
@@ -1548,6 +1650,52 @@ def get_dataset_prediction(
             )
             cur_sc_sum["n_obs_sites"] = n_obs_sites.values
             cur_sc_sum["min_s2s_dist"] = sc_group["s2s_distance"].min().values
+
+            ## Compute the scenario weighted average and std
+            sc_site_int_sim_ims = dataset.get_sc_site_int_sim(
+                batch_ind, rel_shuffle_ind
+            )
+
+            # Compute the scenario weighted IM average and std
+            if run_config.per_im_prob:
+                cur_sc_prob_values = einops.rearrange(
+                    cur_sc_result[prob_cols].values,
+                    "(sc rel) im -> sc rel im",
+                    rel=run_config.n_rels,
+                )
+                cur_sc_wavg = einops.einsum(
+                    cur_sc_prob_values,
+                    sc_site_int_sim_ims,
+                    "sc rel im, sc rel im -> sc im",
+                )
+                cur_sc_wstd = np.sqrt(
+                    einops.einsum(
+                        cur_sc_prob_values,
+                        (sc_site_int_sim_ims - cur_sc_wavg[:, None, :]) ** 2,
+                        "sc rel im, sc rel im -> sc im",
+                    )
+                )
+            else:
+                cur_sc_prob_values = einops.rearrange(
+                    cur_sc_result["prob"].values,
+                    "(sc rel) -> sc rel",
+                    rel=run_config.n_rels,
+                )
+                cur_sc_wavg = einops.einsum(
+                    cur_sc_prob_values,
+                    sc_site_int_sim_ims,
+                    "sc rel, sc rel im -> sc im",
+                )
+                cur_sc_wstd = np.sqrt(
+                    einops.einsum(
+                        cur_sc_prob_values,
+                        (sc_site_int_sim_ims - cur_sc_wavg[:, None, :]) ** 2,
+                        "sc rel, sc rel im -> sc im",
+                    )
+                )
+
+            cur_sc_sum[im_wavg_cols] = cur_sc_wavg
+            cur_sc_sum[im_wstd_cols] = cur_sc_wstd
 
             cur_sc_result.index = mlt.array_utils.numpy_str_join(
                 "_",
@@ -1562,10 +1710,18 @@ def get_dataset_prediction(
 
             start_ix = end_ix + 1
 
-        sc_results = pd.concat(sc_results, axis=0)
-        sc_sum_results = pd.concat(sc_sum_results, axis=0)
+        sc_results = pd.concat(sc_results, axis=0).astype(
+            {"event_id": "category", "site_int": "category", "rel_id": "category"}
+        )
+        sc_sum_results = pd.concat(sc_sum_results, axis=0).astype(
+            {"event_id": "category", "site_int": "category"}
+        )
 
-        return sample_results_df, sc_results, sc_sum_results
+        sample_sum_results = pd.concat(sample_sum_results, axis=0).astype(
+            {"event_id": "category", "site_int": "category", "site_obs": "category"}
+        )
+
+        return sample_results_df, sample_sum_results, sc_results, sc_sum_results
 
 
 def post_processing(
@@ -1604,6 +1760,7 @@ def post_processing(
     print(f"Computing results")
     (
         train_sample_results,
+        train_sum_sample_results,
         train_sc_results,
         train_sc_sum_results,
     ) = get_dataset_prediction(
@@ -1612,7 +1769,12 @@ def post_processing(
     print(
         f"\tTrain sample results - Memory usage: {train_sample_results.memory_usage(deep=True).sum() / 1e6} MB"
     )
-    val_sample_results, val_sc_results, val_sc_sum_results = get_dataset_prediction(
+    (
+        val_sample_results,
+        val_sum_sample_results,
+        val_sc_results,
+        val_sc_sum_results,
+    ) = get_dataset_prediction(
         val_dataset, prob_model, weight_model, run_config, dist_matrix, hp_config
     )
     print(
@@ -1620,10 +1782,12 @@ def post_processing(
     )
 
     train_sample_results.to_parquet(cur_out_dir / "train_sample_results.parquet")
+    train_sum_sample_results.to_parquet(cur_out_dir / "train_sample_summary.parquet")
     train_sc_results.to_parquet(cur_out_dir / "train_scenario_results.parquet")
     train_sc_sum_results.to_parquet(cur_out_dir / "train_scenario_summary.parquet")
 
     val_sample_results.to_parquet(cur_out_dir / "val_sample_results.parquet")
+    val_sum_sample_results.to_parquet(cur_out_dir / "val_sample_summary.parquet")
     val_sc_results.to_parquet(cur_out_dir / "val_scenario_results.parquet")
     val_sc_sum_results.to_parquet(cur_out_dir / "val_scenario_summary.parquet")
 
