@@ -31,13 +31,14 @@ def train_model(
     data_source: str = None,
     im_set: str = "all",
     quiet: bool = False,
+    sample_weighting: sc_prob.SampleWeighting = sc_prob.SampleWeighting.LOTH_BAKER,
     apply_sc_weighting: bool = False,
     min_sc_weight: float = 0.5,
     max_sc_weight: float = 2.0,
     seed: int = None,
     out_dir: Path = None,
 ):
-    run_config = prob.RunParamsConfig(
+    run_config = sc_prob.RunParamsConfig(
         max_dist,
         n_rels,
         sr.constants.IM_SETS[im_set],
@@ -46,6 +47,7 @@ def train_model(
         apply_sc_weighting,
         min_sc_weight,
         max_sc_weight,
+        sample_weighting,
         debug,
         device,
         results_dir=out_dir,
@@ -100,7 +102,7 @@ def train_model(
     prob_model.to(device)
 
     weight_model = sr.ml.models.WeightModel(
-        run_config.n_ims, [32], scalar_features.n_scalar_features
+        run_config.n_ims, [32], hp_config.weight_model_features.size
     )
     weight_model.to(device)
 

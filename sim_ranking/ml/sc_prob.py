@@ -3,6 +3,7 @@ import tempfile as tmp
 from pathlib import Path
 from typing import List, Dict, Sequence, Union
 from dataclasses import dataclass
+from enum import Enum
 
 import einops
 import numpy as np
@@ -24,6 +25,57 @@ from ..db import DB
 from .. import constants
 
 
+class SampleWeighting(str, Enum):
+    CUSTOM_MODEL = "custom_model"
+    LOTH_BAKER = "loth_baker"
+
+
+@dataclass
+class RunParamsConfig:
+    max_dist: float
+    n_rels: int
+    ims: Sequence[str]
+    im_weights: np.ndarray
+
+    # If true then model will be trained to
+    # output P(R_i|X) for each IM independently
+    per_im_prob: bool
+
+    apply_sc_weighting: bool
+    min_sc_weight: float
+    max_sc_weight: float
+
+    sample_weighting_method: SampleWeighting
+
+    debug: bool
+    device: str
+
+    results_dir: Path = None
+
+    def __post_init__(self):
+        if self.results_dir is None:
+            self.results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
+
+    @property
+    def n_ims(self):
+        return len(self.ims)
+
+    def to_dict(self):
+        return {
+            "max_dist": self.max_dist,
+            "n_rels": self.n_rels,
+            "ims": self.ims,
+            "im_weights": self.im_weights.tolist(),
+            "per_im_prob": self.per_im_prob,
+            "sample_weighting_method": self.sample_weighting_method.value,
+            "apply_sc_weighting": self.apply_sc_weighting,
+            "min_sc_weight": self.min_sc_weight,
+            "max_sc_weight": self.max_sc_weight,
+            "debug": self.debug,
+            "device": self.device,
+        }
+
+
 @dataclass
 class HyperParamsConfig:
     n_epochs: int
@@ -31,8 +83,6 @@ class HyperParamsConfig:
     l2_reg: float
     lr: Sequence[float]
     lr_epochs: Sequence[int]
-
-    # lr: float
 
     misfit_fn: str
 
@@ -45,6 +95,8 @@ class HyperParamsConfig:
     use_res_site_obs: bool
     use_res_sim_site_obs_sim_site_int: bool
     use_res_obs_site_obs_sim_site_int: bool
+
+    weight_model_features: np.ndarray
 
     def __post_init__(self):
         self.n_im_features = sum(
@@ -76,6 +128,7 @@ class HyperParamsConfig:
             params["res_site_obs"],
             params["res_sim_site_obs_sim_site_int"],
             params["res_obs_site_obs_sim_site_int"],
+            np.asarray(params["weight_model_features"]),
         )
 
     def to_dict(self):
@@ -94,6 +147,7 @@ class HyperParamsConfig:
             "res_site_obs": self.use_res_site_obs,
             "res_sim_site_obs_sim_site_int": self.use_res_sim_site_obs_sim_site_int,
             "res_obs_site_obs_sim_site_int": self.use_res_obs_site_obs_sim_site_int,
+            "weight_model_features": self.weight_model_features.tolist(),
         }
 
 
@@ -104,7 +158,7 @@ def data_prep(
     train_sites: np.ndarray,
     val_int_sites: np.ndarray,
     events: np.ndarray,
-    run_config: prob.RunParamsConfig,
+    run_config: RunParamsConfig,
     hp_config: HyperParamsConfig,
     db: DB,
     corr_dir: Path,
@@ -138,11 +192,17 @@ def data_prep(
     site_features_df, site_feature_stats = features.preprocess_site_features(
         station_df, SITE_FEATURE_KEYS
     )
+
+    event_features_stats = pd.DataFrame(
+        index=["mean", "std"], columns=EVENT_FEATURE_KEYS
+    )
+    event_features_stats.loc["mean"] = event_df.loc[events, EVENT_FEATURE_KEYS].mean()
+    event_features_stats.loc["std"] = event_df.loc[events, EVENT_FEATURE_KEYS].std()
     event_features_df = event_df.loc[events, EVENT_FEATURE_KEYS]
     event_features_df[EVENT_FEATURE_KEYS] = (
         event_df.loc[events, EVENT_FEATURE_KEYS]
-        - event_df.loc[events, EVENT_FEATURE_KEYS].mean()
-    ) / event_df.loc[events, EVENT_FEATURE_KEYS].std()
+        - event_features_stats.loc["mean", EVENT_FEATURE_KEYS]
+    ) / event_features_stats.loc["std", EVENT_FEATURE_KEYS]
 
     # Compute the site-to-site features
     print(f"Computing scalar features")
@@ -205,6 +265,7 @@ def data_prep(
         db,
         run_config,
         scalar_features,
+        hp_config.weight_model_features,
         ims_mean,
         ims_std,
         hp_config,
@@ -217,6 +278,7 @@ def data_prep(
         db,
         run_config,
         scalar_features,
+        hp_config.weight_model_features,
         ims_mean,
         ims_std,
         hp_config,
@@ -292,8 +354,9 @@ class SCProbDataset(Dataset):
         event_sites: Dict[str, np.ndarray],
         event_site_combs: Dict[str, np.ndarray],
         db: DB,
-        run_config: prob.RunParamsConfig,
+        run_config: RunParamsConfig,
         scalar_features: ml_data.ScalarFeatures,
+        w_scalar_feature_cols: np.ndarray,
         ims_mean: np.ndarray,
         ims_std: np.ndarray,
         hp_config: HyperParamsConfig,
@@ -318,8 +381,16 @@ class SCProbDataset(Dataset):
         self.n_events = len(self.event_sites)
 
         # Create the feature tensor
-        self.scalar_features_values = ml_data.create_scalar_feature_tensor(
+        (
+            self.scalar_features_values,
+            self.scalar_features_columns,
+        ) = ml_data.create_scalar_feature_tensor(
             self.events, self.event_sites, self.scalar_features, self.event_site_combs
+        )
+
+        self.w_scalar_feature_cols = w_scalar_feature_cols
+        self.w_scalar_features_mask = np.isin(
+            self.scalar_features_columns, w_scalar_feature_cols
         )
 
         self.event_scenario_ids = {}
@@ -331,7 +402,7 @@ class SCProbDataset(Dataset):
         self.n_scenarios_event = []
         self.im_misfit_score = []
         for ix, (cur_event, cur_sites) in enumerate(
-            tqdm(self.event_sites.items(), desc="Processsing events")
+            tqdm(self.event_sites.items(), desc="Processing events")
         ):
             # Get the simulation data
             cur_sim_df = db.get_sim_data(cur_event, cur_sites)
@@ -483,6 +554,8 @@ class SCProbDataset(Dataset):
             [self.event_rels[cur_event] for cur_event in self.events], axis=0
         )
 
+
+
     def get_indices(self, batch_ind: np.ndarray):
         # Have to it this way, as some events may not have samples
         event_ind = np.argmax(
@@ -625,8 +698,9 @@ class SCProbDataset(Dataset):
         site_obs_obs_ims = self.obs_ims[record_site_obs_ind, :]
 
         scalar_features = self.scalar_features_values[record_ind]
-        record_im_misfit_score = self.im_misfit_score[record_site_int_ind]
+        w_scalar_features = scalar_features[:, self.w_scalar_features_mask]
 
+        record_im_misfit_score = self.im_misfit_score[record_site_int_ind]
         im_site_corrs = self.im_site_corrs[record_ind, :]
 
         rel_shuffle_ind = (
@@ -648,6 +722,7 @@ class SCProbDataset(Dataset):
             site_obs_sim_ims,
             site_obs_obs_ims,
             scalar_features,
+            w_scalar_features,
             record_im_misfit_score[:, rel_shuffle_ind, :],
             im_site_corrs,
         )
@@ -698,7 +773,7 @@ def create_indRelModel(
 def create_IMmodel(
     hp_config: HyperParamsConfig,
     scalar_features: ml_data.ScalarFeatures,
-    run_config: prob.RunParamsConfig,
+    run_config: RunParamsConfig,
 ):
     n_inputs = (
         run_config.n_rels * hp_config.n_im_features
@@ -890,10 +965,12 @@ def compute_multi_agg_prob(
     ### Aggregated probability for single scenario
     # P(R_i) = \sum_{r} \sum_{j} p_{r,i, j} w_{j} \rho_{r, j} \delta_{r, s}
     # where
-    # - p_{r,i} is the predicted probability of the r-th observation site, i-th realisation and j-th IM
+    # - p_{r,i} is the predicted probability of the r-th observation site,
+    #       i-th realisation and j-th IM
     # - rho_{r} is the site-weight of the r-th observation site and j-th im
     # - w_{j} is the weight of the j-th IM
-    # - \delta_{r, s} is a boolean that shows if the r-th observation site is in the s-th scenario
+    # - \delta_{r, s} is a boolean that shows if the r-th observation site
+    #       is in the s-th scenario
     agg_prob = einops.einsum(
         pred,
         w_pred,
@@ -957,7 +1034,7 @@ def get_weight_prediction(
     weight_model: models.WeightModel,
     scalar_features: torch.Tensor,
     scenario_mask: torch.Tensor,
-    run_config: prob.RunParamsConfig,
+    run_config: RunParamsConfig,
 ):
     """Gets the normalised weight predictions"""
     w_pred = weight_model(
@@ -997,7 +1074,6 @@ def get_loth_weights(
         Normalised loth & baker site-correlations
         [n_samples, n_ims]
     """
-
     w_pred = im_site_corrs
     w_pred = w_pred[:, None, :] * scenario_mask[..., None]
 
@@ -1014,6 +1090,11 @@ def compute_loth_baker_scenario_weights(
     min_weight: float,
     max_weight: float,
 ):
+    """
+    Computes scenario weights based on the
+    site-correlation coefficients from the
+    Loth & Baker model
+    """
     return torch.clamp(
         einops.einsum(
             im_site_corrs,
@@ -1026,13 +1107,73 @@ def compute_loth_baker_scenario_weights(
     )
 
 
+def get_batch_results(
+    pred: torch.Tensor,
+    weight_model: models.WeightModel,
+    w_scalar_features: torch.Tensor,
+    sc_ids: torch.Tensor,
+    record_scenario_ids: torch.Tensor,
+    im_site_corrs: torch.Tensor,
+    sc_im_misfit_score: torch.Tensor,
+    im_weights: torch.Tensor,
+    run_config: RunParamsConfig,
+):
+    scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
+    scenario_mask = scenario_mask.to(run_config.device, torch.float32)
+
+    im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
+
+    if run_config.sample_weighting_method is SampleWeighting.CUSTOM_MODEL:
+        w_pred = get_weight_prediction(
+            weight_model, w_scalar_features, scenario_mask, run_config
+        )
+    elif run_config.sample_weighting_method is SampleWeighting.LOTH_BAKER:
+        w_pred = get_loth_weights(im_site_corrs, scenario_mask)
+    else:
+        raise NotImplementedError()
+
+    scenario_weights = None
+    if run_config.apply_sc_weighting:
+        scenario_weights = compute_loth_baker_scenario_weights(
+            im_site_corrs,
+            scenario_mask,
+            im_weights,
+            run_config.min_sc_weight,
+            run_config.max_sc_weight,
+        )
+
+    if run_config.per_im_prob:
+        agg_probs = compute_multi_agg_prob(scenario_mask, pred, w_pred, im_weights)
+        scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
+            agg_probs,
+            sc_im_misfit_score.to(run_config.device, torch.float32),
+            im_weights,
+            sc_weights=scenario_weights,
+        )
+    else:
+        agg_probs = compute_single_agg_prob(
+            scenario_mask,
+            pred,
+            w_pred,
+            im_weights,
+        )
+        scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
+            agg_probs,
+            sc_im_misfit_score.to(run_config.device, torch.float32),
+            im_weights,
+            sc_weights=scenario_weights,
+        )
+
+    return w_pred, agg_probs, scenario_loss, weighted_scenario_loss, loss, scenario_mask
+
+
 def train(
     prob_model: models.ProbIMModel,
     weight_model: models.WeightModel,
     train_dataset: SCProbDataset,
     val_dataset: SCProbDataset,
     hp_config: HyperParamsConfig,
-    run_config: prob.RunParamsConfig,
+    run_config: RunParamsConfig,
     quiet: bool = False,
 ):
     metrics = {
@@ -1046,9 +1187,19 @@ def train(
     best_val_loss = np.inf
     best_model_state, best_model_epoch = None, None
 
-    optimizer = torch.optim.Adam(
-        prob_model.parameters(), lr=hp_config.lr[0], weight_decay=hp_config.l2_reg
-    )
+    if run_config.sample_weighting_method is SampleWeighting.CUSTOM_MODEL:
+        optimizer = torch.optim.Adam(
+            [
+                {"params": prob_model.parameters()},
+                {"params": weight_model.parameters()},
+            ],
+            lr=hp_config.lr[0],
+            weight_decay=hp_config.l2_reg,
+        )
+    else:
+        optimizer = torch.optim.Adam(
+            prob_model.parameters(), lr=hp_config.lr[0], weight_decay=hp_config.l2_reg
+        )
 
     train_dataloader = prob.CustomTabularDataLoader(
         train_dataset, hp_config.batch_size, True, shuffle_rels=False
@@ -1103,6 +1254,7 @@ def train(
             site_obs_sim_ims,
             site_obs_obs_ims,
             scalar_features,
+            w_scalar_features,
             im_misfit_score,
             im_site_corrs,
         ) in enumerate(iter_loop):
@@ -1130,48 +1282,71 @@ def train(
                         print(f"Saved grads to {tmp_dir}")
                 exit()
 
-            scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
-            scenario_mask = scenario_mask.to(run_config.device, torch.float32)
+            (
+                w_pred,
+                agg_probs,
+                scenario_loss,
+                weighted_scenario_loss,
+                loss,
+                _,
+            ) = get_batch_results(
+                pred,
+                weight_model,
+                w_scalar_features,
+                sc_ids,
+                record_scenario_ids,
+                im_site_corrs,
+                sc_im_misfit_score,
+                im_weights,
+                run_config,
+            )
 
-            im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
-
-            # w_pred = get_weight_prediction(
-            #     weight_model, scalar_features, scenario_mask, run_config)
-            w_pred = get_loth_weights(im_site_corrs, scenario_mask)
-
-            scenario_weights = None
-            if run_config.apply_sc_weighting:
-                scenario_weights = compute_loth_baker_scenario_weights(
-                    im_site_corrs,
-                    scenario_mask,
-                    im_weights,
-                    run_config.min_sc_weight,
-                    run_config.max_sc_weight,
-                )
-
-            if run_config.per_im_prob:
-                agg_probs = compute_multi_agg_prob(
-                    scenario_mask, pred, w_pred, im_weights
-                )
-                scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
-                    agg_probs,
-                    sc_im_misfit_score.to(run_config.device, torch.float32),
-                    im_weights,
-                    sc_weights=scenario_weights,
-                )
-            else:
-                agg_probs = compute_single_agg_prob(
-                    scenario_mask,
-                    pred,
-                    w_pred,
-                    im_weights,
-                )
-                scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
-                    agg_probs,
-                    sc_im_misfit_score.to(run_config.device, torch.float32),
-                    im_weights,
-                    sc_weights=scenario_weights,
-                )
+            # scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
+            # scenario_mask = scenario_mask.to(run_config.device, torch.float32)
+            #
+            # im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
+            #
+            # if run_config.sample_weighting_method is SampleWeighting.CUSTOM_MODEL:
+            #     w_pred = get_weight_prediction(
+            #         weight_model, scalar_features, scenario_mask, run_config)
+            # elif run_config.sample_weighting_method is SampleWeighting.LOTH_BAKER:
+            #     w_pred = get_loth_weights(im_site_corrs, scenario_mask)
+            # else:
+            #     raise NotImplementedError()
+            #
+            # scenario_weights = None
+            # if run_config.apply_sc_weighting:
+            #     scenario_weights = compute_loth_baker_scenario_weights(
+            #         im_site_corrs,
+            #         scenario_mask,
+            #         im_weights,
+            #         run_config.min_sc_weight,
+            #         run_config.max_sc_weight,
+            #     )
+            #
+            # if run_config.per_im_prob:
+            #     agg_probs = compute_multi_agg_prob(
+            #         scenario_mask, pred, w_pred, im_weights
+            #     )
+            #     scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
+            #         agg_probs,
+            #         sc_im_misfit_score.to(run_config.device, torch.float32),
+            #         im_weights,
+            #         sc_weights=scenario_weights,
+            #     )
+            # else:
+            #     agg_probs = compute_single_agg_prob(
+            #         scenario_mask,
+            #         pred,
+            #         w_pred,
+            #         im_weights,
+            #     )
+            #     scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
+            #         agg_probs,
+            #         sc_im_misfit_score.to(run_config.device, torch.float32),
+            #         im_weights,
+            #         sc_weights=scenario_weights,
+            #     )
 
             optimizer.zero_grad()
             loss.backward()
@@ -1200,6 +1375,7 @@ def train(
                 site_obs_sim_ims,
                 site_obs_obs_ims,
                 scalar_features,
+                w_scalar_features,
                 im_misfit_score,
                 im_site_corrs,
             ) in enumerate(val_dataloader):
@@ -1216,51 +1392,70 @@ def train(
                     hp_config,
                 )
 
-                scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
-                scenario_mask = scenario_mask.to(run_config.device, torch.float32)
-
-                im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
-
-                # w_pred = get_weight_prediction(
-                #     weight_model, scalar_features, scenario_mask, run_config)
-                w_pred = get_loth_weights(
-                    im_site_corrs.to(run_config.device, dtype=torch.float32),
-                    scenario_mask,
+                (
+                    w_pred,
+                    agg_probs,
+                    scenario_loss,
+                    weighted_scenario_loss,
+                    loss,
+                    _,
+                ) = get_batch_results(
+                    pred,
+                    weight_model,
+                    w_scalar_features,
+                    sc_ids,
+                    record_scenario_ids,
+                    im_site_corrs,
+                    sc_im_misfit_score,
+                    im_weights,
+                    run_config,
                 )
 
-                scenario_weights = None
-                if run_config.apply_sc_weighting:
-                    scenario_weights = compute_loth_baker_scenario_weights(
-                        im_site_corrs,
-                        scenario_mask,
-                        im_weights,
-                        run_config.min_sc_weight,
-                        run_config.max_sc_weight,
-                    )
-
-                if run_config.per_im_prob:
-                    agg_probs = compute_multi_agg_prob(
-                        scenario_mask, pred, w_pred, im_weights
-                    )
-                    scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
-                        agg_probs,
-                        sc_im_misfit_score.to(run_config.device, torch.float32),
-                        im_weights,
-                        sc_weights=scenario_weights,
-                    )
-                else:
-                    agg_probs = compute_single_agg_prob(
-                        scenario_mask,
-                        pred,
-                        w_pred,
-                        im_weights,
-                    )
-                    scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
-                        agg_probs,
-                        sc_im_misfit_score.to(run_config.device, torch.float32),
-                        im_weights,
-                        sc_weights=scenario_weights,
-                    )
+                # scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
+                # scenario_mask = scenario_mask.to(run_config.device, torch.float32)
+                #
+                # im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
+                #
+                # # w_pred = get_weight_prediction(
+                # #     weight_model, scalar_features, scenario_mask, run_config)
+                # w_pred = get_loth_weights(
+                #     im_site_corrs.to(run_config.device, dtype=torch.float32),
+                #     scenario_mask,
+                # )
+                #
+                # scenario_weights = None
+                # if run_config.apply_sc_weighting:
+                #     scenario_weights = compute_loth_baker_scenario_weights(
+                #         im_site_corrs,
+                #         scenario_mask,
+                #         im_weights,
+                #         run_config.min_sc_weight,
+                #         run_config.max_sc_weight,
+                #     )
+                #
+                # if run_config.per_im_prob:
+                #     agg_probs = compute_multi_agg_prob(
+                #         scenario_mask, pred, w_pred, im_weights
+                #     )
+                #     scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
+                #         agg_probs,
+                #         sc_im_misfit_score.to(run_config.device, torch.float32),
+                #         im_weights,
+                #         sc_weights=scenario_weights,
+                #     )
+                # else:
+                #     agg_probs = compute_single_agg_prob(
+                #         scenario_mask,
+                #         pred,
+                #         w_pred,
+                #         im_weights,
+                #     )
+                #     scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
+                #         agg_probs,
+                #         sc_im_misfit_score.to(run_config.device, torch.float32),
+                #         im_weights,
+                #         sc_weights=scenario_weights,
+                #     )
 
                 metrics["loss_hist_val"][epoch_ix] += loss.item()
                 metrics["unweighted_loss_hist_val"][
@@ -1286,7 +1481,7 @@ def get_dataset_prediction(
     dataset: SCProbDataset,
     prob_model: models.ProbIMModel,
     weight_model: models.WeightModel,
-    run_config: prob.RunParamsConfig,
+    run_config: RunParamsConfig,
     dist_matrix: pd.DataFrame,
     hp_config: HyperParamsConfig,
 ):
@@ -1363,6 +1558,7 @@ def get_dataset_prediction(
             site_obs_sim_ims,
             site_obs_obs_ims,
             scalar_features,
+            w_scalar_features,
             im_misfit_score,
             im_site_corrs,
         ) in enumerate(tqdm(pred_dataloader)):
@@ -1395,14 +1591,26 @@ def get_dataset_prediction(
             )
 
             # Scenario mask
-            scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
-            scenario_mask = scenario_mask.to(run_config.device, torch.float32)
+            # scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
+            # scenario_mask = scenario_mask.to(run_config.device, torch.float32)
 
-            # Site weights
-            # w_pred = get_weight_prediction(
-            #     weight_model, scalar_features, scenario_mask, run_config)
-            w_pred = get_loth_weights(
-                im_site_corrs.to(run_config.device, dtype=torch.float32), scenario_mask
+            (
+                w_pred,
+                agg_probs,
+                scenario_loss,
+                weighted_scenario_loss,
+                loss,
+                scenario_mask,
+            ) = get_batch_results(
+                pred,
+                weight_model,
+                w_scalar_features,
+                sc_ids,
+                record_scenario_ids,
+                im_site_corrs,
+                sc_im_misfit_score,
+                im_weights,
+                run_config,
             )
 
             cur_n_samples = pred.shape[0]
@@ -1730,7 +1938,7 @@ def post_processing(
     train_dataset: SCProbDataset,
     val_dataset: SCProbDataset,
     hp_config: HyperParamsConfig,
-    run_config: prob.RunParamsConfig,
+    run_config: RunParamsConfig,
     metrics: Dict,
     best_epoch: int,
     scalar_features: ml_data.ScalarFeatures,
@@ -1796,6 +2004,7 @@ def post_processing(
 
     # Save the model
     torch.save(prob_model, cur_out_dir / "model.pt")
+    torch.save(weight_model, cur_out_dir / "weight_model.pt")
 
     # Metadata
     metadata = {
@@ -1809,7 +2018,6 @@ def post_processing(
     }
     mlt.utils.write_to_yaml(metadata, cur_out_dir / "meta.yaml")
 
-    # n_inputs = (run_config.n_rels * hp_config.n_im_features) + scalar_features.n_scalar_features
     draw_graph(
         prob_model,
         input_size=[
@@ -1834,7 +2042,7 @@ def post_processing(
 
 def compute_scenario_distribution(
     sample_results: pd.DataFrame,
-    run_config: prob.RunParamsConfig,
+    run_config: RunParamsConfig,
     im_site_weights_suffix: str = "_site_corr_weights",
 ):
     """

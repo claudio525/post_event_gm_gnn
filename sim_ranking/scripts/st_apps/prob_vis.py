@@ -35,6 +35,7 @@ def get_im_cols(results_dir: Path, suffix: str):
     ims = st_utils.ml_get_metadata(results_dir)
     return mlt.array_utils.numpy_str_join("_", ims["run_config"]["ims"], suffix)
 
+
 @st.cache_data
 def get_results_group(
     results_df: pd.DataFrame,
@@ -242,6 +243,45 @@ def _create_event_map(
     return fig
 
 
+def gen_rel_prob_plot(result_df: pd.DataFrame):
+    fig, ax = plt.subplots(figsize=(12, 3))
+
+    if "prob" in result_df.columns:
+        ax.bar(np.arange(result_df.shape[0]), result_df["prob"].values)
+
+        ax.set_ylabel(f"Probability")
+        ax.set_xlabel(f"Realisation")
+        ax.set_ylim([0, 1])
+    else:
+        prob_cols = mlt.array_utils.numpy_str_join("_", sr.constants.PSA_KEYS, "prob")
+        top_ind = (
+            result_df[prob_cols]
+            .sum(axis=1)
+            .sort_values(ascending=False)
+            .index.values[:10]
+        )
+
+        ax.semilogx(
+            sr.constants.PERIODS,
+            result_df.loc[top_ind, prob_cols].T,
+            alpha=0.5,
+            label=result_df.loc[top_ind, "rel_id"]
+            if "rel_id" in result_df.columns
+            else top_ind,
+        )
+
+        ax.set_xlim([0.01, 10])
+        ax.set_ylabel(f"Probability")
+        ax.set_xlabel(f"Period (s)")
+        ax.legend()
+        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+    # fig.tight_layout()
+    st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
+
+
+# @st.experimental_fragment()
 def _scenario_viewer(
     results_dir: Path,
     scenario_results: pd.DataFrame,
@@ -342,10 +382,9 @@ def _scenario_viewer(
         (sample_results.event_id == event) & (sample_results.site_int == site_int)
     ]
     cur_sample_sum_results = sample_sum_results.loc[
-        (sample_sum_results.event_id == event) & (sample_sum_results.site_int == site_int)]
-
-    if "prob" in cur_scenario_df.columns:
-        st.markdown(f"**Scenario loss: {cur_sc_sum_df.loss:.4f}**")
+        (sample_sum_results.event_id == event)
+        & (sample_sum_results.site_int == site_int)
+    ]
 
     assert np.all(site_int_sims.index == cur_scenario_df.index)
 
@@ -364,6 +403,8 @@ def _scenario_viewer(
         if syn_obs_gm_params is not None
         else None
     )
+
+    gen_rel_prob_plot(cur_scenario_df)
 
     create_pSA_dist_plot(
         results_dir,
@@ -413,10 +454,16 @@ def _scenario_viewer(
                     cur_obs_sites_df.loc[cur_obs_site, weight_cols].to_frame().T
                 )
 
+            gen_rel_prob_plot(
+                cur_sample_results.loc[cur_sample_results.site_obs == cur_obs_site]
+            )
+
             create_pSA_dist_plot(
                 results_dir,
                 cur_sample_results.loc[cur_sample_results.site_obs == cur_obs_site],
-                cur_sample_sum_results.loc[cur_sample_sum_results.site_obs == cur_obs_site].squeeze(),
+                cur_sample_sum_results.loc[
+                    cur_sample_sum_results.site_obs == cur_obs_site
+                ].squeeze(),
                 site_int_sims,
                 site_int_obs,
                 high_rels=high_rels if len(high_rels) > 0 else None,
@@ -544,6 +591,7 @@ def create_misfit_dist_plot(results_df: pd.DataFrame, tab_type: str):
     st.pyplot(fig, use_container_width=False)
 
 
+# @st.experimental_fragment
 def _sample_viewer(
     results_dir: Path,
     results_df: pd.DataFrame,
@@ -890,8 +938,12 @@ def create_pSA_dist_plot(
         label="ML +/- 1 Std",
         color="lightblue",
     )
-    ax.semilogx(sr.constants.PERIODS, np.exp(weighted_avg_ln + weighted_std_ln), c="lightblue")
-    ax.semilogx(sr.constants.PERIODS, np.exp(weighted_avg_ln - weighted_std_ln), c="lightblue")
+    ax.semilogx(
+        sr.constants.PERIODS, np.exp(weighted_avg_ln + weighted_std_ln), c="lightblue"
+    )
+    ax.semilogx(
+        sr.constants.PERIODS, np.exp(weighted_avg_ln - weighted_std_ln), c="lightblue"
+    )
 
     if high_rels is not None:
         colors = sns.color_palette("dark", len(high_rels))
@@ -1178,6 +1230,7 @@ def run_ind_samples(
         )
 
 
+# @st.experimental_fragment()
 def run_ind_scenario(
     results_dir: Path,
     sample_results: Tuple[pd.DataFrame, pd.DataFrame],
@@ -1338,6 +1391,7 @@ def posterior_probs_inv(cur_results_dir: Path, results_df: pd.DataFrame, tab_typ
     plt.close(fig)
 
 
+# @st.experimental_fragment
 def agg_scenario_vis(
     cur_results_dir: Path,
     sc_results_df: pd.DataFrame,
@@ -1345,8 +1399,8 @@ def agg_scenario_vis(
     sample_results_df: pd.DataFrame,
     tab_type: str,
 ):
-    # with st.expander("Posterior Probabilities"):
-    #     posterior_probs_inv(cur_results_dir, sc_results_df, tab_type)
+    with st.expander("Posterior Probabilities"):
+        posterior_probs_inv(cur_results_dir, sc_results_df, tab_type)
     st.divider()
 
     im_std_cols = get_im_cols(cur_results_dir, "wstd")
@@ -1355,21 +1409,35 @@ def agg_scenario_vis(
     # Filtering
     st.markdown("### Filtering")
     with st.form(key=f"{tab_type}_filter_form"):
-        apply_filtering = st.checkbox("Apply Filtering", value=False, key=f"{tab_type}_filter")
+        apply_filtering = st.checkbox(
+            "Apply Filtering", value=False, key=f"{tab_type}_filter"
+        )
         c1, c2 = st.columns(2)
         with c1:
             st.text("Number of Observation Sites")
             min_obs_sites = st.number_input(
-                "Minimum", 1, 1000, 1, key=f"{tab_type}_min_obs_sites", disabled=apply_filtering
+                "Minimum",
+                1,
+                1000,
+                1,
+                key=f"{tab_type}_min_obs_sites",
+                disabled=apply_filtering,
             )
         with c2:
             st.text("Minimum S2S Distance")
             max_s2s_dist = st.number_input(
-                "Maximum", 0.0, 1000.0, 100.0, key=f"{tab_type}_max_s2s_dist", disabled=apply_filtering
+                "Maximum",
+                0.0,
+                1000.0,
+                100.0,
+                key=f"{tab_type}_max_s2s_dist",
+                disabled=apply_filtering,
             )
         if st.form_submit_button():
             sc_sum_df = sc_sum_df.loc[
-                (sc_sum_df.n_obs_sites >= min_obs_sites) & (sc_sum_df.min_s2s_dist <= max_s2s_dist)]
+                (sc_sum_df.n_obs_sites >= min_obs_sites)
+                & (sc_sum_df.min_s2s_dist <= max_s2s_dist)
+            ]
 
     axis_cols = ["loss", "n_obs_sites", "min_s2s_dist", "std_avg"]
     if not np.any(sc_sum_df["weight"].isna()):
@@ -1394,7 +1462,7 @@ def agg_scenario_vis(
                 vmax=10.0,
                 alpha=0.9,
                 show_trend_mean_line=True,
-            )
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1416,7 +1484,7 @@ def agg_scenario_vis(
                 vmax=None,
                 alpha=0.9,
                 show_trend_mean_line=True,
-            )
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1441,7 +1509,7 @@ def agg_scenario_vis(
                 vmax=10,
                 alpha=0.9,
                 show_trend_mean_line=True,
-            )
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1464,7 +1532,7 @@ def agg_scenario_vis(
                 vmin=0,
                 alpha=0.9,
                 show_trend_mean_line=True,
-            )
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1484,8 +1552,8 @@ def agg_scenario_vis(
                 vmax_use_qt=True,
                 vmax=0.95,
                 alpha=0.9,
-                show_trend_mean_line=False
-            )
+                show_trend_mean_line=False,
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1509,7 +1577,7 @@ def agg_scenario_vis(
                 vmax=10,
                 alpha=0.9,
                 show_trend_mean_line=True,
-            )
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1530,7 +1598,7 @@ def agg_scenario_vis(
                 vmax=0.95,
                 alpha=0.9,
                 show_trend_mean_line=True,
-            )
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1550,7 +1618,7 @@ def agg_scenario_vis(
                 vmin=0,
                 alpha=0.9,
                 show_trend_mean_line=True,
-            )
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1571,7 +1639,7 @@ def agg_scenario_vis(
                 vmax=0.95,
                 alpha=0.9,
                 show_trend_mean_line=True,
-            )
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1596,7 +1664,7 @@ def agg_scenario_vis(
                 vmin=0,
                 alpha=0.9,
                 show_trend_mean_line=True,
-            )
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1621,7 +1689,7 @@ def agg_scenario_vis(
                 vmax=10,
                 alpha=0.9,
                 show_trend_mean_line=True,
-            )
+            ),
         )
         st.pyplot(fig, use_container_width=False)
         plt.close(fig)
@@ -1636,6 +1704,7 @@ def agg_scenario_vis(
         plt.close(fig)
 
     return
+
 
 def run_agg_scenario(
     cur_results_dir: Path,
@@ -1653,7 +1722,7 @@ def run_agg_scenario(
     train_tab, val_tab = st.tabs(["Training", "Validation"])
 
     with train_tab:
-        start_time = time.time()
+        # start_time = time.time()
         agg_scenario_vis(
             cur_results_dir,
             train_sc_results,
@@ -1661,7 +1730,7 @@ def run_agg_scenario(
             train_sample_results,
             "train_scenario",
         )
-        print(f"Took {time.time() - start_time} to run train_scenario")
+        # print(f"Took {time.time() - start_time} to run train_scenario")
 
     with val_tab:
         agg_scenario_vis(
@@ -1673,31 +1742,36 @@ def run_agg_scenario(
         )
 
 
+# @st.experimental_fragment
 def agg_single_viewer(results_df: pd.DataFrame, tab_type: str):
-    if "site_weights" in results_df.columns:
-        im = None
-    else:
-        im = st.selectbox("IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_single_im")
+    pass
+    # with st.expander("Posterior Probabilities"):
+    #     posterior_probs_inv(None, results_df, tab_type)
+    # st.divider()
 
-    with st.expander("Site Weights Histogram"):
-        fig, ax = plt.subplots(figsize=(12, 6))
-
-        ax.hist(
-            results_df[f"{im}_site_weights" if im is not None else "site_weights"],
-            bins=20,
-            range=(0, 1),
-        )
-        ax.set_title(f"{im}")
-        ax.set_ylabel("Number of Samples")
-        ax.set_xlabel(f"{im} Site Weights")
-        ax.set_xlim([0, 1])
-        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-
-        fig.tight_layout()
-        st.pyplot(fig, use_container_width=False)
-
-    with st.expander("Sample Misfit"):
-        misfit_hist(results_df, im)
+    # if "site_weights" in results_df.columns:
+    # else:
+    #     im = st.selectbox("IM", sr.constants.PSA_KEYS, key=f"{tab_type}_agg_single_im")
+    #
+    # with st.expander("Site Weights Histogram"):
+    #     fig, ax = plt.subplots(figsize=(12, 6))
+    #
+    #     ax.hist(
+    #         results_df[f"{im}_site_weights" if im is not None else "site_weights"],
+    #         bins=20,
+    #         range=(0, 1),
+    #     )
+    #     ax.set_title(f"{im}")
+    #     ax.set_ylabel("Number of Samples")
+    #     ax.set_xlabel(f"{im} Site Weights")
+    #     ax.set_xlim([0, 1])
+    #     ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    #
+    #     fig.tight_layout()
+    #     st.pyplot(fig, use_container_width=False)
+    #
+    # with st.expander("Sample Misfit"):
+    #     misfit_hist(results_df, im)
 
     # with st.expander("Misfit vs Site Weights"):
     # misfit_vs_site_weights(results_df, im)
@@ -1724,7 +1798,7 @@ def misfit_vs_site_weights(results_df: pd.DataFrame, im: str):
 
     fig.colorbar(cm, ax=ax, pad=0, label="Number of Samples")
 
-    fig.tight_layout()
+    # fig.tight_layout()
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
 
@@ -1744,7 +1818,7 @@ def misfit_hist(results_df: pd.DataFrame, im: str):
     ax.set_ylabel("Number of Samples")
     ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
 
-    fig.tight_layout()
+    # fig.tight_layout()
     st.pyplot(fig, use_container_width=False)
     plt.close(fig)
 
@@ -1844,27 +1918,27 @@ def main(
 
     with general_tab:
         # pass
-        start_time = time.time()
+        # start_time = time.time()
         run_general_tab(cur_results_dir)
-        print(f"Took {time.time() - start_time} to run general tab")
+        # print(f"Took {time.time() - start_time} to run general tab")
 
     sample_results = st_utils.ml_load_sample_results(cur_results_dir)
     scenario_results = st_utils.ml_load_scenario_results(cur_results_dir)
 
     with ind_sample_tab:
         # pass
-        start_time = time.time()
+        # start_time = time.time()
         run_ind_samples(
             cur_results_dir,
             sample_results,
             gen_gm_params_ffp=gen_gm_params_ffp,
             syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
         )
-        print(f"Took {time.time() - start_time} to run ind sample tab")
+        # print(f"Took {time.time() - start_time} to run ind sample tab")
 
     with ind_scenario_tab:
         # pass
-        start_time = time.time()
+        # start_time = time.time()
         run_ind_scenario(
             cur_results_dir,
             sample_results,
@@ -1872,20 +1946,20 @@ def main(
             gen_gm_params_ffp=gen_gm_params_ffp,
             syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
         )
-        print(f"Took {time.time() - start_time} to run ind scenario tab")
-    # with agg_single_tab:
-    #     run_agg_single(cur_results_dir, sample_results)
+        # print(f"Took {time.time() - start_time} to run ind scenario tab")
+    with agg_single_tab:
+        run_agg_single(cur_results_dir, sample_results)
 
     with agg_scenario_tab:
         # pass
-        start_time = time.time()
+        # start_time = time.time()
         run_agg_scenario(cur_results_dir, sample_results, scenario_results)
-        print(f"Took {time.time() - start_time} to run agg scenario tab")
+        # print(f"Took {time.time() - start_time} to run agg scenario tab")
 
     with sc_explorer_tab:
-        start_time = time.time()
+        # start_time = time.time()
         run_sc_explorer(cur_results_dir, scenario_results)
-        print(f"Took {time.time() - start_time} to run sc explorer tab")
+        # print(f"Took {time.time() - start_time} to run sc explorer tab")
 
 
 if __name__ == "__main__":

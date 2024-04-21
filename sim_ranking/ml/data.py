@@ -122,6 +122,16 @@ def create_scalar_feature_tensor(
     """
     assert np.all(np.asarray(list(event_sites.keys())) == events)
 
+    scalar_feature_columns = np.asarray([
+        *scalar_features.event_feature_keys,
+        *[f"{cur_key}_site_int" for cur_key in scalar_features.site_feature_keys],
+        *[f"{cur_key}_site_obs" for cur_key in scalar_features.site_feature_keys],
+        *[f"{cur_key}_site_int" for cur_key in scalar_features.event_site_feature_keys],
+        *[f"{cur_key}_site_obs" for cur_key in scalar_features.event_site_feature_keys],
+        *scalar_features.site_to_site_feature_keys,
+        *scalar_features.event_site_to_site_feature_keys,
+    ])
+
     scalar_features_values = []
     for cur_event in events:
         cur_sites = event_sites[cur_event]
@@ -196,7 +206,7 @@ def create_scalar_feature_tensor(
         scalar_features_values.append(cur_tensor)
 
     scalar_features_values = np.concatenate(scalar_features_values, axis=0)
-    return scalar_features_values
+    return scalar_features_values, scalar_feature_columns
 
 
 def _station_df_sanity_check(station_df: pd.DataFrame, site_features: Sequence[str]):
