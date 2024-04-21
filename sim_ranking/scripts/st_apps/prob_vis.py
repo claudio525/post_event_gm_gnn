@@ -413,11 +413,17 @@ def _scenario_viewer(
         site_int_sims,
         site_int_obs,
         high_rels=high_rels if len(high_rels) > 0 else None,
-        gen_gm_params=cur_gen_gm_params,
-        syn_obs_gm_params=cur_syn_obs_gm_params,
+        # gen_gm_params=cur_gen_gm_params,
+        # syn_obs_gm_params=cur_syn_obs_gm_params,
     )
 
     st.divider()
+
+    st.text(f"Site of Interest - "
+            f"Vs30: {site_df.loc[site_int].vs30}, "
+            f"Z1.0: {site_df.loc[site_int, 'z1.0']}, "
+            f"Z2.5: {site_df.loc[site_int, 'z2.5']}, "
+            f"T_site: {site_df.loc[site_int].tsite}")
 
     st.text(
         f"Number of Observation sites: "
@@ -443,7 +449,11 @@ def _scenario_viewer(
         with st.expander(cur_obs_site):
             st.text(
                 f"Observation site: {cur_obs_site}, "
-                f"distance {cur_obs_sites_df.loc[cur_obs_site, 's2s_distance']:.2f}"
+                f"distance {cur_obs_sites_df.loc[cur_obs_site, 's2s_distance']:.2f}, "
+                f"Vs30: {site_df.loc[cur_obs_site].vs30}, "
+                f"Z1.0: {site_df.loc[cur_obs_site, 'z1.0']}, "
+                f"Z2.5: {site_df.loc[cur_obs_site, 'z2.5']}, "
+                f"T_site: {site_df.loc[cur_obs_site].tsite}"
             )
             if isinstance(weight_cols, str):
                 st.text(
