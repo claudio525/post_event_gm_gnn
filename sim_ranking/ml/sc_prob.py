@@ -81,6 +81,7 @@ class HyperParamsConfig:
     n_epochs: int
     batch_size: int
     l2_reg: float
+    l1_reg: float
     lr: Sequence[float]
     lr_epochs: Sequence[int]
 
@@ -118,6 +119,7 @@ class HyperParamsConfig:
             n_epochs,
             params["batch_size"],
             params["l2_reg"],
+            params["l1_reg"],
             params["lr"],
             params["lr_epochs"],
             params["misfit_fn"],
@@ -136,6 +138,7 @@ class HyperParamsConfig:
             "n_epochs": self.n_epochs,
             "batch_size": self.batch_size,
             "l2_reg": self.l2_reg,
+            "l1_reg": self.l1_reg,
             "lr": self.lr,
             "lr_epochs": self.lr_epochs,
             "misfit_fn": self.misfit_fn,
@@ -1109,6 +1112,7 @@ def compute_loth_baker_scenario_weights(
 
 def get_batch_results(
     pred: torch.Tensor,
+    model: models.ProbIMModel,
     weight_model: models.WeightModel,
     w_scalar_features: torch.Tensor,
     sc_ids: torch.Tensor,
@@ -1117,6 +1121,7 @@ def get_batch_results(
     sc_im_misfit_score: torch.Tensor,
     im_weights: torch.Tensor,
     run_config: RunParamsConfig,
+    hp_config: HyperParamsConfig,
 ):
     scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
     scenario_mask = scenario_mask.to(run_config.device, torch.float32)
@@ -1164,7 +1169,14 @@ def get_batch_results(
             sc_weights=scenario_weights,
         )
 
-    return w_pred, agg_probs, scenario_loss, weighted_scenario_loss, loss, scenario_mask
+    # Add L1 regularization to the loss
+    l1_reg = torch.tensor(0., requires_grad=True)
+    for param in model.parameters():
+        l1_reg = l1_reg + torch.norm(param, p=1)
+    l1_reg = hp_config.l1_reg * l1_reg
+    loss = loss + l1_reg
+
+    return w_pred, agg_probs, scenario_loss, weighted_scenario_loss, loss, l1_reg, scenario_mask
 
 
 def train(
@@ -1179,8 +1191,12 @@ def train(
     metrics = {
         "loss_hist_train": torch.zeros(hp_config.n_epochs),
         "loss_hist_val": torch.zeros(hp_config.n_epochs),
+        "l1_reg_hist_train": torch.zeros(hp_config.n_epochs),
+        "l1_reg_hist_val": torch.zeros(hp_config.n_epochs),
         "unweighted_loss_hist_train": torch.zeros(hp_config.n_epochs),
         "unweighted_loss_hist_val": torch.zeros(hp_config.n_epochs),
+        "weighted_loss_hist_train": torch.zeros(hp_config.n_epochs),
+        "weighted_loss_hist_val": torch.zeros(hp_config.n_epochs),
     }
 
     best_epoch_key = "loss_hist_val"
@@ -1288,9 +1304,11 @@ def train(
                 scenario_loss,
                 weighted_scenario_loss,
                 loss,
+                l1_reg,
                 _,
             ) = get_batch_results(
                 pred,
+                prob_model,
                 weight_model,
                 w_scalar_features,
                 sc_ids,
@@ -1299,54 +1317,8 @@ def train(
                 sc_im_misfit_score,
                 im_weights,
                 run_config,
+                hp_config,
             )
-
-            # scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
-            # scenario_mask = scenario_mask.to(run_config.device, torch.float32)
-            #
-            # im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
-            #
-            # if run_config.sample_weighting_method is SampleWeighting.CUSTOM_MODEL:
-            #     w_pred = get_weight_prediction(
-            #         weight_model, scalar_features, scenario_mask, run_config)
-            # elif run_config.sample_weighting_method is SampleWeighting.LOTH_BAKER:
-            #     w_pred = get_loth_weights(im_site_corrs, scenario_mask)
-            # else:
-            #     raise NotImplementedError()
-            #
-            # scenario_weights = None
-            # if run_config.apply_sc_weighting:
-            #     scenario_weights = compute_loth_baker_scenario_weights(
-            #         im_site_corrs,
-            #         scenario_mask,
-            #         im_weights,
-            #         run_config.min_sc_weight,
-            #         run_config.max_sc_weight,
-            #     )
-            #
-            # if run_config.per_im_prob:
-            #     agg_probs = compute_multi_agg_prob(
-            #         scenario_mask, pred, w_pred, im_weights
-            #     )
-            #     scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
-            #         agg_probs,
-            #         sc_im_misfit_score.to(run_config.device, torch.float32),
-            #         im_weights,
-            #         sc_weights=scenario_weights,
-            #     )
-            # else:
-            #     agg_probs = compute_single_agg_prob(
-            #         scenario_mask,
-            #         pred,
-            #         w_pred,
-            #         im_weights,
-            #     )
-            #     scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
-            #         agg_probs,
-            #         sc_im_misfit_score.to(run_config.device, torch.float32),
-            #         im_weights,
-            #         sc_weights=scenario_weights,
-            #     )
 
             optimizer.zero_grad()
             loss.backward()
@@ -1356,9 +1328,15 @@ def train(
             metrics["unweighted_loss_hist_train"][
                 epoch_ix
             ] += scenario_loss.mean().item()
+            if weighted_scenario_loss is not None:
+                metrics["weighted_loss_hist_train"][epoch_ix] += weighted_scenario_loss.mean().item()
+            metrics["l1_reg_hist_train"][epoch_ix] += l1_reg.item()
 
+        metrics["l1_reg_hist_train"][epoch_ix] /= len(train_dataloader)
         metrics["loss_hist_train"][epoch_ix] /= len(train_dataloader)
         metrics["unweighted_loss_hist_train"][epoch_ix] /= len(train_dataloader)
+        if weighted_scenario_loss is not None:
+            metrics["weighted_loss_hist_train"][epoch_ix] /= len(train_dataloader)
 
         prob_model.eval()
         with torch.no_grad():
@@ -1398,9 +1376,11 @@ def train(
                     scenario_loss,
                     weighted_scenario_loss,
                     loss,
+                    l1_reg,
                     _,
                 ) = get_batch_results(
                     pred,
+                    prob_model,
                     weight_model,
                     w_scalar_features,
                     sc_ids,
@@ -1409,61 +1389,22 @@ def train(
                     sc_im_misfit_score,
                     im_weights,
                     run_config,
+                    hp_config,
                 )
-
-                # scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
-                # scenario_mask = scenario_mask.to(run_config.device, torch.float32)
-                #
-                # im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
-                #
-                # # w_pred = get_weight_prediction(
-                # #     weight_model, scalar_features, scenario_mask, run_config)
-                # w_pred = get_loth_weights(
-                #     im_site_corrs.to(run_config.device, dtype=torch.float32),
-                #     scenario_mask,
-                # )
-                #
-                # scenario_weights = None
-                # if run_config.apply_sc_weighting:
-                #     scenario_weights = compute_loth_baker_scenario_weights(
-                #         im_site_corrs,
-                #         scenario_mask,
-                #         im_weights,
-                #         run_config.min_sc_weight,
-                #         run_config.max_sc_weight,
-                #     )
-                #
-                # if run_config.per_im_prob:
-                #     agg_probs = compute_multi_agg_prob(
-                #         scenario_mask, pred, w_pred, im_weights
-                #     )
-                #     scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
-                #         agg_probs,
-                #         sc_im_misfit_score.to(run_config.device, torch.float32),
-                #         im_weights,
-                #         sc_weights=scenario_weights,
-                #     )
-                # else:
-                #     agg_probs = compute_single_agg_prob(
-                #         scenario_mask,
-                #         pred,
-                #         w_pred,
-                #         im_weights,
-                #     )
-                #     scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
-                #         agg_probs,
-                #         sc_im_misfit_score.to(run_config.device, torch.float32),
-                #         im_weights,
-                #         sc_weights=scenario_weights,
-                #     )
 
                 metrics["loss_hist_val"][epoch_ix] += loss.item()
                 metrics["unweighted_loss_hist_val"][
                     epoch_ix
                 ] += scenario_loss.mean().item()
+                if weighted_scenario_loss is not None:
+                    metrics["weighted_loss_hist_val"][epoch_ix] += weighted_scenario_loss.mean().item()
+                metrics["l1_reg_hist_val"][epoch_ix] += l1_reg.item()
 
+            metrics["l1_reg_hist_val"][epoch_ix] /= len(val_dataloader)
             metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
             metrics["unweighted_loss_hist_val"][epoch_ix] /= len(val_dataloader)
+            if weighted_scenario_loss is not None:
+                metrics["weighted_loss_hist_val"][epoch_ix] /= len(val_dataloader)
 
             if metrics["loss_hist_val"][epoch_ix] < best_val_loss:
                 best_val_loss = metrics["loss_hist_val"][epoch_ix]
@@ -1600,9 +1541,11 @@ def get_dataset_prediction(
                 scenario_loss,
                 weighted_scenario_loss,
                 loss,
+                l1_reg,
                 scenario_mask,
             ) = get_batch_results(
                 pred,
+                prob_model,
                 weight_model,
                 w_scalar_features,
                 sc_ids,
@@ -1611,6 +1554,7 @@ def get_dataset_prediction(
                 sc_im_misfit_score,
                 im_weights,
                 run_config,
+                hp_config,
             )
 
             cur_n_samples = pred.shape[0]
@@ -1778,6 +1722,8 @@ def get_dataset_prediction(
                     sc_weights=sc_weights,
                 )
 
+                print(f"wtf")
+
                 cur_sc_result[prob_cols] = einops.rearrange(
                     cur_agg_prob.numpy(force=True), "sc rel im -> (sc rel) im"
                 )
@@ -1790,12 +1736,14 @@ def get_dataset_prediction(
                 )
                 assert np.allclose(cur_agg_prob.sum(axis=1).numpy(force=True), 1.0)
 
-                scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
+                sc_loss, w_sc_loss, loss_2 = compute_single_loss(
                     cur_agg_prob,
                     sc_im_misfit_score.to(run_config.device, torch.float32),
                     im_weights,
                     sc_weights=sc_weights,
                 )
+
+                print(f"wtf")
 
                 cur_sc_result["prob"] = einops.rearrange(
                     cur_agg_prob.numpy(force=True), "sc rel -> (sc rel)"
