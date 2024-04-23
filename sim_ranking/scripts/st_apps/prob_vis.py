@@ -327,6 +327,8 @@ def _scenario_viewer(
 
         st.markdown(f"Magnitude: {event_df.loc[event].mag}")
 
+        plot_rels = st.checkbox("Plot Realisations", value=False, key=f"{tab_type}_plot_rels")
+
     with col2:
         fig = _create_event_map(
             event,
@@ -415,15 +417,18 @@ def _scenario_viewer(
         high_rels=high_rels if len(high_rels) > 0 else None,
         # gen_gm_params=cur_gen_gm_params,
         # syn_obs_gm_params=cur_syn_obs_gm_params,
+        plot_rels=plot_rels
     )
 
     st.divider()
 
-    st.text(f"Site of Interest - "
-            f"Vs30: {site_df.loc[site_int].vs30}, "
-            f"Z1.0: {site_df.loc[site_int, 'z1.0']}, "
-            f"Z2.5: {site_df.loc[site_int, 'z2.5']}, "
-            f"T_site: {site_df.loc[site_int].tsite}")
+    st.text(
+        f"Site of Interest - "
+        f"Vs30: {site_df.loc[site_int].vs30}, "
+        f"Z1.0: {site_df.loc[site_int, 'z1.0']}, "
+        f"Z2.5: {site_df.loc[site_int, 'z2.5']}, "
+        f"T_site: {site_df.loc[site_int].tsite}"
+    )
 
     st.text(
         f"Number of Observation sites: "
@@ -480,6 +485,7 @@ def _scenario_viewer(
                 site_obs_obs=obs_df.loc[
                     (obs_df.event_id == event) & (obs_df.site_id == cur_obs_site)
                 ],
+                plot_rels=plot_rels
                 # gen_gm_params=cur_gen_gm_params if show_gen_dist else None,
                 # syn_obs_gm_params=cur_syn_obs_gm_params if show_obs_dist else None,
             )
@@ -822,6 +828,7 @@ def create_pSA_dist_plot(
     site_obs_obs: pd.DataFrame = None,
     gen_gm_params: pd.DataFrame = None,
     syn_obs_gm_params: pd.DataFrame = None,
+    plot_rels: bool = False,
 ):
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -886,6 +893,44 @@ def create_pSA_dist_plot(
             linewidth=1.0,
         )
 
+    if plot_rels:
+        ax.semilogx(
+            sr.constants.PERIODS,
+            site_int_sims[sr.constants.PSA_KEYS].min(axis=0).values,
+            label="Rel Min/Max (Per IM)",
+            c="green",
+            linestyle="--",
+            linewidth=1.0,
+            alpha=0.75,
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            site_int_sims[sr.constants.PSA_KEYS].max(axis=0).values,
+            c="green",
+            linestyle="--",
+            linewidth=1.0,
+        )
+
+        rel_mean = site_int_sims[sr.constants.PSA_KEYS].mean(axis=0).values
+        rel_std = site_int_sims[sr.constants.PSA_KEYS].std(axis=0).values
+        ax.semilogx(
+            sr.constants.PERIODS,
+            rel_mean,
+            label="Rel Mean (Per IM)",
+            c="green",
+            linewidth=1.0,
+        )
+        ax.fill_between(
+            sr.constants.PERIODS,
+            rel_mean + rel_std,
+            rel_mean - rel_std,
+            alpha=0.4,
+            label="Rel +/- 1 Std (Per IM)",
+            color="lightgreen",
+        )
+
+    print(f"wtf")
+
     if site_obs_obs is not None:
         ax.semilogx(
             sr.constants.PERIODS,
@@ -899,39 +944,6 @@ def create_pSA_dist_plot(
     im_wstd_cols = get_im_cols(result_dir, "wstd")
     weighted_avg_ln = results_sum_df[im_wavg_cols].values.astype(float)
     weighted_std_ln = results_sum_df[im_wstd_cols].values.astype(float)
-
-    # if "prob" in results_df.columns:
-    #     assert np.isclose(np.sum(results_df.prob.values), 1.0)
-    #     weighted_avg = einops.einsum(
-    #         results_df.prob.values,
-    #         site_int_sims.loc[:, sr.constants.PSA_KEYS].values,
-    #         "i, i j -> j",
-    #     )
-    #     weighted_std = np.sqrt(
-    #         einops.einsum(
-    #             results_df.prob.values,
-    #             (site_int_sims.loc[:, sr.constants.PSA_KEYS].values - weighted_avg)
-    #             ** 2,
-    #             "i, i j -> j",
-    #         )
-    #     )
-    # else:
-    #     im_prob_cols = [f"{cur_im}_prob" for cur_im in sr.constants.PSA_KEYS]
-    #     assert np.allclose(results_df[im_prob_cols].sum(), 1.0)
-    #
-    #     weighted_avg = einops.einsum(
-    #         results_df[im_prob_cols].values,
-    #         site_int_sims.loc[:, sr.constants.PSA_KEYS].values,
-    #         "i j, i j -> j",
-    #     )
-    #     weighted_std = np.sqrt(
-    #         einops.einsum(
-    #             results_df[im_prob_cols].values,
-    #             (site_int_sims.loc[:, sr.constants.PSA_KEYS].values - weighted_avg)
-    #             ** 2,
-    #             "i j, i j -> j",
-    #         )
-    #     )
 
     ax.semilogx(
         sr.constants.PERIODS,
@@ -1754,10 +1766,9 @@ def run_agg_scenario(
 
 # @st.experimental_fragment
 def agg_single_viewer(results_df: pd.DataFrame, tab_type: str):
-    pass
-    # with st.expander("Posterior Probabilities"):
-    #     posterior_probs_inv(None, results_df, tab_type)
-    # st.divider()
+    with st.expander("Posterior Probabilities"):
+        posterior_probs_inv(None, results_df, tab_type)
+    st.divider()
 
     # if "site_weights" in results_df.columns:
     # else:

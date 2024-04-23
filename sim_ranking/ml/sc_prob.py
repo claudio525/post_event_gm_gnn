@@ -46,6 +46,7 @@ class RunParamsConfig:
     max_sc_weight: float
 
     sample_weighting_method: SampleWeighting
+    l2_prob_penalty: float
 
     debug: bool
     device: str
@@ -71,6 +72,7 @@ class RunParamsConfig:
             "apply_sc_weighting": self.apply_sc_weighting,
             "min_sc_weight": self.min_sc_weight,
             "max_sc_weight": self.max_sc_weight,
+            "l2_prob_penalty": self.l2_prob_penalty,
             "debug": self.debug,
             "device": self.device,
         }
@@ -556,8 +558,6 @@ class SCProbDataset(Dataset):
         self.rels = np.stack(
             [self.event_rels[cur_event] for cur_event in self.events], axis=0
         )
-
-
 
     def get_indices(self, batch_ind: np.ndarray):
         # Have to it this way, as some events may not have samples
@@ -1170,13 +1170,33 @@ def get_batch_results(
         )
 
     # Add L1 regularization to the loss
-    l1_reg = torch.tensor(0., requires_grad=True)
-    for param in model.parameters():
-        l1_reg = l1_reg + torch.norm(param, p=1)
-    l1_reg = hp_config.l1_reg * l1_reg
-    loss = loss + l1_reg
+    l1_reg = None
+    if hp_config.l1_reg > 0:
+        l1_reg = torch.tensor(0.0, requires_grad=True)
+        for param in model.parameters():
+            l1_reg = l1_reg + torch.norm(param, p=1)
+        l1_reg = hp_config.l1_reg * l1_reg
+        loss = loss + l1_reg
 
-    return w_pred, agg_probs, scenario_loss, weighted_scenario_loss, loss, l1_reg, scenario_mask
+    # Add L2 probability penalty
+    l2_prob_penalty = None
+    if run_config.l2_prob_penalty > 0:
+        # if run_config.per_im_prob:
+        #     l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(torch.sum(pred ** 2, dim=1))
+        # else:
+        l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(torch.sum(pred ** 2, dim=1))
+        loss = loss + l2_prob_penalty
+
+    return (
+        w_pred,
+        agg_probs,
+        scenario_loss,
+        weighted_scenario_loss,
+        loss,
+        l1_reg,
+        l2_prob_penalty,
+        scenario_mask,
+    )
 
 
 def train(
@@ -1188,21 +1208,27 @@ def train(
     run_config: RunParamsConfig,
     quiet: bool = False,
 ):
+    # Setup metrics to log
     metrics = {
         "loss_hist_train": torch.zeros(hp_config.n_epochs),
         "loss_hist_val": torch.zeros(hp_config.n_epochs),
-        "l1_reg_hist_train": torch.zeros(hp_config.n_epochs),
-        "l1_reg_hist_val": torch.zeros(hp_config.n_epochs),
         "unweighted_loss_hist_train": torch.zeros(hp_config.n_epochs),
         "unweighted_loss_hist_val": torch.zeros(hp_config.n_epochs),
         "weighted_loss_hist_train": torch.zeros(hp_config.n_epochs),
         "weighted_loss_hist_val": torch.zeros(hp_config.n_epochs),
     }
+    if hp_config.l1_reg > 0:
+        metrics["l1_reg_hist_train"] = torch.zeros(hp_config.n_epochs)
+        metrics["l1_reg_hist_val"] = torch.zeros(hp_config.n_epochs)
+    if run_config.l2_prob_penalty > 0:
+        metrics["l2_prob_penalty_hist_train"] = torch.zeros(hp_config.n_epochs)
+        metrics["l2_prob_penalty_hist_val"] = torch.zeros(hp_config.n_epochs)
 
     best_epoch_key = "loss_hist_val"
     best_val_loss = np.inf
     best_model_state, best_model_epoch = None, None
 
+    # Setup optimizer
     if run_config.sample_weighting_method is SampleWeighting.CUSTOM_MODEL:
         optimizer = torch.optim.Adam(
             [
@@ -1217,6 +1243,7 @@ def train(
             prob_model.parameters(), lr=hp_config.lr[0], weight_decay=hp_config.l2_reg
         )
 
+    # Setup dataloaders
     train_dataloader = prob.CustomTabularDataLoader(
         train_dataset, hp_config.batch_size, True, shuffle_rels=False
     )
@@ -1224,6 +1251,7 @@ def train(
         val_dataset, hp_config.batch_size, True, shuffle_rels=False
     )
 
+    # Extra debug logging
     def save_grad(grad: torch.Tensor):
         grad_df.loc[len(grad_df)] = {
             "epoch": epoch_ix,
@@ -1232,12 +1260,12 @@ def train(
             "max": torch.abs(grad).max().item(),
             "norm": grad.norm().item(),
         }
-
     if run_config.debug:
         grad_df = pd.DataFrame(columns=["epoch", "shape", "min", "max", "norm"])
         for param in prob_model.parameters():
             param.register_hook(save_grad)
 
+    # Setup IM weights
     im_weights = torch.from_numpy(run_config.im_weights).to(
         run_config.device, torch.float32
     )
@@ -1305,6 +1333,7 @@ def train(
                 weighted_scenario_loss,
                 loss,
                 l1_reg,
+                l2_prob_penalty,
                 _,
             ) = get_batch_results(
                 pred,
@@ -1324,19 +1353,28 @@ def train(
             loss.backward()
             optimizer.step()
 
+            # Log metrics
             metrics["loss_hist_train"][epoch_ix] += loss.item()
             metrics["unweighted_loss_hist_train"][
                 epoch_ix
             ] += scenario_loss.mean().item()
             if weighted_scenario_loss is not None:
-                metrics["weighted_loss_hist_train"][epoch_ix] += weighted_scenario_loss.mean().item()
-            metrics["l1_reg_hist_train"][epoch_ix] += l1_reg.item()
+                metrics["weighted_loss_hist_train"][
+                    epoch_ix
+                ] += weighted_scenario_loss.mean().item()
+            if hp_config.l1_reg > 0:
+                metrics["l1_reg_hist_train"][epoch_ix] += l1_reg.item()
+            if run_config.l2_prob_penalty > 0:
+                metrics["l2_prob_penalty_hist_train"][epoch_ix] += l2_prob_penalty.item()
 
-        metrics["l1_reg_hist_train"][epoch_ix] /= len(train_dataloader)
         metrics["loss_hist_train"][epoch_ix] /= len(train_dataloader)
         metrics["unweighted_loss_hist_train"][epoch_ix] /= len(train_dataloader)
         if weighted_scenario_loss is not None:
             metrics["weighted_loss_hist_train"][epoch_ix] /= len(train_dataloader)
+        if hp_config.l1_reg > 0:
+            metrics["l1_reg_hist_train"][epoch_ix] /= len(train_dataloader)
+        if run_config.l2_prob_penalty > 0:
+            metrics["l2_prob_penalty_hist_train"][epoch_ix] /= len(train_dataloader)
 
         prob_model.eval()
         with torch.no_grad():
@@ -1377,6 +1415,7 @@ def train(
                     weighted_scenario_loss,
                     loss,
                     l1_reg,
+                    l2_prob_penalty,
                     _,
                 ) = get_batch_results(
                     pred,
@@ -1392,20 +1431,30 @@ def train(
                     hp_config,
                 )
 
+                # Log metrics
                 metrics["loss_hist_val"][epoch_ix] += loss.item()
                 metrics["unweighted_loss_hist_val"][
                     epoch_ix
                 ] += scenario_loss.mean().item()
                 if weighted_scenario_loss is not None:
-                    metrics["weighted_loss_hist_val"][epoch_ix] += weighted_scenario_loss.mean().item()
-                metrics["l1_reg_hist_val"][epoch_ix] += l1_reg.item()
+                    metrics["weighted_loss_hist_val"][
+                        epoch_ix
+                    ] += weighted_scenario_loss.mean().item()
+                if hp_config.l1_reg > 0:
+                    metrics["l1_reg_hist_val"][epoch_ix] += l1_reg.item()
+                if run_config.l2_prob_penalty > 0:
+                    metrics["l2_prob_penalty_hist_val"][epoch_ix] += l2_prob_penalty.item()
 
-            metrics["l1_reg_hist_val"][epoch_ix] /= len(val_dataloader)
             metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
             metrics["unweighted_loss_hist_val"][epoch_ix] /= len(val_dataloader)
             if weighted_scenario_loss is not None:
                 metrics["weighted_loss_hist_val"][epoch_ix] /= len(val_dataloader)
+            if hp_config.l1_reg > 0:
+                metrics["l1_reg_hist_val"][epoch_ix] /= len(val_dataloader)
+            if run_config.l2_prob_penalty > 0:
+                metrics["l2_prob_penalty_hist_val"][epoch_ix] /= len(val_dataloader)
 
+            # Keep track of the best epoch
             if metrics["loss_hist_val"][epoch_ix] < best_val_loss:
                 best_val_loss = metrics["loss_hist_val"][epoch_ix]
                 best_model_state = prob_model.state_dict()
@@ -1542,6 +1591,7 @@ def get_dataset_prediction(
                 weighted_scenario_loss,
                 loss,
                 l1_reg,
+                l2_prob_penalty,
                 scenario_mask,
             ) = get_batch_results(
                 pred,
@@ -1715,15 +1765,6 @@ def get_dataset_prediction(
                 )
                 assert np.allclose(cur_agg_prob.sum(axis=1).numpy(force=True), 1.0)
 
-                scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
-                    cur_agg_prob,
-                    sc_im_misfit_score.to(run_config.device, torch.float32),
-                    im_weights,
-                    sc_weights=sc_weights,
-                )
-
-                print(f"wtf")
-
                 cur_sc_result[prob_cols] = einops.rearrange(
                     cur_agg_prob.numpy(force=True), "sc rel im -> (sc rel) im"
                 )
@@ -1735,15 +1776,6 @@ def get_dataset_prediction(
                     im_weights,
                 )
                 assert np.allclose(cur_agg_prob.sum(axis=1).numpy(force=True), 1.0)
-
-                sc_loss, w_sc_loss, loss_2 = compute_single_loss(
-                    cur_agg_prob,
-                    sc_im_misfit_score.to(run_config.device, torch.float32),
-                    im_weights,
-                    sc_weights=sc_weights,
-                )
-
-                print(f"wtf")
 
                 cur_sc_result["prob"] = einops.rearrange(
                     cur_agg_prob.numpy(force=True), "sc rel -> (sc rel)"

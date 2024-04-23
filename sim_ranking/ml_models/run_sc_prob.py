@@ -19,24 +19,51 @@ print(f"Using device: {device.upper()}")
 
 
 def train_model(
-    rel_db_ffp: Path,
-    hyperparams_ffp: Path,
-    rel_corr_dir: Path,
-    n_epochs: int = 10,
-    max_dist: float = 50,
-    per_im_prob: bool = False,
-    debug: bool = False,
-    n_rels: int = None,
-    id_suffix: str = "",
-    data_source: str = None,
-    im_set: str = "all",
-    quiet: bool = False,
-    sample_weighting: sc_prob.SampleWeighting = sc_prob.SampleWeighting.LOTH_BAKER,
-    apply_sc_weighting: bool = False,
-    min_sc_weight: float = 0.5,
-    max_sc_weight: float = 2.0,
-    seed: int = None,
-    out_dir: Path = None,
+    rel_db_ffp: Path = typer.Argument(
+        ...,
+        help="Relative path to the database file with "
+        "respect to $wdata env variable",
+    ),
+    hyperparams_ffp: Path = typer.Argument(
+        ..., help="Path to the hyperparameters file"
+    ),
+    rel_corr_dir: Path = typer.Argument(
+        ...,
+        help="Relative path to the correlation directory "
+        "with respect to $wdata env variable",
+    ),
+    n_epochs: int = typer.Option(10, help="Number of epochs for training"),
+    max_dist: float = typer.Option(
+        50,
+        help="Maximum allowed distance of an observation "
+        "site from the site of interest",
+    ),
+    per_im_prob: bool = typer.Option(
+        False, help="If true the realisation probabilities are computed per IM"
+    ),
+    debug: bool = typer.Option(False, help="Extra debug information"),
+    n_rels: int = typer.Option(None, help="Number of realisations to use"),
+    id_suffix: str = typer.Option("", help="Suffix to add to the output directory"),
+    data_source: str = typer.Option(
+        None, help="Data source to use when selecting data from the specified database"
+    ),
+    im_set: str = typer.Option("all", help="The IM set to use. One of ['all', 'pSA']"),
+    quiet: bool = typer.Option(False),
+    sample_weighting: sc_prob.SampleWeighting = typer.Option(
+        sc_prob.SampleWeighting.LOTH_BAKER,
+        help="Sample weighting method to use when "
+        "aggregating sample predictions for a scenario",
+    ),
+    apply_sc_weighting: bool = typer.Option(
+        False, help="Whether to apply scenario weighting or not"
+    ),
+    min_sc_weight: float = typer.Option(0.5, help="Minimum scenario weight"),
+    max_sc_weight: float = typer.Option(2.0, help="Maximum scenario weight"),
+    l2_prob_penalty: float = typer.Option(
+        default=0.0, help="L2 penalty to discourage sparse realisations probabilities"
+    ),
+    seed: int = typer.Option(None),
+    out_dir: Path = typer.Option(..., help="Output directory"),
 ):
     run_config = sc_prob.RunParamsConfig(
         max_dist,
@@ -48,6 +75,7 @@ def train_model(
         min_sc_weight,
         max_sc_weight,
         sample_weighting,
+        l2_prob_penalty,
         debug,
         device,
         results_dir=out_dir,
