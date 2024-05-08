@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -9,10 +10,12 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import typer
 import seaborn as sns
+from scipy import stats
 
 import st_utils
 import sim_ranking as sr
 import sha_calc as sha
+import ml_tools as mlt
 
 
 @st.cache_data
@@ -23,6 +26,7 @@ def load_site_misfits(cim_results_dir: Path):
 
 def create_pSA_dist_plot(
     ml_results_df: pd.DataFrame,
+    ml_sum_df: pd.DataFrame,
     emp_cim: sr.conditional.ConditionalMVNDistribution,
     sim_cim: sr.conditional.ConditionalMVNDistribution,
     site_int_sims: pd.DataFrame,
@@ -57,20 +61,7 @@ def create_pSA_dist_plot(
     with col3:
         show_ml = st.checkbox("Show ML", value=True, key=f"{tab_type}_ml")
 
-    ## ML - Compute the quantiles
     assert site_int_sims.index.equals(ml_results_df.index)
-    # cdf_x, cdf_y = [], []
-    # for cur_im in sr.constants.PSA_KEYS:
-    #     cur_sort_ind = np.argsort(site_int_sims[cur_im].values)
-    #     cdf_x.append(site_int_sims[cur_im].values[cur_sort_ind])
-    #     cdf_y.append(np.cumsum(ml_results_df.prob.values[cur_sort_ind]))
-    #
-    # cdf_x = pd.DataFrame(np.asarray(cdf_x).T, columns=sr.constants.PSA_KEYS)
-    # cdf_y = pd.DataFrame(np.asarray(cdf_y).T, columns=sr.constants.PSA_KEYS)
-    #
-    # qt_2, qt_16, qt_50, qt_84, qt_98 = sha.query_non_parametric_multi_cdf_invs(
-    #     np.asarray([0.02, 0.16, 0.5, 0.84, 0.98]), cdf_x.T.values, cdf_y.T.values
-    # )
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -224,82 +215,39 @@ def create_pSA_dist_plot(
         )
 
     if show_ml:
-        ## ML Mean
-        if "prob" in ml_results_df:
-            weighted_avg = einops.einsum(
-                ml_results_df.prob.values,
-                np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
-                "i, i j -> j",
-            )
-            weighted_std = np.sqrt(
-                einops.einsum(
-                    ml_results_df.prob.values,
-                    (
-                        np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
-                        - weighted_avg
-                    )
-                    ** 2,
-                    "i, i j -> j",
-                )
-                / np.sum(ml_results_df.prob.values)
-            )
-        else:
-            im_prob_cols = [f"{cur_im}_prob" for cur_im in sr.constants.PSA_KEYS]
-            weighted_avg = einops.einsum(
-                ml_results_df[im_prob_cols].values,
-                np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values),
-                "i j, i j -> j",
-            )
-            weighted_std = np.sqrt(
-                einops.einsum(
-                    ml_results_df[im_prob_cols].values,
-                    (
-                        np.log(site_int_sims.loc[:, sr.constants.PSA_KEYS].values)
-                        - weighted_avg
-                    )
-                    ** 2,
-                    "i j, i j -> j",
-                )
-                / np.sum(ml_results_df[im_prob_cols].values)
-            )
+        im_wavg_cols = mlt.array_utils.numpy_str_join(
+            "_", sr.constants.PSA_KEYS, "wavg"
+        )
+        im_wstd_cols = mlt.array_utils.numpy_str_join(
+            "_", sr.constants.PSA_KEYS, "wstd"
+        )
+        weighted_avg_ln = ml_sum_df.loc[im_wavg_cols].values.astype(float)
+        weighted_std_ln = ml_sum_df.loc[im_wstd_cols].values.astype(float)
 
         ax.semilogx(
             sr.constants.PERIODS,
-            np.exp(weighted_avg),
+            np.exp(weighted_avg_ln),
             label="ML - Mean",
             c="blue",
         )
         ax.fill_between(
             sr.constants.PERIODS,
-            np.exp(weighted_avg + weighted_std),
-            np.exp(weighted_avg - weighted_std),
+            np.exp(weighted_avg_ln + weighted_std_ln),
+            np.exp(weighted_avg_ln - weighted_std_ln),
             alpha=0.4,
             label="ML +/- 1 Std",
             color="lightblue",
         )
         ax.semilogx(
-            sr.constants.PERIODS, np.exp(weighted_avg + weighted_std), c="lightblue"
+            sr.constants.PERIODS,
+            np.exp(weighted_avg_ln + weighted_std_ln),
+            c="lightblue",
         )
         ax.semilogx(
-            sr.constants.PERIODS, np.exp(weighted_avg - weighted_std), c="lightblue"
+            sr.constants.PERIODS,
+            np.exp(weighted_avg_ln - weighted_std_ln),
+            c="lightblue",
         )
-
-        # ML Median and 16-84th
-        # ax.semilogx(sr.constants.PERIODS, qt_50, label="Model - Median", c="blue")
-        # ax.fill_between(
-        #     sr.constants.PERIODS,
-        #     qt_16,
-        #     qt_84,
-        #     alpha=0.4,
-        #     label="Model - 16/84th",
-        #     color="lightblue",
-        # )
-        # ax.semilogx(
-        #     sr.constants.PERIODS, qt_16, c="lightblue", linestyle="--", linewidth=1.0
-        # )
-        # ax.semilogx(
-        #     sr.constants.PERIODS, qt_84, c="lightblue", linestyle="--", linewidth=1.0
-        # )
 
     if high_rels is not None:
         colors = sns.color_palette("dark", len(high_rels))
@@ -475,8 +423,10 @@ def _create_scenario_map(
 
 
 def run_ind_scenario(
-    scenario_results: pd.DataFrame,
-    sample_results: pd.DataFrame,
+    scenario_df: pd.DataFrame,
+    scenario_sum_df: pd.DataFrame,
+    sample_df: pd.DataFrame,
+    sample_sum_df: pd.DataFrame,
     ml_results_dir: Path,
     emp_cim_results_dir: Path,
     sim_cim_results_dir: Path,
@@ -488,7 +438,7 @@ def run_ind_scenario(
     col1, col2 = st.columns([1, 6])
 
     with col1:
-        cur_events = scenario_results.event_id.unique().astype(str)
+        cur_events = scenario_df.event_id.unique().astype(str)
         cur_event = st.selectbox(
             "Event",
             event_df.loc[cur_events]
@@ -498,7 +448,7 @@ def run_ind_scenario(
         )
 
         cur_sites = (
-            scenario_results.loc[scenario_results.event_id == cur_event]
+            scenario_df.loc[scenario_df.event_id == cur_event]
             .site_int.unique()
             .astype(str)
         )
@@ -509,11 +459,9 @@ def run_ind_scenario(
     # Load the cIM results
     cur_emp_cim_results_dir = emp_cim_results_dir / cur_event / "empirical_cMVN"
     cur_emp_cim = st_utils.cim_load_cmvn_result(cur_emp_cim_results_dir)
-    # cur_emp_misfit_df = load_site_misfits(cur_emp_cim_results_dir, cur_event)
 
     cur_sim_cim_results_dir = sim_cim_results_dir / cur_event / "sim_cMVN"
     cur_sim_cim = st_utils.cim_load_cmvn_result(cur_sim_cim_results_dir)
-    # cur_sim_misfit_df = load_site_misfits(cur_sim_cim_results_dir, cur_event)
 
     # Get observed and simulation IM values
     obs_df = st_utils.ml_get_obs_df(ml_results_dir)
@@ -522,13 +470,16 @@ def run_ind_scenario(
     ### Get the relevant data
     # ML - current scenario
     cur_scenario_df = (
-        scenario_results.loc[
-            (scenario_results.event_id == cur_event)
-            & (scenario_results.site_int == cur_site)
+        scenario_df.loc[
+            (scenario_df.event_id == cur_event) & (scenario_df.site_int == cur_site)
         ]
         .set_index("rel_id")
         .sort_index()
     )
+    cur_sc_sum_df = scenario_sum_df.loc[
+        (scenario_sum_df.event_id == cur_event) & (scenario_sum_df.site_int == cur_site)
+    ].squeeze()
+
     # Event realisations
     cur_event_rels = cur_scenario_df.index.unique().astype(str)
     # Observation data at the site of interest
@@ -546,8 +497,8 @@ def run_ind_scenario(
         .sort_index()
     )
     # ML - sample data for the current scenario
-    cur_sample_results = sample_results.loc[
-        (sample_results.event_id == cur_event) & (sample_results.site_int == cur_site)
+    cur_sample_results = sample_df.loc[
+        (sample_df.event_id == cur_event) & (sample_df.site_int == cur_site)
     ]
 
     assert np.all(site_int_sims.index == cur_scenario_df.index)
@@ -573,10 +524,10 @@ def run_ind_scenario(
         fig = _create_pot_sites_map(
             cur_event,
             st_utils.ml_get_site_df(ml_results_dir),
-            scenario_results.loc[scenario_results.event_id == cur_event]
+            scenario_df.loc[scenario_df.event_id == cur_event]
             .site_int.unique()
             .astype(str),
-            sample_results.loc[sample_results.event_id == cur_event]
+            sample_df.loc[sample_df.event_id == cur_event]
             .site_obs.unique()
             .astype(str),
             event_df,
@@ -601,6 +552,7 @@ def run_ind_scenario(
     # Plots
     create_pSA_dist_plot(
         cur_scenario_df,
+        cur_sc_sum_df,
         cur_emp_cim,
         cur_sim_cim,
         site_int_sims,
@@ -622,7 +574,181 @@ def run_ind_scenario(
         f"ML Observation sites used: {cur_sample_results.site_obs.unique().astype(str)}"
     )
 
-    print(f"wtf")
+    ### CDFs
+    with st.expander("CDFs"):
+        meta = st_utils.ml_get_metadata(ml_results_dir)
+        ims = st.multiselect(
+            "IMs",
+            options=meta["run_config"]["ims"],
+            default=["pSA_0.01", "pSA_0.05", "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_5.0"],
+            key=f"{tab_type}_ims_scenario",
+        )
+
+        n_ims = len(ims)
+        n_rows = int(np.ceil(n_ims / 2))
+
+        fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 4))
+        axs = axs.ravel()
+
+        for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
+
+            ### Empirical CIM
+            # Get mu and sigma
+            cur_emp_cim_mu = cur_emp_cim.cond_lnIM_mean_df.loc[cur_site, cur_im]
+            cur_emp_cim_sigma = cur_emp_cim.cond_lnIM_std_df.loc[cur_site, cur_im]
+            # Create values
+            cur_emp_cim_im_values = np.linspace(cur_emp_cim_mu - 4 * cur_emp_cim_sigma,
+                                        cur_emp_cim_mu + 4 * cur_emp_cim_sigma, 100)
+            cur_emp_cim_prob_values = stats.norm.cdf(cur_emp_cim_im_values, cur_emp_cim_mu, cur_emp_cim_sigma)
+
+            ### Simulation based CIM
+            # Get mu and sigma
+            cur_sim_cim_mu = cur_sim_cim.cond_lnIM_mean_df.loc[cur_site, cur_im]
+            cur_sim_cim_sigma = cur_sim_cim.cond_lnIM_std_df.loc[cur_site, cur_im]
+            # Create values
+            cur_sim_cim_im_values = np.linspace(cur_sim_cim_mu - 4 * cur_sim_cim_sigma,
+                                        cur_sim_cim_mu + 4 * cur_sim_cim_sigma, 100)
+            cur_sim_cim_prob_values = stats.norm.cdf(cur_sim_cim_im_values, cur_sim_cim_mu, cur_sim_cim_sigma)
+
+            ### ML
+            # Get values
+            ml_im_values = np.log(site_int_sims[cur_im].values.astype(float))
+            ml_prob_values = cur_scenario_df[f"{cur_im}_prob"]
+            # Sort
+            sort_int = np.argsort(ml_im_values)
+            ml_im_values = ml_im_values[sort_int]
+            ml_cum_prob_values = np.cumsum(ml_prob_values.values[sort_int])
+
+            # Plot
+            cur_ax.plot(cur_emp_cim_im_values, cur_emp_cim_prob_values, label="cIM CDF", c="green")
+            cur_ax.step(ml_im_values, ml_cum_prob_values, label="ML CDF", c="blue")
+            cur_ax.plot(cur_sim_cim_im_values, cur_sim_cim_prob_values, label="Sim-CIM CDF", c="orange")
+
+            if ix == 0:
+                cur_ax.legend()
+
+            if ix % 2 == 0:
+                cur_ax.set_ylabel(f"Probability")
+
+            if ix % 2 == 1:
+                # cur_ax.set_yticklabels([])
+                cur_ax.yaxis.tick_right()
+
+            cur_ax.set_ylim(0.0, 1.0)
+            cur_ax.set_xlim(cur_emp_cim_im_values.min(), cur_emp_cim_im_values.max())
+            cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+            cur_ax.text(
+                0.5,
+                0.95,
+                f"{cur_im}",
+                horizontalalignment="center",
+                verticalalignment="top",
+                transform=cur_ax.transAxes,
+                fontsize=12,
+            )
+
+        fig.tight_layout()
+        fig.subplots_adjust(wspace=0, hspace=0)
+        st.pyplot(fig, use_container_width=False)
+
+
+
+def run_stats_tab(
+    sc_df: pd.DataFrame,
+    sc_sum_df: pd.DataFrame,
+    emp_cim_results_dir: Path,
+    ml_results_dir: Path,
+    tab_type: str,
+):
+    metadata = st_utils.ml_get_metadata(ml_results_dir)
+    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
+
+    run_config = sr.ml.sc_prob.RunParamsConfig.from_dict(metadata["run_config"])
+
+    ks_df, p_df = sr.ml.sc_prob.compute_ks_p_values(
+        sc_df,
+        emp_cim_results_dir,
+        db_ffp,
+        run_config,
+    )
+
+    ims = st.multiselect(
+        "IMs",
+        options=run_config.ims,
+        default=["pSA_0.01", "pSA_0.05", "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_5.0"],
+        key=f"{tab_type}_ims",
+    )
+    n_ims = len(ims)
+    n_rows = int(np.ceil(n_ims / 2))
+
+    if n_ims > 0:
+        with st.expander("KS-Statistic"):
+            fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
+            axs = axs.ravel()
+
+            for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
+                cur_ax.hist(ks_df[cur_im].values, bins=50)
+                cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+                if ix >= 4:
+                    cur_ax.set_xlabel(f"KS-Statisitc")
+                if ix % 2 == 0:
+                    cur_ax.set_ylabel(f"Count")
+
+                if ix % 2 == 1:
+                    # cur_ax.set_yticklabels([])
+                    cur_ax.yaxis.tick_right()
+
+                cur_ax.set_xlim(0, None)
+
+                if ix > 0:
+                    cur_ax.set_ylim(axs[ix - 1].get_ylim())
+
+                cur_ax.text(
+                    0.5,
+                    0.95,
+                    f"{cur_im}",
+                    horizontalalignment="center",
+                    verticalalignment="top",
+                    transform=cur_ax.transAxes,
+                    fontsize=12,
+                )
+
+            fig.tight_layout()
+            fig.subplots_adjust(wspace=0, hspace=0)
+            st.pyplot(fig, use_container_width=False)
+
+        with st.expander("P-Values"):
+            fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
+            axs = axs.ravel()
+
+            for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
+                cur_ax.hist(p_df[cur_im].loc[p_df[cur_im] < 0.1].values, bins=50)
+                cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+                if ix >= 4:
+                    cur_ax.set_xlabel(f"P-Value")
+                if ix % 2 == 0:
+                    cur_ax.set_ylabel(f"Count")
+
+                if ix % 2 == 1:
+                    # cur_ax.set_yticklabels([])
+                    cur_ax.yaxis.tick_right()
+
+                cur_ax.set_xlim(0, None)
+
+                if ix > 0:
+                    cur_ax.set_ylim(axs[ix - 1].get_ylim())
+
+                cur_ax.text(0.5, 0.95, f"{cur_im}", horizontalalignment="center",
+                            verticalalignment="top", transform=cur_ax.transAxes,
+                            fontsize=12)
+
+            fig.tight_layout()
+            fig.subplots_adjust(wspace=0, hspace=0)
+            st.pyplot(fig, use_container_width=False)
+
 
 
 def main(
@@ -635,33 +761,40 @@ def main(
     """Compare the results of the ML, empirical CIM and simulated CIM results"""
     st.set_page_config(layout="wide")
 
-    (ind_scenarios,) = st.tabs(["Individual Scenario"])
+    (ind_scenarios, stats_tab) = st.tabs(["Individual Scenario", "Stats"])
+
+    (
+        train_sc_df,
+        train_sc_sum_df,
+        val_sc_df,
+        val_sc_sum_results,
+    ) = st_utils.ml_load_scenario_results(ml_results_dir)
+    (
+        train_sample_df,
+        train_sample_sum_df,
+        val_sample_df,
+        val_sample_sum_df,
+    ) = st_utils.ml_load_sample_results(ml_results_dir)
+
+    syn_obs_gm_params = (
+        st_utils.load_gm_params(syn_obs_gm_params_ffp)
+        if syn_obs_gm_params_ffp is not None
+        else None
+    )
+    gen_gm_params = (
+        st_utils.load_gm_params(gen_gm_params_ffp)
+        if gen_gm_params_ffp is not None
+        else None
+    )
 
     with ind_scenarios:
-        (
-            train_scenario_results,
-            val_scenario_results,
-        ) = st_utils.ml_load_scenario_results(ml_results_dir)
-        train_sample_results, val_sample_results = st_utils.ml_load_sample_results(
-            ml_results_dir
-        )
-
-        syn_obs_gm_params = (
-            st_utils.load_gm_params(syn_obs_gm_params_ffp)
-            if syn_obs_gm_params_ffp is not None
-            else None
-        )
-        gen_gm_params = (
-            st_utils.load_gm_params(gen_gm_params_ffp)
-            if gen_gm_params_ffp is not None
-            else None
-        )
-
         train_tab, val_tab = st.tabs(["Train", "Validation"])
         with train_tab:
             run_ind_scenario(
-                train_scenario_results,
-                train_sample_results,
+                train_sc_df,
+                train_sc_sum_df,
+                train_sample_df,
+                train_sample_sum_df,
                 ml_results_dir,
                 emp_cim_results_dir,
                 sim_cim_results_dir,
@@ -669,17 +802,38 @@ def main(
                 syn_obs_gm_params=syn_obs_gm_params,
                 gen_gm_params=gen_gm_params,
             )
-
         with val_tab:
             run_ind_scenario(
-                val_scenario_results,
-                val_sample_results,
+                val_sc_df,
+                val_sc_sum_results,
+                val_sample_df,
+                val_sample_sum_df,
                 ml_results_dir,
                 emp_cim_results_dir,
                 sim_cim_results_dir,
                 "val",
                 syn_obs_gm_params=syn_obs_gm_params,
                 gen_gm_params=gen_gm_params,
+            )
+
+    with stats_tab:
+        train_tab, val_tab = st.tabs(["Train", "Validation"])
+        with train_tab:
+            pass
+            run_stats_tab(
+                train_sc_df,
+                train_sc_sum_df,
+                emp_cim_results_dir,
+                ml_results_dir,
+                "train",
+            )
+        with val_tab:
+            run_stats_tab(
+                val_sc_df,
+                val_sc_sum_results,
+                emp_cim_results_dir,
+                ml_results_dir,
+                "val",
             )
 
     print(f"wtf")

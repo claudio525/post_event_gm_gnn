@@ -13,6 +13,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 from torchinfo import summary
 from torchview import draw_graph
+from scipy import stats
 
 import ml_tools as mlt
 import spatial_hazard as sh
@@ -23,6 +24,7 @@ from . import models
 from . import prob
 from ..db import DB
 from .. import constants
+from .. import conditional
 
 
 class SampleWeighting(str, Enum):
@@ -76,6 +78,23 @@ class RunParamsConfig:
             "debug": self.debug,
             "device": self.device,
         }
+
+    @classmethod
+    def from_dict(cls, params: Dict):
+        return RunParamsConfig(
+            params["max_dist"],
+            params["n_rels"],
+            params["ims"],
+            np.asarray(params["im_weights"]),
+            params["per_im_prob"],
+            params["apply_sc_weighting"],
+            params["min_sc_weight"],
+            params["max_sc_weight"],
+            SampleWeighting(params["sample_weighting_method"]),
+            params["l2_prob_penalty"],
+            params["debug"],
+            params["device"],
+        )
 
 
 @dataclass
@@ -1184,7 +1203,9 @@ def get_batch_results(
         # if run_config.per_im_prob:
         #     l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(torch.sum(pred ** 2, dim=1))
         # else:
-        l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(torch.sum(pred ** 2, dim=1))
+        l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(
+            torch.sum(pred ** 2, dim=1)
+        )
         loss = loss + l2_prob_penalty
 
     return (
@@ -1260,6 +1281,7 @@ def train(
             "max": torch.abs(grad).max().item(),
             "norm": grad.norm().item(),
         }
+
     if run_config.debug:
         grad_df = pd.DataFrame(columns=["epoch", "shape", "min", "max", "norm"])
         for param in prob_model.parameters():
@@ -1365,7 +1387,9 @@ def train(
             if hp_config.l1_reg > 0:
                 metrics["l1_reg_hist_train"][epoch_ix] += l1_reg.item()
             if run_config.l2_prob_penalty > 0:
-                metrics["l2_prob_penalty_hist_train"][epoch_ix] += l2_prob_penalty.item()
+                metrics["l2_prob_penalty_hist_train"][
+                    epoch_ix
+                ] += l2_prob_penalty.item()
 
         metrics["loss_hist_train"][epoch_ix] /= len(train_dataloader)
         metrics["unweighted_loss_hist_train"][epoch_ix] /= len(train_dataloader)
@@ -1443,7 +1467,9 @@ def train(
                 if hp_config.l1_reg > 0:
                     metrics["l1_reg_hist_val"][epoch_ix] += l1_reg.item()
                 if run_config.l2_prob_penalty > 0:
-                    metrics["l2_prob_penalty_hist_val"][epoch_ix] += l2_prob_penalty.item()
+                    metrics["l2_prob_penalty_hist_val"][
+                        epoch_ix
+                    ] += l2_prob_penalty.item()
 
             metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
             metrics["unweighted_loss_hist_val"][epoch_ix] /= len(val_dataloader)
@@ -2126,3 +2152,185 @@ def compute_scenario_distribution(
         columns=["event_id", "site_int", "loss", "n_sites", "min_s2s_distance"],
     )
     return scenario_sum_df, scenario_df
+
+
+def load_emp_cim_data(data_dir: Path, event: str):
+    """Loads the empirical conditional IM data for the given event"""
+    result_ffp = data_dir / event / "empirical_cMVN/cMVN_distributions.pickle"
+    if result_ffp.exists():
+        return conditional.ConditionalMVNDistribution.load(result_ffp)
+    return None
+
+
+def compute_ks_p_values(
+    sc_df: pd.DataFrame,
+    emp_cim_dir: Path,
+    db_ffp: Path,
+    run_config: RunParamsConfig,
+):
+    """
+    Computes the KS statistics and p-values for
+    the given scenario results with respect to the
+    specified empirical conditional IM distribution
+    results
+
+    Parameters
+    ----------
+    sc_df: pd.DataFrame
+        The scenario results dataframe
+    emp_cim_dir: Path
+    db_ffp: Path
+    run_config: RunParamsConfig
+
+    Returns
+    -------
+    ks_df: pd.DataFrame
+    p_df: pd.DataFrame
+        The KS statistic/p-value for every event/site_int combination
+    """
+    db = DB(db_ffp)
+
+    im_cols = run_config.ims
+    im_prob_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "prob")
+
+    events = sc_df.event_id.unique().astype(str)
+
+    ks_dfs, p_dfs = [], []
+    for cur_event in events:
+        cur_df = sc_df.loc[sc_df.event_id == cur_event].sort_index()
+        cur_sites = cur_df.site_int.unique().astype(str)
+
+        # Load the cIM data
+        cur_emp_cim = load_emp_cim_data(emp_cim_dir, cur_event)
+        if cur_emp_cim is None:
+            print(f"Skipping event {cur_event} as no cIM data found")
+            continue
+
+        # Get the IM values
+        cur_ml_im_df = db.get_sim_data(cur_event, cur_sites).sort_index()
+
+        # Rearrange arrays to be (site, rel, im)
+        cur_ml_im_values = np.log(
+            einops.rearrange(
+                cur_ml_im_df[im_cols].values,
+                "(site rel) im -> rel site im",
+                rel=run_config.n_rels,
+            )
+        )
+        cur_ml_prob_values = einops.rearrange(
+            cur_df[im_prob_cols].values,
+            "(site rel) im -> rel site im",
+            rel=run_config.n_rels,
+        )
+        # Sort by IM values
+        cur_sort_ind = np.argsort(cur_ml_im_values, axis=0)
+        cur_ml_im_values = np.take_along_axis(cur_ml_im_values, cur_sort_ind, axis=0)
+        cur_ml_prob_values = np.take_along_axis(
+            cur_ml_prob_values, cur_sort_ind, axis=0
+        )
+
+        # Cumulative sum
+        cur_ml_cum_prob_values = np.cumsum(cur_ml_prob_values, axis=0)
+
+        # Get the cIM mean & std values
+        cur_cim_mu = cur_emp_cim.cond_lnIM_mean_df.loc[cur_sites, im_cols].values
+        cur_cim_sigma = cur_emp_cim.cond_lnIM_std_df.loc[cur_sites, im_cols].values
+
+        # Get the cIM CDF values
+        cur_cim_cdf = stats.norm.cdf(cur_ml_im_values, cur_cim_mu, cur_cim_sigma)
+
+        # Compute the KS statistics
+        ks_stats = np.max(
+            np.abs(cur_cim_cdf - cur_ml_cum_prob_values), axis=0
+        ) * np.sqrt(run_config.n_rels)
+
+        # Compute the p-value
+        p_value = stats.kstwobign.sf(ks_stats)
+
+        # Create the dataframes
+        cur_index = mlt.array_utils.numpy_str_join("_", cur_event, cur_sites)
+        cur_ks_df = pd.DataFrame(index=cur_index, columns=im_cols, data=ks_stats)
+        cur_p_df = pd.DataFrame(index=cur_index, columns=im_cols, data=p_value)
+        cur_ks_df["event_id"] = cur_p_df["event"] = cur_event
+        cur_ks_df["site_int"] = cur_p_df["site_int"] = cur_sites
+        ks_dfs.append(cur_ks_df)
+        p_dfs.append(cur_p_df)
+
+    ks_df = pd.concat(ks_dfs, axis=0)
+    p_df = pd.concat(p_dfs, axis=0)
+
+    return ks_df, p_df
+
+
+def compute_mean_std_residuals_wrt_emp(
+    sc_sum_df: pd.DataFrame,
+    emp_cim_dir: Path,
+    run_config: RunParamsConfig,
+):
+    """
+    Computes the residual between the mean and
+    standard deviation of the conditional IM and ML
+    based method
+
+    Parameters
+    ----------
+    sc_sum_df: pd.DataFrame
+        Summary scenario results dataframe
+    emp_cim_dir: Path
+        The directory containing the empirical conditional IM data
+    run_config: RunParamsConfig
+
+    Returns
+    -------
+    mean_residuals: pd.DataFrame
+    std_residuals: pd.DataFrame
+    """
+    im_wavg_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "wavg")
+    im_wstd_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "wstd")
+
+    events = sc_sum_df.event_id.unique().astype(str)
+
+    mean_residuals, std_residuals = [], []
+    for cur_event in events:
+        # Load the cIM data
+        cur_emp_cim = load_emp_cim_data(emp_cim_dir, cur_event)
+        if cur_emp_cim is None:
+            print(f"Skipping event {cur_event} as no cIM data found")
+            continue
+
+        cur_sc_sum_df = (
+            sc_sum_df[sc_sum_df["event_id"] == cur_event]
+            .set_index("site_int")
+            .sort_index()
+        )
+        cur_sites = cur_sc_sum_df.index.values.astype(str)
+
+        # Mean residual
+        cur_ml_mean_df = cur_sc_sum_df[im_wavg_cols]
+        cur_emp_cim_mean_df = cur_emp_cim.cond_lnIM_mean_df.loc[
+            cur_sites, run_config.ims
+        ]
+        assert np.all(cur_ml_mean_df.index == cur_emp_cim_mean_df.index)
+
+        cur_mean_residuals = pd.DataFrame(
+            data=cur_emp_cim_mean_df[run_config.ims].values
+            - cur_ml_mean_df[im_wavg_cols].values,
+            index=mlt.array_utils.numpy_str_join("_", cur_event, cur_sites),
+            columns=run_config.ims,
+        )
+        mean_residuals.append(cur_mean_residuals)
+
+        # Std residual
+        cur_ml_std_df = cur_sc_sum_df[im_wstd_cols]
+        cur_emp_cim_std_df = cur_emp_cim.cond_lnIM_std_df.loc[cur_sites, run_config.ims]
+        assert np.all(cur_ml_std_df.index == cur_emp_cim_std_df.index)
+
+        cur_std_residuals = pd.DataFrame(
+            data=cur_emp_cim_std_df[run_config.ims].values
+            - cur_ml_std_df[im_wstd_cols].values,
+            index=mlt.array_utils.numpy_str_join("_", cur_event, cur_sites),
+            columns=run_config.ims,
+        )
+        std_residuals.append(cur_std_residuals)
+
+    return pd.concat(mean_residuals, axis=0), pd.concat(std_residuals, axis=0)

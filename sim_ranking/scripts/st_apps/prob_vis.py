@@ -243,6 +243,24 @@ def _create_event_map(
     return fig
 
 
+def gen_pSA_std_plot(result_dir: Path, sum_result_df: pd.DataFrame):
+    cols = mlt.array_utils.numpy_str_join("_", sr.constants.PSA_KEYS, "wstd")
+
+
+    fig, ax = plt.subplots(figsize=(12, 3))
+
+    ax.semilogx(sr.constants.PERIODS, sum_result_df.loc[cols].values, label="Weighted std")
+
+    ax.set_xlim([0.01, 10])
+    ax.set_ylim([0, 1])
+    ax.set_ylabel(f"Weighted Standard Deviation")
+    ax.set_xlabel(f"Period (s)")
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+    st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
+
+
 def gen_rel_prob_plot(result_df: pd.DataFrame):
     fig, ax = plt.subplots(figsize=(12, 3))
 
@@ -328,6 +346,7 @@ def _scenario_viewer(
         st.markdown(f"Magnitude: {event_df.loc[event].mag}")
 
         plot_rels = st.checkbox("Plot Realisations", value=False, key=f"{tab_type}_plot_rels")
+        show_std = st.checkbox("Show Standard Deviation", value=True, key=f"{tab_type}_show_std")
 
     with col2:
         fig = _create_event_map(
@@ -406,7 +425,10 @@ def _scenario_viewer(
         else None
     )
 
-    gen_rel_prob_plot(cur_scenario_df)
+    if show_std:
+        gen_pSA_std_plot(results_dir, cur_sc_sum_df)
+    else:
+        gen_rel_prob_plot(cur_scenario_df)
 
     create_pSA_dist_plot(
         results_dir,
@@ -469,9 +491,17 @@ def _scenario_viewer(
                     cur_obs_sites_df.loc[cur_obs_site, weight_cols].to_frame().T
                 )
 
-            gen_rel_prob_plot(
-                cur_sample_results.loc[cur_sample_results.site_obs == cur_obs_site]
-            )
+            if show_std:
+                gen_pSA_std_plot(
+                    results_dir,
+                    cur_sample_sum_results.loc[
+                        cur_sample_sum_results.site_obs == cur_obs_site
+                    ].squeeze()
+                )
+            else:
+                gen_rel_prob_plot(
+                    cur_sample_results.loc[cur_sample_results.site_obs == cur_obs_site]
+                )
 
             create_pSA_dist_plot(
                 results_dir,
@@ -928,8 +958,6 @@ def create_pSA_dist_plot(
             label="Rel +/- 1 Std (Per IM)",
             color="lightgreen",
         )
-
-    print(f"wtf")
 
     if site_obs_obs is not None:
         ax.semilogx(
