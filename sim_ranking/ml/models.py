@@ -8,38 +8,6 @@ import numpy as np
 import einops
 
 
-class PairWiseModel(nn.Module):
-    def __init__(
-        self,
-        fc_units: List[int],
-        n_scalar_inputs: int,
-        n_ims: int,
-    ):
-        super().__init__()
-
-        self.n_fc_layers = len(fc_units)
-
-        fc_input_size = (5 * n_ims) + n_scalar_inputs
-        self.fc_layers = nn.Sequential()
-        for i in range(len(fc_units)):
-            if i == 0:
-                self.fc_layers.append(nn.Linear(fc_input_size, fc_units[i]))
-            else:
-                self.fc_layers.append(nn.Linear(fc_units[i - 1], fc_units[i]))
-
-            self.fc_layers.append(nn.ELU())
-
-        self.fc_layers.append(nn.Linear(self.fc_layers[-2].out_features, 1))
-        # self.fc_layers.append(nn.Sigmoid())
-
-    def forward(self, im_values: torch.Tensor, scalar_values: torch.Tensor):
-        # Flatten
-        im_values = torch.reshape(im_values, (im_values.shape[0], -1))
-        x = torch.cat((im_values, scalar_values), 1)
-
-        return self.fc_layers(x)
-
-
 class ProbModel(nn.Module):
     """Base class, don't use directly"""
 

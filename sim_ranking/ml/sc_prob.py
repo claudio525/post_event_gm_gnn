@@ -9,6 +9,7 @@ import einops
 import numpy as np
 import pandas as pd
 import torch
+from torch import nn
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from torchinfo import summary
@@ -21,7 +22,7 @@ import spatial_hazard as sh
 from . import data as ml_data
 from . import features
 from . import models
-from . import prob
+from . import utils
 from ..db import DB
 from .. import constants
 from .. import conditional
@@ -759,7 +760,7 @@ class SCProbDataset(Dataset):
 def create_indRelModel(
     hp_config: HyperParamsConfig,
     scalar_features: ml_data.ScalarFeatures,
-    run_config: prob.RunParamsConfig,
+    run_config: RunParamsConfig,
 ):
 
     prob_model = models.ProbIndModel(
@@ -1265,10 +1266,10 @@ def train(
         )
 
     # Setup dataloaders
-    train_dataloader = prob.CustomTabularDataLoader(
+    train_dataloader = utils.CustomTabularDataLoader(
         train_dataset, hp_config.batch_size, True, shuffle_rels=False
     )
-    val_dataloader = prob.CustomTabularDataLoader(
+    val_dataloader = utils.CustomTabularDataLoader(
         val_dataset, hp_config.batch_size, True, shuffle_rels=False
     )
 
@@ -1324,7 +1325,7 @@ def train(
             im_misfit_score,
             im_site_corrs,
         ) in enumerate(iter_loop):
-            pred = prob.get_prediction(
+            pred = get_prediction(
                 prob_model,
                 site_obs_norm_obs_ims,
                 site_int_norm_sim_ims,
@@ -1419,7 +1420,7 @@ def train(
                 im_misfit_score,
                 im_site_corrs,
             ) in enumerate(val_dataloader):
-                pred = prob.get_prediction(
+                pred = get_prediction(
                     prob_model,
                     site_obs_norm_obs_ims,
                     site_int_norm_sim_ims,
@@ -1492,6 +1493,77 @@ def train(
 
     return metrics, best_model_state, best_model_epoch
 
+def get_prediction(
+    prob_model: nn.Module,
+    site_obs_norm_obs_ims: torch.Tensor,
+    site_int_norm_sim_ims: torch.Tensor,
+    site_obs_norm_sim_ims: torch.Tensor,
+    site_obs_obs_ims: torch.Tensor,
+    site_int_sim_ims: torch.Tensor,
+    site_obs_sim_ims: torch.Tensor,
+    scalar_features: torch.Tensor,
+    # obs_site_misfit_score: torch.Tensor,
+    run_config: RunParamsConfig,
+    hp_config: HyperParamsConfig,
+):
+    # Pre-allocate IM tensor on device
+    im_tensor = torch.full(
+        (
+            site_obs_norm_obs_ims.shape[0],
+            hp_config.n_im_features,
+            run_config.n_rels,
+            len(run_config.ims),
+        ),
+        torch.nan,
+        dtype=torch.float32,
+        device=run_config.device,
+        requires_grad=False,
+    )
+    ix = 0
+
+    if hp_config.use_im_obs_site_obs:
+        # Need observed value (at observation site) per realisation
+        im_tensor[:, ix, :, :] = site_obs_norm_obs_ims = einops.repeat(
+            site_obs_norm_obs_ims[:, None, :],
+            "batch rel im -> batch (n_rels rel) im",
+            n_rels=run_config.n_rels,
+        )
+        ix += 1
+
+    if hp_config.use_im_sim_site_obs:
+        im_tensor[:, ix, :, :] = site_obs_norm_sim_ims
+        ix += 1
+
+    if hp_config.use_im_sim_site_int:
+        im_tensor[:, ix, :, :] = site_int_norm_sim_ims
+        ix += 1
+
+    if hp_config.use_res_site_obs:
+        im_tensor[:, ix, :, :] = site_obs_obs_ims[:, None, :] - site_obs_sim_ims
+        ix += 1
+
+    if hp_config.use_res_sim_site_obs_sim_site_int:
+        im_tensor[:, ix, :, :] = site_obs_sim_ims - site_int_sim_ims
+        ix += 1
+
+    if hp_config.use_res_obs_site_obs_sim_site_int:
+        im_tensor[:, ix, :, :] = site_obs_obs_ims[:, None, :] - site_int_sim_ims
+        ix += 1
+
+    scalar_features = einops.repeat(
+        scalar_features, "batch ss -> batch rel ss", rel=run_config.n_rels
+    )
+    # if hp_config.use_obs_site_misfit_score:
+    #     scalar_features = torch.cat(
+    #         [scalar_features, obs_site_misfit_score[..., None]], dim=2
+    #     )
+
+    scalar_features = scalar_features.to(
+        run_config.device, dtype=torch.float32, non_blocking=True
+    )
+
+    return prob_model(im_tensor, scalar_features)
+
 
 def get_dataset_prediction(
     dataset: SCProbDataset,
@@ -1501,7 +1573,7 @@ def get_dataset_prediction(
     dist_matrix: pd.DataFrame,
     hp_config: HyperParamsConfig,
 ):
-    pred_dataloader = prob.CustomTabularDataLoader(
+    pred_dataloader = utils.CustomTabularDataLoader(
         dataset, hp_config.batch_size, shuffle=False, shuffle_rels=False
     )
 
@@ -1593,7 +1665,7 @@ def get_dataset_prediction(
             ) = dataset.get_metadata(batch_ind, rel_shuffle_ind)
 
             # Predictions
-            pred = prob.get_prediction(
+            pred = get_prediction(
                 prob_model,
                 site_obs_norm_obs_ims,
                 site_int_norm_sim_ims,
@@ -2424,3 +2496,5 @@ def compute_mean_std_residuals_wrt_emp(
         std_residuals.append(cur_std_residuals)
 
     return pd.concat(mean_residuals, axis=0), pd.concat(std_residuals, axis=0)
+
+

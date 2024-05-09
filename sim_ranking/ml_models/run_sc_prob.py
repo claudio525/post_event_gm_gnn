@@ -3,11 +3,9 @@ from pathlib import Path
 
 import torch
 import numpy as np
-import pandas as pd
 import typer
 
 import sim_ranking as sr
-import sim_ranking.ml.prob as prob
 import sim_ranking.ml.sc_prob as sc_prob
 
 
