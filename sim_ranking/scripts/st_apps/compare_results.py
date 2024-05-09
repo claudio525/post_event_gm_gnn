@@ -437,6 +437,15 @@ def run_ind_scenario(
     event_df = st_utils.ml_get_event_df(ml_results_dir)
     col1, col2 = st.columns([1, 6])
 
+    metadata = st_utils.ml_get_metadata(ml_results_dir)
+
+    (
+        mean_ml_emp_cIM_residuals,
+        std_ml_emp_cIM_residuals,
+    ) = sr.ml.sc_prob.compute_mean_std_residuals_wrt_emp(
+        scenario_sum_df, emp_cim_results_dir, metadata["run_config"]["ims"]
+    )
+
     with col1:
         cur_events = scenario_df.event_id.unique().astype(str)
         cur_event = st.selectbox(
@@ -466,6 +475,15 @@ def run_ind_scenario(
     # Get observed and simulation IM values
     obs_df = st_utils.ml_get_obs_df(ml_results_dir)
     sim_df = st_utils.ml_get_sim_data(ml_results_dir, cur_event)
+
+    # Get residuals wrt observed
+    ml_obs_residuals, emp_cIM_obs_residuals, sim_cIM_obs_residuals = get_obs_residuals(
+        scenario_sum_df,
+        st_utils.ml_get_db_ffp(ml_results_dir),
+        metadata["run_config"]["ims"],
+        emp_cim_results_dir,
+        sim_cim_results_dir,
+    )
 
     ### Get the relevant data
     # ML - current scenario
@@ -580,7 +598,14 @@ def run_ind_scenario(
         ims = st.multiselect(
             "IMs",
             options=meta["run_config"]["ims"],
-            default=["pSA_0.01", "pSA_0.05", "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_5.0"],
+            default=[
+                "pSA_0.01",
+                "pSA_0.05",
+                "pSA_0.1",
+                "pSA_0.5",
+                "pSA_1.0",
+                "pSA_5.0",
+            ],
             key=f"{tab_type}_ims_scenario",
         )
 
@@ -597,18 +622,28 @@ def run_ind_scenario(
             cur_emp_cim_mu = cur_emp_cim.cond_lnIM_mean_df.loc[cur_site, cur_im]
             cur_emp_cim_sigma = cur_emp_cim.cond_lnIM_std_df.loc[cur_site, cur_im]
             # Create values
-            cur_emp_cim_im_values = np.linspace(cur_emp_cim_mu - 4 * cur_emp_cim_sigma,
-                                        cur_emp_cim_mu + 4 * cur_emp_cim_sigma, 100)
-            cur_emp_cim_prob_values = stats.norm.cdf(cur_emp_cim_im_values, cur_emp_cim_mu, cur_emp_cim_sigma)
+            cur_emp_cim_im_values = np.linspace(
+                cur_emp_cim_mu - 4 * cur_emp_cim_sigma,
+                cur_emp_cim_mu + 4 * cur_emp_cim_sigma,
+                100,
+            )
+            cur_emp_cim_prob_values = stats.norm.cdf(
+                cur_emp_cim_im_values, cur_emp_cim_mu, cur_emp_cim_sigma
+            )
 
             ### Simulation based CIM
             # Get mu and sigma
             cur_sim_cim_mu = cur_sim_cim.cond_lnIM_mean_df.loc[cur_site, cur_im]
             cur_sim_cim_sigma = cur_sim_cim.cond_lnIM_std_df.loc[cur_site, cur_im]
             # Create values
-            cur_sim_cim_im_values = np.linspace(cur_sim_cim_mu - 4 * cur_sim_cim_sigma,
-                                        cur_sim_cim_mu + 4 * cur_sim_cim_sigma, 100)
-            cur_sim_cim_prob_values = stats.norm.cdf(cur_sim_cim_im_values, cur_sim_cim_mu, cur_sim_cim_sigma)
+            cur_sim_cim_im_values = np.linspace(
+                cur_sim_cim_mu - 4 * cur_sim_cim_sigma,
+                cur_sim_cim_mu + 4 * cur_sim_cim_sigma,
+                100,
+            )
+            cur_sim_cim_prob_values = stats.norm.cdf(
+                cur_sim_cim_im_values, cur_sim_cim_mu, cur_sim_cim_sigma
+            )
 
             ### ML
             # Get values
@@ -620,9 +655,19 @@ def run_ind_scenario(
             ml_cum_prob_values = np.cumsum(ml_prob_values.values[sort_int])
 
             # Plot
-            cur_ax.plot(cur_emp_cim_im_values, cur_emp_cim_prob_values, label="cIM CDF", c="green")
+            cur_ax.plot(
+                cur_emp_cim_im_values,
+                cur_emp_cim_prob_values,
+                label="cIM CDF",
+                c="green",
+            )
             cur_ax.step(ml_im_values, ml_cum_prob_values, label="ML CDF", c="blue")
-            cur_ax.plot(cur_sim_cim_im_values, cur_sim_cim_prob_values, label="Sim-CIM CDF", c="orange")
+            cur_ax.plot(
+                cur_sim_cim_im_values,
+                cur_sim_cim_prob_values,
+                label="Sim-CIM CDF",
+                c="orange",
+            )
 
             if ix == 0:
                 cur_ax.legend()
@@ -652,12 +697,149 @@ def run_ind_scenario(
         fig.subplots_adjust(wspace=0, hspace=0)
         st.pyplot(fig, use_container_width=False)
 
+    cur_mean_ml_emp_cIM_residuals = mean_ml_emp_cIM_residuals.loc[
+        (mean_ml_emp_cIM_residuals.event_id == cur_event)
+        & (mean_ml_emp_cIM_residuals.site_int == cur_site)
+    ].squeeze()
+    cur_std_ml_emp_cIM_residuals = std_ml_emp_cIM_residuals.loc[
+        (std_ml_emp_cIM_residuals.event_id == cur_event)
+        & (std_ml_emp_cIM_residuals.site_int == cur_site)
+    ].squeeze()
+    with st.expander("ML-Emp cIM Residual"):
+        fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(12, 6))
+
+        # Mean
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            cur_mean_ml_emp_cIM_residuals[sr.constants.PSA_KEYS].values,
+            label="$\mu_{emp} - \mu_{ML}$",
+        )
+
+        ax1.set_title(f"Mean Residuals")
+        ax1.set_xlabel(f"Period (s)")
+        ax1.set_ylabel(f"Residual (lnIM_emp - lnIM_ml)")
+        ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+        ax1.set_xlim(0.01, 10)
+        ax1.set_ylim(-1, 1)
+
+        ax1.legend()
+
+        # Std
+        ax2.semilogx(
+            sr.constants.PERIODS,
+            cur_std_ml_emp_cIM_residuals[sr.constants.PSA_KEYS].values,
+            label="$\sigma_{emp} - \sigma_{ML}$",
+        )
+
+        ax2.set_title(f"Std Residuals")
+        ax2.set_xlabel(f"Period (s)")
+        ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        ax2.yaxis.tick_right()
+
+        ax2.set_xlim(0.01, 10)
+        ax2.set_ylim(-1, 1)
+
+        fig.tight_layout()
+        fig.subplots_adjust(wspace=0.05)
+        st.pyplot(fig, use_container_width=False)
+
+    cur_ml_obs_residuals = ml_obs_residuals.loc[
+        (ml_obs_residuals.event_id == cur_event)
+        & (ml_obs_residuals.site_int == cur_site)
+    ].squeeze()
+    cur_emp_cIM_obs_residuals = emp_cIM_obs_residuals.loc[
+        (emp_cIM_obs_residuals.event_id == cur_event)
+        & (emp_cIM_obs_residuals.site_int == cur_site)
+    ].squeeze()
+    cur_sim_cIM_obs_residuals = sim_cIM_obs_residuals.loc[
+        (sim_cIM_obs_residuals.event_id == cur_event)
+        & (sim_cIM_obs_residuals.site_int == cur_site)
+    ].squeeze()
+    with st.expander("Residuals wrt. Observed"):
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+
+        # Mean
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            cur_ml_obs_residuals[sr.constants.PSA_KEYS].values,
+            label="$\ln_{IM}^{Obs} - \mu_{ML}$",
+        )
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            cur_emp_cIM_obs_residuals[sr.constants.PSA_KEYS].values,
+            label="$\ln_{IM}^{Obs} - \mu_{emp}$",
+        )
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            cur_sim_cIM_obs_residuals[sr.constants.PSA_KEYS].values,
+            label="$\ln_{IM}^{Obs} - \mu_{sim}$",
+        )
+
+        ax1.set_title(f"Residuals - {cur_site}")
+        ax1.set_xlabel(f"Period (s)")
+        ax1.set_ylabel(f"Residual")
+        ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+        ax1.set_xlim(0.01, 10)
+        ax1.set_ylim(-2, 2)
+
+        ax1.legend()
+
+        fig.tight_layout()
+        st.pyplot(fig, use_container_width=False)
+
+
+@st.cache_data
+def get_obs_residuals(
+    sc_df: pd.DataFrame,
+    db_ffp: Path,
+    ims: np.ndarray,
+    emp_cim_results_dir: Path,
+    sim_cim_results_dir: Path,
+):
+    ml_obs_residuals = sr.ml.sc_prob.compute_ml_residuals_wrt_obs(sc_df, db_ffp, ims)
+
+    emp_cIM_obs_residuals = sr.ml.sc_prob.compute_cIM_residuals_wrt_obs(
+        emp_cim_results_dir, db_ffp, sr.constants.RankingMethod.emp_cMVN, ims
+    )
+
+    sim_cIM_obs_residuals = sr.ml.sc_prob.compute_cIM_residuals_wrt_obs(
+        sim_cim_results_dir, db_ffp, sr.constants.RankingMethod.sim_cMVN, ims
+    )
+
+    index_intersection = np.intersect1d(
+        np.intersect1d(
+            ml_obs_residuals.index.values.astype(str),
+            emp_cIM_obs_residuals.index.values.astype(str),
+        ),
+        sim_cIM_obs_residuals.index.values.astype(str),
+    )
+
+    ml_obs_residuals = ml_obs_residuals.loc[index_intersection]
+    emp_cIM_obs_residuals = emp_cIM_obs_residuals.loc[index_intersection]
+    sim_cIM_obs_residuals = sim_cIM_obs_residuals.loc[index_intersection]
+
+    return ml_obs_residuals, emp_cIM_obs_residuals, sim_cIM_obs_residuals
+
+
+@st.cache_data
+def get_ml_emp_cIM_residuals(
+    sc_sum_df: pd.DataFrame, emp_cim_dir: Path, ims: np.ndarray
+):
+    (
+        mean_ml_residual_emp_cIM,
+        std_ml_residuals_emp_cIM,
+    ) = sr.ml.sc_prob.compute_mean_std_residuals_wrt_emp(sc_sum_df, emp_cim_dir, ims)
+
+    return mean_ml_residual_emp_cIM, std_ml_residuals_emp_cIM
 
 
 def run_stats_tab(
     sc_df: pd.DataFrame,
     sc_sum_df: pd.DataFrame,
     emp_cim_results_dir: Path,
+    sim_cim_results_dir: Path,
     ml_results_dir: Path,
     tab_type: str,
 ):
@@ -671,6 +853,16 @@ def run_stats_tab(
         emp_cim_results_dir,
         db_ffp,
         run_config,
+    )
+
+    # Get residuals wrt observed
+    ml_obs_residuals, emp_cIM_obs_residuals, sim_cIM_obs_residuals = get_obs_residuals(
+        sc_sum_df, db_ffp, run_config.ims, emp_cim_results_dir, sim_cim_results_dir
+    )
+
+    # Get ML residuals wrt empirical cIM
+    mean_ml_residual_emp_cIM, std_ml_residuals_emp_cIM = get_ml_emp_cIM_residuals(
+        sc_sum_df, emp_cim_results_dir, run_config.ims
     )
 
     ims = st.multiselect(
@@ -741,14 +933,266 @@ def run_stats_tab(
                 if ix > 0:
                     cur_ax.set_ylim(axs[ix - 1].get_ylim())
 
-                cur_ax.text(0.5, 0.95, f"{cur_im}", horizontalalignment="center",
-                            verticalalignment="top", transform=cur_ax.transAxes,
-                            fontsize=12)
+                cur_ax.text(
+                    0.5,
+                    0.95,
+                    f"{cur_im}",
+                    horizontalalignment="center",
+                    verticalalignment="top",
+                    transform=cur_ax.transAxes,
+                    fontsize=12,
+                )
 
             fig.tight_layout()
             fig.subplots_adjust(wspace=0, hspace=0)
             st.pyplot(fig, use_container_width=False)
 
+    with st.expander("Residuals wrt. Observed"):
+        if n_ims > 0:
+            n_rows = n_ims
+            fig, axs = plt.subplots(n_rows, 3, figsize=(14, n_rows * 6), sharex=True)
+
+            bins = np.linspace(-2.0, 2.0, 50)
+
+            y_max = 0
+            for ix, (cur_im, (cur_ax1, cur_ax2, cur_ax3)) in enumerate(zip(ims, axs)):
+                cur_ax1.hist(ml_obs_residuals[cur_im].values, bins=bins)
+                cur_ax1.axvline(
+                    np.mean(ml_obs_residuals[cur_im].values), color="r", linestyle="--"
+                )
+                cur_ax1.axvline(0, color="k", linestyle="-")
+                cur_ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+                cur_ax2.hist(emp_cIM_obs_residuals[cur_im].values, bins=bins)
+                cur_ax2.axvline(
+                    np.mean(emp_cIM_obs_residuals[cur_im].values),
+                    color="r",
+                    linestyle="--",
+                )
+                cur_ax2.axvline(0, color="k", linestyle="-")
+                cur_ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+                cur_ax3.hist(sim_cIM_obs_residuals[cur_im].values, bins=bins)
+                cur_ax3.axvline(
+                    np.mean(sim_cIM_obs_residuals[cur_im].values),
+                    color="r",
+                    linestyle="--",
+                )
+                cur_ax3.axvline(0, color="k", linestyle="-")
+                cur_ax3.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+                if ix == 0:
+                    cur_ax1.set_xlim(-2.0, 2.0)
+
+                y_max = max(y_max, cur_ax1.get_ylim()[1], cur_ax2.get_ylim()[1])
+
+                cur_ax2.yaxis.tick_right()
+
+                cur_ax1.text(
+                    0.01,
+                    0.98,
+                    f"ML-Obs Residuals",
+                    horizontalalignment="left",
+                    verticalalignment="top",
+                    transform=cur_ax1.transAxes,
+                    fontsize=12,
+                )
+                cur_ax1.text(
+                    0.98,
+                    0.98,
+                    f"{cur_im}",
+                    horizontalalignment="right",
+                    verticalalignment="top",
+                    transform=cur_ax1.transAxes,
+                    fontsize=12,
+                )
+                cur_ax1.text(
+                    0.01,
+                    0.94,
+                    f"Mean: {np.mean(ml_obs_residuals[cur_im].values):.2f}, Std: {np.std(ml_obs_residuals[cur_im].values):.2f}",
+                    horizontalalignment="left",
+                    verticalalignment="top",
+                    transform=cur_ax1.transAxes,
+                    fontsize=12,
+                )
+
+                cur_ax2.text(
+                    0.01,
+                    0.98,
+                    f"Emp cIM Residuals",
+                    horizontalalignment="left",
+                    verticalalignment="top",
+                    transform=cur_ax2.transAxes,
+                    fontsize=12,
+                )
+                cur_ax2.text(
+                    0.01,
+                    0.94,
+                    f"Mean: {np.mean(emp_cIM_obs_residuals[cur_im].values):.2f}, Std: {np.std(emp_cIM_obs_residuals[cur_im].values):.2f}",
+                    horizontalalignment="left",
+                    verticalalignment="top",
+                    transform=cur_ax2.transAxes,
+                    fontsize=12,
+                )
+
+                cur_ax3.text(
+                    0.01,
+                    0.98,
+                    f"Sim cIM Residuals",
+                    horizontalalignment="left",
+                    verticalalignment="top",
+                    transform=cur_ax3.transAxes,
+                    fontsize=12,
+                )
+                cur_ax3.text(
+                    0.01,
+                    0.94,
+                    f"Mean: {np.mean(sim_cIM_obs_residuals[cur_im].values):.2f}, Std: {np.std(sim_cIM_obs_residuals[cur_im].values):.2f}",
+                    horizontalalignment="left",
+                    verticalalignment="top",
+                    transform=cur_ax3.transAxes,
+                    fontsize=12,
+                )
+
+            for cur_ax in axs.ravel():
+                cur_ax.set_ylim(0, y_max)
+
+            fig.tight_layout()
+            fig.subplots_adjust(wspace=0, hspace=0)
+            st.pyplot(fig, use_container_width=False)
+
+        ml_obs_mean = ml_obs_residuals[sr.constants.PSA_KEYS].mean()
+        ml_obs_std = ml_obs_residuals[sr.constants.PSA_KEYS].std()
+
+        emp_cIM_obs_mean = emp_cIM_obs_residuals[sr.constants.PSA_KEYS].mean()
+        emp_cIM_obs_std = emp_cIM_obs_residuals[sr.constants.PSA_KEYS].std()
+
+        sim_cIM_obs_mean = sim_cIM_obs_residuals[sr.constants.PSA_KEYS].mean()
+        sim_cIM_obs_std = sim_cIM_obs_residuals[sr.constants.PSA_KEYS].std()
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        ax.semilogx(
+            sr.constants.PERIODS,
+            ml_obs_mean,
+            label=f"ML-Obs, $\mu$={ml_obs_mean.mean():.2f}",
+            c="blue",
+        )
+        ax.semilogx(
+            sr.constants.PERIODS, ml_obs_mean + ml_obs_std, c="blue", linestyle="--"
+        )
+        ax.semilogx(
+            sr.constants.PERIODS, ml_obs_mean - ml_obs_std, c="blue", linestyle="--"
+        )
+
+        ax.semilogx(
+            sr.constants.PERIODS,
+            emp_cIM_obs_mean,
+            label=f"Emp cIM-Obs, $\mu$={emp_cIM_obs_mean.mean():.2f} ",
+            c="green",
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            emp_cIM_obs_mean + emp_cIM_obs_std,
+            c="green",
+            linestyle="--",
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            emp_cIM_obs_mean - emp_cIM_obs_std,
+            c="green",
+            linestyle="--",
+        )
+
+        ax.semilogx(
+            sr.constants.PERIODS,
+            sim_cIM_obs_mean,
+            label=f"Sim cIM-Obs, $\mu$={sim_cIM_obs_mean.mean():.2f}",
+            c="orange",
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            sim_cIM_obs_mean + sim_cIM_obs_std,
+            c="orange",
+            linestyle="--",
+        )
+        ax.semilogx(
+            sr.constants.PERIODS,
+            sim_cIM_obs_mean - sim_cIM_obs_std,
+            c="orange",
+            linestyle="--",
+        )
+
+        ax.set_ylim(-1.25, 1.25)
+        ax.set_xlim(0.01, 10)
+        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        ax.legend()
+
+        ax.set_title("Mean Residuals")
+
+        fig.tight_layout()
+        st.pyplot(fig, use_container_width=False)
+
+    with st.expander("ML Residuals wrt. Empirical CIM"):
+        n_rows = n_ims
+
+        fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
+
+        bins = np.linspace(-2.0, 2.0, 50)
+
+        y_max = 0
+        for ix, (cur_im, (cur_ax1, cur_ax2)) in enumerate(zip(ims, axs)):
+            cur_ax1.hist(mean_ml_residual_emp_cIM[cur_im].values, bins=bins)
+            cur_ax1.axvline(
+                np.mean(mean_ml_residual_emp_cIM[cur_im].values),
+                color="r",
+                linestyle="--",
+            )
+            cur_ax1.axvline(0, color="k", linestyle="-")
+            cur_ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+            cur_ax2.hist(std_ml_residuals_emp_cIM[cur_im].values, bins=bins)
+            cur_ax2.axvline(
+                np.mean(std_ml_residuals_emp_cIM[cur_im].values),
+                color="r",
+                linestyle="--",
+            )
+            cur_ax2.axvline(0, color="k", linestyle="-")
+            cur_ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+            if ix == 0:
+                cur_ax1.set_xlim(-1.25, 1.25)
+
+            y_max = max(y_max, cur_ax1.get_ylim()[1], cur_ax2.get_ylim()[1])
+
+            cur_ax2.yaxis.tick_right()
+
+            cur_ax1.text(
+                0.01,
+                0.98,
+                f"Mean Residuals - {cur_im}",
+                horizontalalignment="left",
+                verticalalignment="top",
+                transform=cur_ax1.transAxes,
+                fontsize=12,
+            )
+
+            cur_ax2.text(
+                0.01,
+                0.98,
+                f"Std Residuals - {cur_im}",
+                horizontalalignment="left",
+                verticalalignment="top",
+                transform=cur_ax2.transAxes,
+                fontsize=12,
+            )
+
+        for cur_ax in axs.ravel():
+            cur_ax.set_ylim(0, y_max)
+
+        fig.tight_layout()
+        fig.subplots_adjust(wspace=0, hspace=0)
+        st.pyplot(fig, use_container_width=False)
 
 
 def main(
@@ -824,6 +1268,7 @@ def main(
                 train_sc_df,
                 train_sc_sum_df,
                 emp_cim_results_dir,
+                sim_cim_results_dir,
                 ml_results_dir,
                 "train",
             )
@@ -832,6 +1277,7 @@ def main(
                 val_sc_df,
                 val_sc_sum_results,
                 emp_cim_results_dir,
+                sim_cim_results_dir,
                 ml_results_dir,
                 "val",
             )

@@ -2154,9 +2154,14 @@ def compute_scenario_distribution(
     return scenario_sum_df, scenario_df
 
 
-def load_emp_cim_data(data_dir: Path, event: str):
+def load_emp_cim_data(data_dir: Path, event: str, method: constants.RankingMethod):
     """Loads the empirical conditional IM data for the given event"""
-    result_ffp = data_dir / event / "empirical_cMVN/cMVN_distributions.pickle"
+    result_ffp = (
+        data_dir
+        / event
+        / f"{constants.METHOD_RESULT_DIR_NAME_MAPPING[method]}"
+        / "cMVN_distributions.pickle"
+    )
     if result_ffp.exists():
         return conditional.ConditionalMVNDistribution.load(result_ffp)
     return None
@@ -2201,7 +2206,9 @@ def compute_ks_p_values(
         cur_sites = cur_df.site_int.unique().astype(str)
 
         # Load the cIM data
-        cur_emp_cim = load_emp_cim_data(emp_cim_dir, cur_event)
+        cur_emp_cim = load_emp_cim_data(
+            emp_cim_dir, cur_event, constants.RankingMethod.emp_cMVN
+        )
         if cur_emp_cim is None:
             print(f"Skipping event {cur_event} as no cIM data found")
             continue
@@ -2262,10 +2269,90 @@ def compute_ks_p_values(
     return ks_df, p_df
 
 
+def compute_ml_residuals_wrt_obs(
+    sc_sum_df: pd.DataFrame, db_ffp: Path, ims: np.ndarray
+):
+    """
+    Computes the residuals between the ML weighted average
+    and the observed
+
+    Parameters
+    ----------
+    sc_sum_df: pd.DataFrame
+        Summary scenario results dataframe
+    db_ffp: Path
+    ims: Sequence[str]
+        The IMs to use
+
+    Returns
+    -------
+    res_df: pd.DataFrame
+    """
+    db = DB(db_ffp)
+    obs_df = db.get_obs_df(log=True)
+
+    im_wavg_cols = mlt.array_utils.numpy_str_join("_", ims, "wavg")
+    residuals = pd.DataFrame(
+        data=obs_df.loc[sc_sum_df.index, ims].values - sc_sum_df[im_wavg_cols].values,
+        columns=ims,
+        index=sc_sum_df.index,
+    )
+    residuals["event_id"] = sc_sum_df["event_id"]
+    residuals["site_int"] = sc_sum_df["site_int"]
+
+    return residuals
+
+
+def compute_cIM_residuals_wrt_obs(
+    emp_cim_dir: Path, db_ffp: Path, method: constants.RankingMethod, ims: np.ndarray
+):
+    """
+    Computes the residual of a conditional IM result
+    with respect to the observed IM values
+    """
+    if method in [
+        constants.RankingMethod.ml_prob,
+        constants.RankingMethod.ml_prob_per_im,
+    ]:
+        raise ValueError("Invalid method")
+
+    db = DB(db_ffp)
+    obs_df = db.get_obs_df(log=True)
+
+    residuals = []
+    for cur_dir in emp_cim_dir.iterdir():
+        cur_event = cur_dir.stem
+        if cur_event not in obs_df.event_id:
+            pass
+
+        if (cur_emp_cim := load_emp_cim_data(emp_cim_dir, cur_event, method)) is None:
+            print(f"Skipping event {cur_event} as no cIM data found")
+            continue
+
+        cur_emp_mean_df = cur_emp_cim.cond_lnIM_mean_df
+
+        cur_obs_df = obs_df.loc[obs_df.event_id == cur_event].set_index("site_id")
+        cur_residual = pd.DataFrame(
+            data=cur_obs_df.loc[cur_emp_mean_df.index, ims].values
+            - cur_emp_mean_df.loc[cur_emp_mean_df.index, ims].values,
+            columns=ims,
+            index=cur_emp_mean_df.index,
+        )
+        cur_residual["event_id"] = cur_event
+        cur_residual["site_int"] = cur_residual.index
+        cur_residual.index = mlt.array_utils.numpy_str_join(
+            "_", cur_event, cur_residual.index.values.astype(str)
+        )
+
+        residuals.append(cur_residual)
+
+    return pd.concat(residuals, axis=0)
+
+
 def compute_mean_std_residuals_wrt_emp(
     sc_sum_df: pd.DataFrame,
     emp_cim_dir: Path,
-    run_config: RunParamsConfig,
+    ims: np.ndarray,
 ):
     """
     Computes the residual between the mean and
@@ -2278,22 +2365,25 @@ def compute_mean_std_residuals_wrt_emp(
         Summary scenario results dataframe
     emp_cim_dir: Path
         The directory containing the empirical conditional IM data
-    run_config: RunParamsConfig
+    ims: Sequence[str]
+        The IMs to use
 
     Returns
     -------
     mean_residuals: pd.DataFrame
     std_residuals: pd.DataFrame
     """
-    im_wavg_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "wavg")
-    im_wstd_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "wstd")
+    im_wavg_cols = mlt.array_utils.numpy_str_join("_", ims, "wavg")
+    im_wstd_cols = mlt.array_utils.numpy_str_join("_", ims, "wstd")
 
     events = sc_sum_df.event_id.unique().astype(str)
 
     mean_residuals, std_residuals = [], []
     for cur_event in events:
         # Load the cIM data
-        cur_emp_cim = load_emp_cim_data(emp_cim_dir, cur_event)
+        cur_emp_cim = load_emp_cim_data(
+            emp_cim_dir, cur_event, constants.RankingMethod.emp_cMVN
+        )
         if cur_emp_cim is None:
             print(f"Skipping event {cur_event} as no cIM data found")
             continue
@@ -2307,30 +2397,30 @@ def compute_mean_std_residuals_wrt_emp(
 
         # Mean residual
         cur_ml_mean_df = cur_sc_sum_df[im_wavg_cols]
-        cur_emp_cim_mean_df = cur_emp_cim.cond_lnIM_mean_df.loc[
-            cur_sites, run_config.ims
-        ]
+        cur_emp_cim_mean_df = cur_emp_cim.cond_lnIM_mean_df.loc[cur_sites, ims]
         assert np.all(cur_ml_mean_df.index == cur_emp_cim_mean_df.index)
 
         cur_mean_residuals = pd.DataFrame(
-            data=cur_emp_cim_mean_df[run_config.ims].values
-            - cur_ml_mean_df[im_wavg_cols].values,
+            data=cur_emp_cim_mean_df[ims].values - cur_ml_mean_df[im_wavg_cols].values,
             index=mlt.array_utils.numpy_str_join("_", cur_event, cur_sites),
-            columns=run_config.ims,
+            columns=ims,
         )
+        cur_mean_residuals["event_id"] = cur_event
+        cur_mean_residuals["site_int"] = cur_sites
         mean_residuals.append(cur_mean_residuals)
 
         # Std residual
         cur_ml_std_df = cur_sc_sum_df[im_wstd_cols]
-        cur_emp_cim_std_df = cur_emp_cim.cond_lnIM_std_df.loc[cur_sites, run_config.ims]
+        cur_emp_cim_std_df = cur_emp_cim.cond_lnIM_std_df.loc[cur_sites, ims]
         assert np.all(cur_ml_std_df.index == cur_emp_cim_std_df.index)
 
         cur_std_residuals = pd.DataFrame(
-            data=cur_emp_cim_std_df[run_config.ims].values
-            - cur_ml_std_df[im_wstd_cols].values,
+            data=np.log(cur_emp_cim_std_df[ims].values) - np.log(cur_ml_std_df[im_wstd_cols].values),
             index=mlt.array_utils.numpy_str_join("_", cur_event, cur_sites),
-            columns=run_config.ims,
+            columns=ims,
         )
+        cur_std_residuals["event_id"] = cur_event
+        cur_std_residuals["site_int"] = cur_sites
         std_residuals.append(cur_std_residuals)
 
     return pd.concat(mean_residuals, axis=0), pd.concat(std_residuals, axis=0)

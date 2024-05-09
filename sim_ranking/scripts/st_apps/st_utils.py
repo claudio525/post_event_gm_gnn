@@ -56,10 +56,12 @@ def ml_get_metadata(results_dir: Path):
 
 @st.cache_data
 def ml_get_site_df(results_dir: Path):
-    metadata = ml_get_metadata(results_dir)
-    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
+    return sr.db.DB(ml_get_db_ffp(results_dir)).get_site_df()
 
-    return sr.db.DB(db_ffp).get_site_df()
+@st.cache_data
+def ml_get_db_ffp(results_dir: Path):
+    metadata = ml_get_metadata(results_dir)
+    return Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
 
 
 @st.cache_data
