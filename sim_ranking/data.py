@@ -153,10 +153,8 @@ def gen_emp_synthetic_observed(
 
     # Shift the mean
     mean_cols = [f"{cur_im}_mean" for cur_im in constants.PSA_KEYS]
-    std_total_cols = [f"{cur_im}_std_Total" for cur_im in constants.PSA_KEYS]
     gm_params.loc[:, mean_cols] = (
         gm_params.loc[:, mean_cols].values
-        # + 0.5 * gm_params.loc[:, std_total_cols].values
         + 0.5 * 0.6
     )
 
@@ -221,7 +219,7 @@ def gen_emp_synthethic_realisations(
         cur_df = gm_params.loc[gm_params.event == cur_event, :].set_index("site")
         cur_sites = cur_df.index.values.astype(str)
 
-        im_values = sh.im_dist.gen_im_rels(
+        im_values, _, __ = sh.im_dist.gen_im_rels(
             cur_df,
             dist_matrix.loc[cur_sites, cur_sites],
             ims,
@@ -534,7 +532,6 @@ def compute_event_site_corrs_from_rels(sim_params_dir: Path):
 
     results = []
     for ix, cur_event in enumerate(tqdm.tqdm(events)):
-        # print(f"Processing event {cur_event}, {ix + 1}/{len(events)}")
         cur_sim_gm_params = SimGMParams.load(sim_params_dir / cur_event)
         cur_ims = np.asarray(cur_sim_gm_params.ims)
         cur_sites = np.asarray(cur_sim_gm_params.sites)
@@ -561,23 +558,6 @@ def compute_event_site_corrs_from_rels(sim_params_dir: Path):
                 cur_site_corrs, np.asarray(cur_sites), np.asarray(cur_ims), cur_event
             )
         )
-
-        # correlations = {}
-        # for cur_im in sim_gm_params.ims:
-        #     cur_within_residuals = sim_gm_params.within_residuals[
-        #         [cur_im, "site", "rel"]
-        #     ]
-        #     cur_within_residuals = cur_within_residuals.pivot(
-        #         index="rel", columns="site", values=cur_im
-        #     )
-        #
-        #     correlations[cur_im] = cur_within_residuals.corr(method="pearson")
-        #
-        # results.append(
-        #     SimWithinEventSiteCorrelations(
-        #         cur_event, sim_gm_params.ims, sim_gm_params.sites, correlations
-        #     )
-        # )
 
     return results
 

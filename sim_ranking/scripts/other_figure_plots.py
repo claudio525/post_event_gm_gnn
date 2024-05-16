@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import List, Sequence
+from typing_extensions import Annotated
 
 import pandas as pd
 import numpy as np
@@ -100,7 +101,6 @@ def plot_perturbed_response_spectrum(
     plt.savefig(output_ffp)
     plt.close()
 
-
 @app.command("observation-sites")
 def plot_observation_sites(sites_ffp: Path, map_data_ffp: Path, output_ffp: Path):
     from pygmt_helper import plotting
@@ -188,8 +188,12 @@ def plot_historic_events(events_ffp: Path, map_data_ffp: Path, output_ffp: Path)
 
 @app.command("event-sites-example")
 def plot_event_sites_example(
-    events_ffp: Path, sites_ffp: Path, map_data_ffp: Path, output_ffp: Path, events_to_highlight: List[str] = None,
-        sites_to_highlight: List[str] = None
+    events_ffp: Path,
+    sites_ffp: Path,
+    map_data_ffp: Path,
+    output_ffp: Path,
+    events_to_highlight: List[str] = None,
+    sites_to_highlight: List[str] = None,
 ):
     """Creates a figure of Canterbury showing
     all historic events"""
@@ -301,7 +305,7 @@ def plot_event_sites_example(
 
     # Create the inset
     with fig.inset(
-        position="jTR",#+o0.2c",
+        position="jTR",  # +o0.2c",
         region=inset_region,
         projection="M4c",
         margin=0,
@@ -363,7 +367,9 @@ def plot_event_sites_example(
 
 
 @app.command("sim-site-correlations")
-def sim_site_correlations(sim_corr_dir: Path, site_ffp: Path, ims: List[str], event: str, output_dir: Path):
+def sim_site_correlations(
+    sim_corr_dir: Path, site_ffp: Path, ims: List[str], event: str, output_dir: Path
+):
     """Generates a simulation site-pair
     correlation plot with respect to site-to-site distance."""
     plt.rcParams.update({"font.size": 14, "axes.labelsize": 14})
@@ -378,7 +384,9 @@ def sim_site_correlations(sim_corr_dir: Path, site_ffp: Path, ims: List[str], ev
     for cur_im in ims:
         # Get the model values
         dist = np.logspace(np.log10(0.1), np.log(MAX_DIST), 1000)
-        loth_baker_vals = sha.loth_baker_corr_model.get_correlations(cur_im, cur_im, dist)
+        loth_baker_vals = sha.loth_baker_corr_model.get_correlations(
+            cur_im, cur_im, dist
+        )
 
         # Get the simulation values
         lower_tri_mask = np.tril(dist_matrix.values).astype(bool)
@@ -395,8 +403,12 @@ def sim_site_correlations(sim_corr_dir: Path, site_ffp: Path, ims: List[str], ev
                 continue
 
             cur_mask = bin_inds == ix
-            sim_avg_values.append(np.mean(cur_sim_site_corrs.values[lower_tri_mask][cur_mask]))
-            sim_std_values.append(np.std(cur_sim_site_corrs.values[lower_tri_mask][cur_mask]))
+            sim_avg_values.append(
+                np.mean(cur_sim_site_corrs.values[lower_tri_mask][cur_mask])
+            )
+            sim_std_values.append(
+                np.std(cur_sim_site_corrs.values[lower_tri_mask][cur_mask])
+            )
 
         sim_avg_values = np.asarray(sim_avg_values)
         sim_std_values = np.asarray(sim_std_values)
@@ -409,14 +421,34 @@ def sim_site_correlations(sim_corr_dir: Path, site_ffp: Path, ims: List[str], ev
             cur_sim_site_corrs.values[lower_tri_mask],
             s=1.0,
             alpha=0.75,
-            label="Simulation Site-Pair Correlations"
+            label="Simulation Site-Pair Correlations",
         )
 
-        plt.semilogx(bin_centres, sim_avg_values, c="r", linewidth=1.0, label="Simulation Average & Standard Deviation")
-        plt.semilogx(bin_centres, sim_avg_values + sim_std_values, c="r", linewidth=1.0, linestyle="--")
-        plt.semilogx(bin_centres, sim_avg_values - sim_std_values, c="r", linewidth=1.0, linestyle="--")
+        plt.semilogx(
+            bin_centres,
+            sim_avg_values,
+            c="r",
+            linewidth=1.0,
+            label="Simulation Average & Standard Deviation",
+        )
+        plt.semilogx(
+            bin_centres,
+            sim_avg_values + sim_std_values,
+            c="r",
+            linewidth=1.0,
+            linestyle="--",
+        )
+        plt.semilogx(
+            bin_centres,
+            sim_avg_values - sim_std_values,
+            c="r",
+            linewidth=1.0,
+            linestyle="--",
+        )
 
-        plt.semilogx(dist, loth_baker_vals, c="k", linewidth=1.0, label="Loth & Baker (2013)")
+        plt.semilogx(
+            dist, loth_baker_vals, c="k", linewidth=1.0, label="Loth & Baker (2013)"
+        )
 
         plt.title(f"{sr.utils.get_nice_im_name(cur_im)}")
         plt.xlabel(f"Distance (km)")
@@ -427,7 +459,9 @@ def sim_site_correlations(sim_corr_dir: Path, site_ffp: Path, ims: List[str], ev
         plt.legend()
         plt.tight_layout()
 
-        fig.savefig(output_dir / f"{event}_{cur_im}_site_correlations.{sr.constants.FIG_FORMAT}")
+        fig.savefig(
+            output_dir / f"{event}_{cur_im}_site_correlations.{sr.constants.FIG_FORMAT}"
+        )
         plt.close()
         # plt.show()
         # print(f"wtf")
@@ -436,115 +470,3 @@ def sim_site_correlations(sim_corr_dir: Path, site_ffp: Path, ims: List[str], ev
 
 if __name__ == "__main__":
     app()
-
-
-# @app.command("correlation-period")
-# def correlation_period(
-#     sim_corr_dir: Path, event: str, station_ffp: Path, output_dir: Path
-# ):
-#     """Plots the average correlation as a function period."""
-#     sim_corrs = sr.data.load_correlations(sim_corr_dir)[event]
-#
-#     periods, pSA_keys = sr.utils.get_periods(sim_corrs.ims)
-#
-#     station_df = sr.data.load_ll_file(station_ffp)
-#     dist_matrix = sh.im_dist.calculate_distance_matrix(sim_corrs.sites, station_df)
-#
-#     upper_mask = np.triu(sim_corrs.get_im_corrs(pSA_keys[0]), 1).astype(bool)
-#
-#     # Compute the average absolute correlation for each period
-#     # across all site pairs
-#     rho_avg = {}
-#     rho_std = {}
-#     for cur_im in pSA_keys:
-#         cur_corrs = sim_corrs.get_im_corrs(cur_im)
-#         rho_avg[cur_im] = np.mean(cur_corrs.values[upper_mask])
-#         rho_std[cur_im] = np.std(cur_corrs.values[upper_mask])
-#
-#     rho_avg = pd.Series(rho_avg)
-#     rho_std = pd.Series(rho_std)
-#
-#     # Compute the average absolute correlation for different distance bins
-#     distance_bins = np.array([0, 10, 30, 80, 150])
-#     dist_rho_avg = {i: {} for i in range(len(distance_bins) - 1)}
-#     dist_rho_std = {i: {} for i in range(len(distance_bins) - 1)}
-#     dist_emp_corr = {i: {} for i in range(len(distance_bins) - 1)}
-#     for i in range(len(distance_bins) - 1):
-#
-#         cur_dist_mask = (dist_matrix >= distance_bins[i]) & (
-#             dist_matrix < distance_bins[i + 1]
-#         )
-#         cur_mask = cur_dist_mask & upper_mask
-#
-#         for cur_im in pSA_keys:
-#             cur_corrs = sim_corrs.get_im_corrs(cur_im)
-#             dist_rho_avg[i][cur_im] = np.mean(cur_corrs.values[cur_mask])
-#             dist_rho_std[i][cur_im] = np.std(cur_corrs.values[cur_mask])
-#             dist_emp_corr[i][cur_im] = sha.loth_baker_corr_model.get_correlations(
-#                 cur_im, cur_im, np.asarray([np.mean(distance_bins[i : i + 2])])
-#             )[0]
-#
-#     dist_rho_avg = pd.DataFrame(dist_rho_avg)
-#     dist_rho_std = pd.DataFrame(dist_rho_std)
-#     dist_emp_corr = pd.DataFrame(dist_emp_corr)
-#
-#     fig = plt.figure(figsize=(8, 6))
-#
-#     c = ["maroon", "red", "blue", "magenta"]
-#     for i in range(len(distance_bins) - 1):
-#         plt.semilogx(
-#             periods,
-#             dist_emp_corr.loc[:, i],
-#             label=f"Loth & Baker (2013)" if i == 0 else None,
-#             c=c[i],
-#             linewidth=1.0,
-#             linestyle="--",
-#         )
-#         plt.semilogx(
-#             periods,
-#             dist_rho_avg.loc[:, i],
-#             label=f"{distance_bins[i]}-{distance_bins[i + 1]} km",
-#             c=c[i],
-#             linewidth=1.0,
-#         )
-#
-#     plt.semilogx(periods, rho_avg, label="All site pairs", c="k", linewidth=1.0)
-#
-#     # plt.title(f"Average Absolute Correlation vs Period")
-#     plt.xlabel(f"Period (s)")
-#     plt.ylabel(f"Average Absolute Correlation")
-#     plt.xlim(periods.min(), periods.max())
-#     plt.ylim(-0.6, 0.6)
-#     plt.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
-#     plt.legend()
-#
-#     plt.tight_layout()
-#     plt.savefig(
-#         output_dir / f"{event}_average_correlation_vs_period.{sr.constants.FIG_FORMAT}"
-#     )
-#
-#     # Standard deviation plot
-#     fig = plt.figure(figsize=(8, 6))
-#
-#     for i in range(len(distance_bins) - 1):
-#         plt.semilogx(
-#             periods,
-#             dist_rho_std.loc[:, i],
-#             label=f"{distance_bins[i]}-{distance_bins[i + 1]} km",
-#             c=c[i],
-#             linewidth=1.0,
-#         )
-#
-#     plt.semilogx(periods, rho_std, label="All site pairs", c="k", linewidth=1.0)
-#
-#     plt.xlabel(f"Period (s)")
-#     plt.ylabel(f"Standard Deviation Of Absolute Correlation")
-#     plt.xlim(periods.min(), periods.max())
-#     plt.ylim(0, 0.3)
-#     plt.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
-#     plt.legend()
-#
-#     plt.tight_layout()
-#     plt.savefig(
-#         output_dir / f"{event}_std_correlation_vs_period.{sr.constants.FIG_FORMAT}"
-#     )

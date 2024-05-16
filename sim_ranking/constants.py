@@ -73,7 +73,10 @@ IM_WEIGTHS_SETS = {
 
 COMPONENTS = ["090", "000", "ver"]
 
+
+
 CANTERBURY_REGION = [171.54, 173.12, -43.95, -43.22]
+WELLINGTON_REGION = [172.639, 176.35, -42.427, -40.475]
 
 STATION_FN_NAME = "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land"
 

@@ -60,7 +60,7 @@ def run_general_tab(results_dir: Path):
 
     fig, ax = plt.subplots(figsize=(12, 6))
     mlt.plotting.plot_metrics(
-        metrics, sel_metric_keys, ax=ax, best_epoch=meta["best_epoch"]
+        metrics, sel_metric_keys, ax=ax, best_epoch=meta["best_epoch"], y_lim=(0.0, 1.5)
     )
     # mlt.plotting.plot_metrics(load_training_metrics(results_dir), ax=ax)
     st.pyplot(fig, use_container_width=False)
