@@ -159,8 +159,5 @@ def plot_events_map(
     )
 
 
-
-
-
 if __name__ == "__main__":
     app()

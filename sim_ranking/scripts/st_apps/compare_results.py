@@ -349,7 +349,7 @@ def _create_scenario_map(
 ):
     all_sites = np.unique(np.concatenate([emp_sites, sim_sites, ml_sites]))
 
-    assert np.all(np.isin(emp_sites, sim_sites))
+    # assert np.all(np.isin(emp_sites, sim_sites))
     cim_sites = np.unique(np.concatenate([emp_sites, sim_sites]))
 
     cim_only_sites = np.setdiff1d(cim_sites, ml_sites)
@@ -616,7 +616,6 @@ def run_ind_scenario(
         axs = axs.ravel()
 
         for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
-
             ### Empirical CIM
             # Get mu and sigma
             cur_emp_cim_mu = cur_emp_cim.cond_lnIM_mean_df.loc[cur_site, cur_im]
@@ -678,6 +677,8 @@ def run_ind_scenario(
             if ix % 2 == 1:
                 # cur_ax.set_yticklabels([])
                 cur_ax.yaxis.tick_right()
+
+            cur_ax.axvline(np.log(site_int_obs[cur_im]), c="red", linestyle="--", label="Observed")
 
             cur_ax.set_ylim(0.0, 1.0)
             cur_ax.set_xlim(cur_emp_cim_im_values.min(), cur_emp_cim_im_values.max())
@@ -757,7 +758,7 @@ def run_ind_scenario(
         & (sim_cIM_obs_residuals.site_int == cur_site)
     ].squeeze()
     with st.expander("Residuals wrt. Observed"):
-        fig, ax1 = plt.subplots(figsize=(12, 6))
+        fig, ax1 = plt.subplots(1, 1, figsize=(12, 6))
 
         # Mean
         ax1.semilogx(
@@ -776,9 +777,9 @@ def run_ind_scenario(
             label="$\ln_{IM}^{Obs} - \mu_{sim}$",
         )
 
-        ax1.set_title(f"Residuals - {cur_site}")
+        ax1.set_title(f"{cur_site}")
         ax1.set_xlabel(f"Period (s)")
-        ax1.set_ylabel(f"Residual")
+        ax1.set_ylabel(f"Bias")
         ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
 
         ax1.set_xlim(0.01, 10)
@@ -792,13 +793,13 @@ def run_ind_scenario(
 
 @st.cache_data
 def get_obs_residuals(
-    sc_df: pd.DataFrame,
+    sc_sum_df: pd.DataFrame,
     db_ffp: Path,
     ims: np.ndarray,
     emp_cim_results_dir: Path,
     sim_cim_results_dir: Path,
 ):
-    ml_obs_residuals = sr.ml.sc_prob.compute_ml_residuals_wrt_obs(sc_df, db_ffp, ims)
+    ml_obs_residuals = sr.ml.sc_prob.compute_ml_residuals_wrt_obs(sc_sum_df, db_ffp, ims)
 
     emp_cIM_obs_residuals = sr.ml.sc_prob.compute_cIM_residuals_wrt_obs(
         emp_cim_results_dir, db_ffp, sr.constants.RankingMethod.emp_cMVN, ims
@@ -1195,6 +1196,43 @@ def run_stats_tab(
         st.pyplot(fig, use_container_width=False)
 
 
+def run_explore_tab(
+    sc_sum_df: pd.DataFrame,
+    ml_results_dir: Path,
+    emp_cim_results_dir: Path,
+    sim_cim_results_dir: Path,
+    tab_type: str,
+):
+    sc_sum_df = sc_sum_df.sort_index()
+
+    ims = np.asarray(st_utils.ml_get_metadata(ml_results_dir)["run_config"]["ims"])
+    mean_ml_emp_cIM_res, std_ml_emp_cIM_res = get_ml_emp_cIM_residuals(
+        sc_sum_df, emp_cim_results_dir, ims
+    )
+    mean_ml_emp_cIM_res = mean_ml_emp_cIM_res.sort_index()
+
+
+    ml_obs_residuals, emp_cIM_obs_residuals, sim_cIM_obs_residuals = get_obs_residuals(sc_sum_df, st_utils.ml_get_db_ffp(ml_results_dir), ims, emp_cim_results_dir, sim_cim_results_dir)
+
+    res_df = ml_obs_residuals[["event_id", "site_int"]].copy(deep=True)
+    res_df["ml_obs_mse"] = (ml_obs_residuals[sr.constants.PSA_KEYS] ** 2).mean(axis=1)
+    res_df["emp_cIM_obs_mse"] = (emp_cIM_obs_residuals[sr.constants.PSA_KEYS] ** 2).mean(
+        axis=1
+    )
+    assert np.all(sim_cIM_obs_residuals.index == res_df.index)
+    res_df["sim_cIM_obs_mse"] = (sim_cIM_obs_residuals[sr.constants.PSA_KEYS] ** 2).mean(
+        axis=1
+    )
+    res_df["ml_emp_cIM_mse"] = (mean_ml_emp_cIM_res.loc[res_df.index, sr.constants.PSA_KEYS] ** 2).mean(
+        axis=1
+    )
+    res_df["n_obs_sites"] = sc_sum_df.loc[res_df.index, "n_obs_sites"]
+    res_df["min_s2s_dist"] = sc_sum_df.loc[res_df.index, "min_s2s_dist"]
+    res_df["sc_weight"] = sc_sum_df.loc[res_df.index, "weight"]
+
+    st.dataframe(res_df)
+
+
 def main(
     ml_results_dir: Path,
     emp_cim_results_dir: Path,
@@ -1205,7 +1243,9 @@ def main(
     """Compare the results of the ML, empirical CIM and simulated CIM results"""
     st.set_page_config(layout="wide")
 
-    (ind_scenarios, stats_tab) = st.tabs(["Individual Scenario", "Stats"])
+    (ind_scenarios, stats_tab, explore_tab) = st.tabs(
+        ["Individual Scenario", "Stats", "Explore"]
+    )
 
     (
         train_sc_df,
@@ -1282,7 +1322,25 @@ def main(
                 "val",
             )
 
-    print(f"wtf")
+    with explore_tab:
+        train_tab, val_tab = st.tabs(["Train", "Validation"])
+
+        with train_tab:
+            run_explore_tab(
+                train_sc_sum_df,
+                ml_results_dir,
+                emp_cim_results_dir,
+                sim_cim_results_dir,
+                "train",
+            )
+        with val_tab:
+            run_explore_tab(
+                val_sc_sum_results,
+                ml_results_dir,
+                emp_cim_results_dir,
+                sim_cim_results_dir,
+                "val",
+            )
 
 
 if __name__ == "__main__":

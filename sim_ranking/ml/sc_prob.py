@@ -189,17 +189,17 @@ def data_prep(
     corr_dir: Path,
 ):
     # Scalar features
-    # EVENT_FEATURE_KEYS = ["mag"]
-    # SITE_FEATURE_KEYS = ["vs30", "z1.0", "z2.5", "tsite"]
-    # SITE_TO_SITE_FEATURE_KEYS = ["dist"]
-    # EVENT_SITE_FEATURE_KEYS = ["r_rup"]
-    # EVENT_SITE_TO_SITE_FEATURE_KEYS = ["angular_dist"]
-
     EVENT_FEATURE_KEYS = ["mag"]
-    SITE_FEATURE_KEYS = ["vs30", "z1.0", "z2.5"]
+    SITE_FEATURE_KEYS = ["vs30", "z1.0", "z2.5", "tsite"]
     SITE_TO_SITE_FEATURE_KEYS = ["dist"]
     EVENT_SITE_FEATURE_KEYS = ["r_rup"]
-    EVENT_SITE_TO_SITE_FEATURE_KEYS = []
+    EVENT_SITE_TO_SITE_FEATURE_KEYS = ["angular_dist"]
+
+    # EVENT_FEATURE_KEYS = ["mag"]
+    # SITE_FEATURE_KEYS = ["vs30", "z1.0", "z2.5"]
+    # SITE_TO_SITE_FEATURE_KEYS = ["dist"]
+    # EVENT_SITE_FEATURE_KEYS = ["r_rup"]
+    # EVENT_SITE_TO_SITE_FEATURE_KEYS = []
 
     event_df = db.get_event_df()
     record_df = db.get_record_df()
@@ -1936,6 +1936,7 @@ def get_dataset_prediction(
             )
             cur_sc_sum["n_obs_sites"] = n_obs_sites.values
             cur_sc_sum["min_s2s_dist"] = sc_group["s2s_distance"].min().values
+            cur_sc_sum["mean_s2s_dist"] = sc_group["s2s_distance"].mean().values
 
             ## Compute the scenario weighted average and std
             sc_site_int_sim_ims = dataset.get_sc_site_int_sim(
@@ -2361,7 +2362,7 @@ def compute_ml_residuals_wrt_obs(
     res_df: pd.DataFrame
     """
     db = DB(db_ffp)
-    obs_df = db.get_obs_df(log=True)
+    obs_df = db.get_obs_df(log=True, fix_index=True)
 
     im_wavg_cols = mlt.array_utils.numpy_str_join("_", ims, "wavg")
     residuals = pd.DataFrame(
