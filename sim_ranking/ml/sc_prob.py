@@ -51,6 +51,9 @@ class RunParamsConfig:
     sample_weighting_method: SampleWeighting
     l2_prob_penalty: float
 
+    scalar_feature_set_key: constants.ScalarFeatureSetKey
+    weight_model_feature_set_key: constants.ScalarFeatureSetKey
+
     debug: bool
     device: str
 
@@ -76,6 +79,8 @@ class RunParamsConfig:
             "min_sc_weight": self.min_sc_weight,
             "max_sc_weight": self.max_sc_weight,
             "l2_prob_penalty": self.l2_prob_penalty,
+            "scalar_feature_set_key": self.scalar_feature_set_key.value,
+            "weight_model_feature_set_key": self.weight_model_feature_set_key.value,
             "debug": self.debug,
             "device": self.device,
         }
@@ -93,6 +98,8 @@ class RunParamsConfig:
             params["max_sc_weight"],
             SampleWeighting(params["sample_weighting_method"]),
             params["l2_prob_penalty"],
+            constants.ScalarFeatureSetKey(params["scalar_feature_set_key"]),
+            constants.ScalarFeatureSetKey(params["weight_model_feature_set_key"]),
             params["debug"],
             params["device"],
         )
@@ -119,7 +126,9 @@ class HyperParamsConfig:
     use_res_sim_site_obs_sim_site_int: bool
     use_res_obs_site_obs_sim_site_int: bool
 
-    weight_model_features: np.ndarray
+    # Weight model
+    wm_fc_units: List[int]
+    wm_l2_reg: float
 
     def __post_init__(self):
         self.n_im_features = sum(
@@ -152,7 +161,8 @@ class HyperParamsConfig:
             params["res_site_obs"],
             params["res_sim_site_obs_sim_site_int"],
             params["res_obs_site_obs_sim_site_int"],
-            np.asarray(params["weight_model_features"]),
+            params["wm_fc_units"],
+            params["wm_l2_reg"],
         )
 
     def to_dict(self):
@@ -172,7 +182,8 @@ class HyperParamsConfig:
             "res_site_obs": self.use_res_site_obs,
             "res_sim_site_obs_sim_site_int": self.use_res_sim_site_obs_sim_site_int,
             "res_obs_site_obs_sim_site_int": self.use_res_obs_site_obs_sim_site_int,
-            "weight_model_features": self.weight_model_features.tolist(),
+            "wm_fc_units": self.wm_fc_units,
+            "wm_l2_reg": self.wm_l2_reg,
         }
 
 
@@ -188,18 +199,10 @@ def data_prep(
     db: DB,
     corr_dir: Path,
 ):
-    # Scalar features
-    EVENT_FEATURE_KEYS = ["mag"]
-    SITE_FEATURE_KEYS = ["vs30", "z1.0", "z2.5", "tsite"]
-    SITE_TO_SITE_FEATURE_KEYS = ["dist"]
-    EVENT_SITE_FEATURE_KEYS = ["r_rup"]
-    EVENT_SITE_TO_SITE_FEATURE_KEYS = ["angular_dist"]
-
-    # EVENT_FEATURE_KEYS = ["mag"]
-    # SITE_FEATURE_KEYS = ["vs30", "z1.0", "z2.5"]
-    # SITE_TO_SITE_FEATURE_KEYS = ["dist"]
-    # EVENT_SITE_FEATURE_KEYS = ["r_rup"]
-    # EVENT_SITE_TO_SITE_FEATURE_KEYS = []
+    # Get the scalar feature keys
+    scalar_feature_keys = constants.SCALAR_FEATURE_SET_LOOKUP[run_config.scalar_feature_set_key]
+    event_feature_keys = scalar_feature_keys["event"]
+    site_feature_keys = scalar_feature_keys["site"]
 
     event_df = db.get_event_df()
     record_df = db.get_record_df()
@@ -215,19 +218,19 @@ def data_prep(
     # only happens on training sites, not all sites
     print(f"Pre-processing site & event features")
     site_features_df, site_feature_stats = features.preprocess_site_features(
-        station_df, SITE_FEATURE_KEYS
+        station_df, site_feature_keys
     )
 
     event_features_stats = pd.DataFrame(
-        index=["mean", "std"], columns=EVENT_FEATURE_KEYS
+        index=["mean", "std"], columns=event_feature_keys
     )
-    event_features_stats.loc["mean"] = event_df.loc[events, EVENT_FEATURE_KEYS].mean()
-    event_features_stats.loc["std"] = event_df.loc[events, EVENT_FEATURE_KEYS].std()
-    event_features_df = event_df.loc[events, EVENT_FEATURE_KEYS]
-    event_features_df[EVENT_FEATURE_KEYS] = (
-        event_df.loc[events, EVENT_FEATURE_KEYS]
-        - event_features_stats.loc["mean", EVENT_FEATURE_KEYS]
-    ) / event_features_stats.loc["std", EVENT_FEATURE_KEYS]
+    event_features_stats.loc["mean"] = event_df.loc[events, event_feature_keys].mean()
+    event_features_stats.loc["std"] = event_df.loc[events, event_feature_keys].std()
+    event_features_df = event_df.loc[events, event_feature_keys]
+    event_features_df[event_feature_keys] = (
+        event_df.loc[events, event_feature_keys]
+        - event_features_stats.loc["mean", event_feature_keys]
+    ) / event_features_stats.loc["std", event_feature_keys]
 
     # Compute the site-to-site features
     print(f"Computing scalar features")
@@ -246,15 +249,15 @@ def data_prep(
     )
     scalar_features = ml_data.ScalarFeatures(
         event_features_df,
-        EVENT_FEATURE_KEYS,
+        event_feature_keys,
         site_features_df,
-        SITE_FEATURE_KEYS,
+        site_feature_keys,
         site_to_site_features,
-        SITE_TO_SITE_FEATURE_KEYS,
+        scalar_feature_keys["site_to_site"],
         event_site_features,
-        EVENT_SITE_FEATURE_KEYS,
+        scalar_feature_keys["event_site"],
         event_site_to_site_features,
-        EVENT_SITE_TO_SITE_FEATURE_KEYS,
+        scalar_feature_keys["event_site_to_site"],
     )
 
     # Compute mean and standard deviation for each period
@@ -290,7 +293,7 @@ def data_prep(
         db,
         run_config,
         scalar_features,
-        hp_config.weight_model_features,
+        constants.WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP[run_config.weight_model_feature_set_key],
         ims_mean,
         ims_std,
         hp_config,
@@ -303,7 +306,7 @@ def data_prep(
         db,
         run_config,
         scalar_features,
-        hp_config.weight_model_features,
+        constants.WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP[run_config.weight_model_feature_set_key],
         ims_mean,
         ims_std,
         hp_config,
@@ -623,12 +626,12 @@ class SCProbDataset(Dataset):
 
             record_ind[i_counter : i_counter + cur_record_ind.size] = cur_record_ind
 
-            record_site_int_ind[
-                i_counter : i_counter + cur_record_ind.size
-            ] = cur_site_int_ind
-            record_site_obs_ind[
-                i_counter : i_counter + cur_record_ind.size
-            ] = cur_site_obs_ind
+            record_site_int_ind[i_counter : i_counter + cur_record_ind.size] = (
+                cur_site_int_ind
+            )
+            record_site_obs_ind[i_counter : i_counter + cur_record_ind.size] = (
+                cur_site_obs_ind
+            )
 
             site_int_ind[i] = cur_site_int_ind[0]
             site_obs_ind[i] = cur_site_obs_ind[0]
@@ -1205,7 +1208,7 @@ def get_batch_results(
         #     l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(torch.sum(pred ** 2, dim=1))
         # else:
         l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(
-            torch.sum(pred ** 2, dim=1)
+            torch.sum(pred**2, dim=1)
         )
         loss = loss + l2_prob_penalty
 
@@ -1254,11 +1257,10 @@ def train(
     if run_config.sample_weighting_method is SampleWeighting.CUSTOM_MODEL:
         optimizer = torch.optim.Adam(
             [
-                {"params": prob_model.parameters()},
-                {"params": weight_model.parameters()},
+                {"params": prob_model.parameters(), "weight_decay": hp_config.l2_reg},
+                {"params": weight_model.parameters(), "weight_decay": hp_config.wm_l2_reg},
             ],
             lr=hp_config.lr[0],
-            weight_decay=hp_config.l2_reg,
         )
     else:
         optimizer = torch.optim.Adam(
@@ -1493,6 +1495,7 @@ def train(
 
     return metrics, best_model_state, best_model_epoch
 
+
 def get_prediction(
     prob_model: nn.Module,
     site_obs_norm_obs_ims: torch.Tensor,
@@ -1630,7 +1633,7 @@ def get_dataset_prediction(
     ### Iterate over dataset
     sc_results, sc_sum_results = [], []
     sample_sum_results = []
-    with (torch.no_grad()):
+    with torch.no_grad():
         prob_model.eval()
         start_ix = 0
         for i, (
@@ -1714,16 +1717,16 @@ def get_dataset_prediction(
                 record_events, "batch -> (batch rel)", rel=pred.shape[1]
             )
             # Site of Interest
-            sample_results_df.loc[
-                start_ix:end_ix, "site_int"
-            ] = df_site_int = einops.repeat(
-                record_site_int, "batch -> (batch rel)", rel=pred.shape[1]
+            sample_results_df.loc[start_ix:end_ix, "site_int"] = df_site_int = (
+                einops.repeat(
+                    record_site_int, "batch -> (batch rel)", rel=pred.shape[1]
+                )
             )
             # Observation site
-            sample_results_df.loc[
-                start_ix:end_ix, "site_obs"
-            ] = df_site_obs = einops.repeat(
-                record_site_obs, "batch -> (batch rel)", rel=pred.shape[1]
+            sample_results_df.loc[start_ix:end_ix, "site_obs"] = df_site_obs = (
+                einops.repeat(
+                    record_site_obs, "batch -> (batch rel)", rel=pred.shape[1]
+                )
             )
             # Realisation
             sample_results_df.loc[start_ix:end_ix, "rel_id"] = einops.rearrange(
@@ -2087,9 +2090,11 @@ def post_processing(
 
     # Metadata
     metadata = {
-        "method_type": constants.RankingMethod.ml_prob_per_im.value
-        if run_config.per_im_prob
-        else constants.RankingMethod.ml_prob.value,
+        "method_type": (
+            constants.RankingMethod.ml_prob_per_im.value
+            if run_config.per_im_prob
+            else constants.RankingMethod.ml_prob.value
+        ),
         "hp_config": hp_config.to_dict(),
         "best_epoch": best_epoch,
         "data": data_metadata,
@@ -2488,7 +2493,8 @@ def compute_mean_std_residuals_wrt_emp(
         assert np.all(cur_ml_std_df.index == cur_emp_cim_std_df.index)
 
         cur_std_residuals = pd.DataFrame(
-            data=np.log(cur_emp_cim_std_df[ims].values) - np.log(cur_ml_std_df[im_wstd_cols].values),
+            data=np.log(cur_emp_cim_std_df[ims].values)
+            - np.log(cur_ml_std_df[im_wstd_cols].values),
             index=mlt.array_utils.numpy_str_join("_", cur_event, cur_sites),
             columns=ims,
         )
@@ -2497,5 +2503,3 @@ def compute_mean_std_residuals_wrt_emp(
         std_residuals.append(cur_std_residuals)
 
     return pd.concat(mean_residuals, axis=0), pd.concat(std_residuals, axis=0)
-
-

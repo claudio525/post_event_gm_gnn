@@ -219,7 +219,7 @@ def gen_emp_synthethic_realisations(
         cur_df = gm_params.loc[gm_params.event == cur_event, :].set_index("site")
         cur_sites = cur_df.index.values.astype(str)
 
-        im_values, _, __ = sh.im_dist.gen_im_rels(
+        im_values, between_event, within_event = sh.im_dist.gen_im_rels(
             cur_df,
             dist_matrix.loc[cur_sites, cur_sites],
             ims,

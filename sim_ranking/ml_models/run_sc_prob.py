@@ -46,6 +46,15 @@ def train_model(
         None, help="Data source to use when selecting data from the specified database"
     ),
     im_set: str = typer.Option("all", help="The IM set to use. One of ['all', 'pSA']"),
+    scalar_feature_set_key: sr.constants.ScalarFeatureSetKey = typer.Option(
+        sr.constants.ScalarFeatureSetKey.all,
+        help="The scalar feature set to use",
+    ),
+    custom_weight_model_feature_set_key: sr.constants.ScalarFeatureSetKey = typer.Option(
+        sr.constants.ScalarFeatureSetKey.all,
+        help="The scalar feature set to use for the weight model. "
+        "Only applicable if sample_weighting is 'custom_model'",
+    ),
     quiet: bool = typer.Option(False),
     sample_weighting: sc_prob.SampleWeighting = typer.Option(
         sc_prob.SampleWeighting.LOTH_BAKER,
@@ -74,6 +83,8 @@ def train_model(
         max_sc_weight,
         sample_weighting,
         l2_prob_penalty,
+        scalar_feature_set_key,
+        custom_weight_model_feature_set_key,
         debug,
         device,
         results_dir=out_dir,
@@ -120,7 +131,7 @@ def train_model(
         run_config,
         hp_config,
         db,
-        corr_dir=corr_dir,
+        corr_dir,
     )
 
     # prob_model = sc_prob.create_IMmodel(hp_config, scalar_features, run_config)
@@ -128,7 +139,7 @@ def train_model(
     prob_model.to(device)
 
     weight_model = sr.ml.models.WeightModel(
-        run_config.n_ims, [32], hp_config.weight_model_features.size
+        run_config.n_ims, hp_config.wm_fc_units, len(sr.constants.WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP[run_config.weight_model_feature_set_key])
     )
     weight_model.to(device)
 

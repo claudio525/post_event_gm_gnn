@@ -27,4 +27,6 @@ res_sim_site_obs_sim_site_int: True
 #res_obs_site_obs_sim_site_int: True
 res_obs_site_obs_sim_site_int: False
 
-weight_model_features: ["vs30_site_int", "vs30_site_obs", "dist"]
+###### Weight model
+wm_fc_units: [8]
+wm_l2_reg: 0.0005
