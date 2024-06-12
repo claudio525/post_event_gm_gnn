@@ -189,16 +189,54 @@ class HyperParamsConfig:
 
 def data_prep(
     event_sites: Dict[str, np.ndarray],
+    valid_event_int_sites: Dict[str, np.ndarray],
     train_events: np.ndarray,
     val_events: np.ndarray,
-    train_sites: np.ndarray,
+    train_int_sites: np.ndarray,
     val_int_sites: np.ndarray,
+    obs_sites: np.ndarray,
     events: np.ndarray,
     run_config: RunParamsConfig,
     hp_config: HyperParamsConfig,
     db: DB,
     corr_dir: Path,
 ):
+    """
+    Creates the training and validation dataset for
+    training of the  ML-based model
+
+    Parameters
+    ----------
+    event_sites: Dict[str, np.ndarray]
+        Available sites per event
+    valid_event_int_sites
+        Valid sites of interest per event
+    train_events: np.ndarray
+    val_events: np.ndarray
+        Training and validation events
+    train_int_sites: np.ndarray
+        Sites of interest for training
+    val_int_sites: np.ndarray
+        Sites of interest for validation
+    obs_sites: np.ndarray
+        Observation sites, used for both training
+        and validation!
+    events: np.ndarray
+        All available events
+    run_config: RunParamsConfig
+    hp_config: HyperParamsConfig
+    db: DB
+    corr_dir: Path
+        Path to the site correlation data
+        per event
+
+    Returns
+    -------
+    train_dataset : SCProbDataset
+    val_dataset: SCProbDataset
+    scalar_features: ml_data.ScalarFeatures
+    metadata: Dict
+    """
     # Get the scalar feature keys
     scalar_feature_keys = constants.SCALAR_FEATURE_SET_LOOKUP[run_config.scalar_feature_set_key]
     event_feature_keys = scalar_feature_keys["event"]
@@ -270,17 +308,19 @@ def data_prep(
     print(f"Creating site combinations")
     train_site_combs, train_event_sites = ml_data.compute_site_combinations(
         event_sites,
+        valid_event_int_sites,
         train_events,
         dist_matrix,
-        train_sites,
-        train_sites,
+        obs_sites,
+        train_int_sites,
         max_dist=run_config.max_dist,
     )
     val_site_combs, val_event_sites = ml_data.compute_site_combinations(
         event_sites,
+        valid_event_int_sites,
         val_events,
         dist_matrix,
-        train_sites,
+        obs_sites,
         val_int_sites,
         max_dist=run_config.max_dist,
     )
@@ -314,8 +354,9 @@ def data_prep(
     )
 
     metadata = {
-        "train_sites": train_sites.tolist(),
+        "train_int_sites": train_int_sites.tolist(),
         "val_int_sites": val_int_sites.tolist(),
+        "obs_sites": obs_sites.tolist(),
         "train_events": train_events.tolist(),
         "val_events": val_events.tolist(),
         "n_train_scenarios": len(train_dataset),
@@ -2026,7 +2067,8 @@ def post_processing(
     scalar_features: ml_data.ScalarFeatures,
     data_metadata: Dict,
     val_int_sites: np.ndarray,
-    train_sites: np.ndarray,
+    train_int_sites: np.ndarray,
+    obs_sites: np.ndarray,
     id_suffix: str = "",
 ):
     (
@@ -2036,7 +2078,8 @@ def post_processing(
 
     # Save the training sites and validation sites
     np.save(cur_out_dir / "val_int_sites.npy", val_int_sites)
-    np.save(cur_out_dir / "train_sites.npy", train_sites)
+    np.save(cur_out_dir / "train_int_sites.npy", train_int_sites)
+    np.save(cur_out_dir / "obs_sites.npy", obs_sites)
 
     # Compute the distance matrix
     print(f"Computing distance matrix")

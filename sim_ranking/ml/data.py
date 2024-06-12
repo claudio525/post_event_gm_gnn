@@ -1,8 +1,12 @@
+import warnings
 from typing import Dict, Sequence
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+
+from empirical.util.classdef import TectType, GMM
+from empirical.util.openquake_wrapper_vectorized import oq_run
 
 
 @dataclass
@@ -42,7 +46,8 @@ class WeightScalarFeatures:
 
 
 def compute_site_combinations(
-    sites: Dict[str, np.ndarray],
+    event_sites: Dict[str, np.ndarray],
+    valid_event_int_sites: Dict[str, np.ndarray],
     events: Sequence[str],
     dist_matrix: pd.DataFrame,
     site_obs: np.ndarray,
@@ -57,20 +62,36 @@ def compute_site_combinations(
 
     Parameters
     ----------
+    event_sites: dict
+        Sites available for each event
+    valid_event_int_sites: dict
+        Valid sites of interest for each event
+    site_obs: np.ndarray
+        Sites that are allowed to be used as observation sites
     site_int: np.ndarray
-        The site of interests that are allowed to be used
-        Any site not in this array is not used as site of interest,
-        can be used as observation site though
+        Sites that are allowed to be used as sites of interest
     """
     site_combs, used_sites = {}, {}
     for cur_event in events:
-        cur_sites = sites[cur_event]
-        cur_sites = cur_sites[
-            np.isin(cur_sites, site_int) | np.isin(cur_sites, site_obs)
-        ]
+        # Current sites of interest
+        cur_int_sites = valid_event_int_sites[cur_event]
+        cur_int_sites = cur_int_sites[np.isin(cur_int_sites, site_int)]
 
-        # Need at least two sites for the event
-        if len(cur_sites) < 2:
+        # Current observation sites
+        cur_obs_sites = event_sites[cur_event]
+        cur_obs_sites = cur_obs_sites[np.isin(cur_obs_sites, site_obs)]
+
+        # All sites for the current event
+        cur_sites = np.union1d(cur_int_sites, cur_obs_sites)
+
+
+        # cur_sites = event_sites[cur_event]
+        # cur_sites = cur_sites[
+        #     np.isin(cur_sites, site_int) | np.isin(cur_sites, site_obs)
+        # ]
+
+        # Need at least one site of interest and one observation site
+        if len(cur_int_sites) < 1 or len(cur_obs_sites) < 1:
             continue
 
         # Filter for the current event sites
@@ -92,8 +113,8 @@ def compute_site_combinations(
         cur_site_combs = np.stack((cur_row_ind, cur_col_ind), axis=1)
 
         # Filter based on allowed observation sites and sites of interest
-        cur_mask = np.isin(cur_sites[cur_site_combs[:, 1]], site_obs) & np.isin(
-            cur_sites[cur_site_combs[:, 0]], site_int
+        cur_mask = np.isin(cur_sites[cur_site_combs[:, 1]], cur_obs_sites) & np.isin(
+            cur_sites[cur_site_combs[:, 0]], cur_int_sites
         )
 
         site_combs[cur_event] = cur_site_combs[cur_mask]
@@ -122,15 +143,23 @@ def create_scalar_feature_tensor(
     """
     assert np.all(np.asarray(list(event_sites.keys())) == events)
 
-    scalar_feature_columns = np.asarray([
-        *scalar_features.event_feature_keys,
-        *[f"{cur_key}_site_int" for cur_key in scalar_features.site_feature_keys],
-        *[f"{cur_key}_site_obs" for cur_key in scalar_features.site_feature_keys],
-        *[f"{cur_key}_site_int" for cur_key in scalar_features.event_site_feature_keys],
-        *[f"{cur_key}_site_obs" for cur_key in scalar_features.event_site_feature_keys],
-        *scalar_features.site_to_site_feature_keys,
-        *scalar_features.event_site_to_site_feature_keys,
-    ])
+    scalar_feature_columns = np.asarray(
+        [
+            *scalar_features.event_feature_keys,
+            *[f"{cur_key}_site_int" for cur_key in scalar_features.site_feature_keys],
+            *[f"{cur_key}_site_obs" for cur_key in scalar_features.site_feature_keys],
+            *[
+                f"{cur_key}_site_int"
+                for cur_key in scalar_features.event_site_feature_keys
+            ],
+            *[
+                f"{cur_key}_site_obs"
+                for cur_key in scalar_features.event_site_feature_keys
+            ],
+            *scalar_features.site_to_site_feature_keys,
+            *scalar_features.event_site_to_site_feature_keys,
+        ]
+    )
 
     scalar_features_values = []
     for cur_event in events:
@@ -156,25 +185,25 @@ def create_scalar_feature_tensor(
         # Set the site features
         cur_f_ix = n_event_features
         n_site_features = len(scalar_features.site_feature_keys)
-        cur_tensor[
-            :, cur_f_ix : cur_f_ix + n_site_features
-        ] = scalar_features.site_features_data.loc[
-            cur_site_ints, scalar_features.site_feature_keys
-        ]
-        cur_tensor[
-            :, cur_f_ix + n_site_features : cur_f_ix + n_site_features * 2
-        ] = scalar_features.site_features_data.loc[
-            cur_site_obs, scalar_features.site_feature_keys
-        ]
+        cur_tensor[:, cur_f_ix : cur_f_ix + n_site_features] = (
+            scalar_features.site_features_data.loc[
+                cur_site_ints, scalar_features.site_feature_keys
+            ]
+        )
+        cur_tensor[:, cur_f_ix + n_site_features : cur_f_ix + n_site_features * 2] = (
+            scalar_features.site_features_data.loc[
+                cur_site_obs, scalar_features.site_feature_keys
+            ]
+        )
 
         # Set the event site features
         cur_f_ix += n_site_features * 2
         n_event_site_features = len(scalar_features.event_site_feature_keys)
-        cur_tensor[
-            :, cur_f_ix : cur_f_ix + n_event_site_features
-        ] = scalar_features.event_site_features_data[cur_event].loc[
-            cur_site_ints, scalar_features.event_site_feature_keys
-        ]
+        cur_tensor[:, cur_f_ix : cur_f_ix + n_event_site_features] = (
+            scalar_features.event_site_features_data[cur_event].loc[
+                cur_site_ints, scalar_features.event_site_feature_keys
+            ]
+        )
         cur_tensor[
             :, cur_f_ix + n_event_site_features : cur_f_ix + n_event_site_features * 2
         ] = scalar_features.event_site_features_data[cur_event].loc[
@@ -217,3 +246,92 @@ def _station_df_sanity_check(station_df: pd.DataFrame, site_features: Sequence[s
     assert all(
         [np.isclose(station_df[cur_feature].std(), 1) for cur_feature in site_features]
     )
+
+
+def get_valid_site_ints(
+    event_sites: Dict[str, np.ndarray],
+    record_df: pd.DataFrame,
+    station_df: pd.DataFrame,
+):
+    """
+    Gets the list of site of interests per event that experience
+    strong enough GM to be of interest.
+
+    Based on Bradley 2013 model, with a threshold of PGA > 0.01g for
+    Magnitude 6 event
+
+    Parameters
+    ----------
+    event_sites: dict
+        Available sites per event
+    record_df: Dataframe
+        Record data
+    station_df: Dataframe
+        Station data
+
+    Returns
+    -------
+    valid_int_sites: np.ndarray
+        Valid sites of interests
+    valid_event_int_sites: dict
+        Valid sites of interests per event
+    """
+    # Sanity check that input data is in agreement
+    assert all([
+        np.all(np.isin(event_sites[cur_event], cur_df.site_id.values.astype(str)))
+        for cur_event, cur_df in record_df.groupby("event_id")
+    ])
+
+    # Create the rupture dataframe
+    rupture_df = record_df.copy(True)
+    rupture_df = rupture_df.merge(
+        station_df[["vs30", "z1.0"]], left_on="site_id", right_index=True, how="inner"
+    )
+    assert rupture_df.shape[0] == record_df.shape[0]
+
+    # Constant inputs
+    rupture_df["mag"] = 6.0
+    rupture_df["r_jb"] = rupture_df["r_rup"]
+    rupture_df["rake"] = 45.0
+    rupture_df["dip"] = 45.0
+    rupture_df["z_tor"] = 0.0
+
+    # Rename the columns to be in line what openquake expects
+    rupture_df = rupture_df.rename(
+        columns={
+            "z_tor": "ztor",
+            "r_rup": "rrup",
+            "r_jb": "rjb",
+            "r_x": "rx",
+            "z1.0": "z1pt0",
+        }
+    )
+    rupture_df["vs30measured"] = True
+
+    # Check for nans
+    assert rupture_df.isna().sum().sum() == 0
+
+    # Get PGA results
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        pga_result = oq_run(
+            GMM.Br_10,
+            TectType.ACTIVE_SHALLOW,
+            rupture_df,
+            "PGA",
+        )
+    pga_result.index = rupture_df.index
+
+    assert np.all(pga_result.index == rupture_df.index)
+    pga_result["event_id"] = rupture_df["event_id"]
+    pga_result["site_id"] = rupture_df["site_id"]
+
+    # Get the valid site of interests
+    pga_result = pga_result.loc[pga_result["PGA_mean"] >= np.log(0.01)]
+    valid_event_int_sites = {
+        cur_event: cur_df.site_id.values.astype(str)
+        for cur_event, cur_df in pga_result.groupby("event_id")
+    }
+    valid_int_sites = np.unique(pga_result.site_id.values.astype(str))
+
+    return valid_int_sites, valid_event_int_sites

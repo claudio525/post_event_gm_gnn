@@ -111,22 +111,36 @@ def train_model(
     # Get the sites per event
     event_sites = db.get_event_sites()
 
+    # Get the set of valid site-interests per event
+    valid_int_sites, valid_event_int_sites = sr.ml.data.get_valid_site_ints(
+        event_sites, db.get_record_df(), db.get_site_df()
+    )
+
     # Split into training and validation
     if seed is not None:
         print(f"Using numpy random seed: {seed}")
         np.random.seed(seed)
-    val_int_sites = np.random.choice(all_sites, 100, replace=False)
-    train_sites = np.setdiff1d(all_sites, val_int_sites)
+    val_int_sites = np.random.choice(valid_int_sites, 75, replace=False)
+    train_int_sites = np.setdiff1d(valid_int_sites, val_int_sites)
+    obs_sites = np.setdiff1d(all_sites, val_int_sites)
+
+    print(f"Number of available sites: {len(all_sites)}")
+    print(f"Number of valid sites of interests: {valid_int_sites.size}")
+    print(f"Number of training sites of interests: {train_int_sites.size}")
+    print(f"Number of validation sites of interests: {val_int_sites.size}")
+    print(f"Number of observation sites: {obs_sites.size}")
 
     val_events = np.random.choice(events, 75, replace=False)
     train_events = np.setdiff1d(events, val_events)
 
     train_dataset, val_dataset, scalar_features, data_metadata = sc_prob.data_prep(
         event_sites,
+        valid_event_int_sites,
         train_events,
         val_events,
-        train_sites,
+        train_int_sites,
         val_int_sites,
+        obs_sites,
         events,
         run_config,
         hp_config,
@@ -139,7 +153,13 @@ def train_model(
     prob_model.to(device)
 
     weight_model = sr.ml.models.WeightModel(
-        run_config.n_ims, hp_config.wm_fc_units, len(sr.constants.WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP[run_config.weight_model_feature_set_key])
+        run_config.n_ims,
+        hp_config.wm_fc_units,
+        len(
+            sr.constants.WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP[
+                run_config.weight_model_feature_set_key
+            ]
+        ),
     )
     weight_model.to(device)
 
@@ -176,7 +196,8 @@ def train_model(
         scalar_features,
         data_metadata,
         val_int_sites,
-        train_sites,
+        train_int_sites,
+        obs_sites,
         id_suffix=id_suffix,
     )
 
