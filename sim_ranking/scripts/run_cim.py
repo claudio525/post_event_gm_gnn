@@ -1,6 +1,6 @@
 import os.path
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 
 import pandas as pd
 import numpy as np
@@ -19,9 +19,9 @@ def emp_cmvn(
     rel_gmm_params_ffp: Path,
     rel_db_ffp: Path,
     results_dir: Path,
-    IMs: List[str] = None,
     min_n_obs_stations: int = 5,
     n_stations: int = 20,
+    IMs: List[str] = None,
     quiet: bool = False
 ):
     """
@@ -35,14 +35,21 @@ def emp_cmvn(
      - Support for specifying sites of interest
      - Support for setting IM weights
     """
+    obs_site_sel_params = {
+        "min_n_obs_stations": min_n_obs_stations,
+        "n_stations": n_stations,
+
+        # "max_obs_dist": max_obs_dist,
+        # "min_n_obs": min_n_obs,
+    }
+
     run_emp_cmvn(
         rupture,
         rel_gmm_params_ffp,
         rel_db_ffp,
         results_dir,
+        obs_site_sel_params,
         IMs=IMs,
-        min_n_obs_stations=min_n_obs_stations,
-        n_obs_stations=n_stations,
         quiet=quiet
     )
 
@@ -66,16 +73,23 @@ def emp_cmvn_all(
 
     events = np.intersect1d(sim_events, obs_events)
 
+    obs_site_sel_params = {
+        "min_n_obs_stations": min_n_obs_stations,
+        "n_stations": n_stations,
+
+        # "max_obs_dist": max_obs_dist,
+        # "min_n_obs": min_n_obs,
+    }
+
     for cur_event in tqdm(events):
         run_emp_cmvn(
             str(cur_event),
             rel_gm_params_ffp,
             rel_db_ffp,
             results_dir / cur_event,
+            obs_site_sel_params,
             val_int_sites_ffp=val_int_sites_ffp,
             IMs=IMs,
-            min_n_obs_stations=min_n_obs_stations,
-            n_obs_stations=n_stations,
             quiet=quiet
         )
 
@@ -85,10 +99,9 @@ def run_emp_cmvn(
     rel_gm_params_ffp: Path,
     rel_db_ffp: Path,
     results_dir: Path,
+    obs_site_sel_params: Dict[str, Any],
     val_int_sites_ffp: Path = None,
     IMs: List[str] = None,
-    min_n_obs_stations: int = 5,
-    n_obs_stations: int = 20,
     quiet: bool = False
 ):
     db_ffp = Path(os.path.expandvars("$wdata")) / rel_db_ffp
@@ -109,7 +122,7 @@ def run_emp_cmvn(
     # IMs to use for ranking
     IMs = (
         [f"pSA_{cur_period}" for cur_period in sr.constants.PERIODS]
-        if len(IMs) == 0
+        if IMs is None or len(IMs) == 0
         else IMs
     )
     im_weights = sr.constants.IM_WEIGTHS_SETS["pSA"]
@@ -137,7 +150,6 @@ def run_emp_cmvn(
                   f" as specified by val_int_sites")
         obs_df = obs_df.loc[~mask]
 
-
     # Load the simulation IM data
     sim_data = db.get_sim_data(rupture, int_stations)
     sim_data = {cur_site: cur_g for cur_site, cur_g in sim_data.groupby("site_id")}
@@ -153,8 +165,7 @@ def run_emp_cmvn(
         obs_df,
         int_stations,
         sr.utils.SourceInfo(rupture, tuple(event_df.loc[rupture, ["lon", "lat"]].values)),
-        min_n_obs_stations=min_n_obs_stations,
-        n_obs_stations=n_obs_stations,
+        obs_site_sel_params,
         verbose=not quiet
     )
 
@@ -164,8 +175,7 @@ def run_emp_cmvn(
         IMs=IMs,
         db_ffp=str(rel_db_ffp),
         gm_params_ffp=str(rel_gm_params_ffp),
-        min_n_obs_stations=min_n_obs_stations,
-        n_obs_stations=n_obs_stations,
+        obs_site_sel_params=obs_site_sel_params,
     )
     mlt.utils.write_to_yaml(meta, output_dir / "meta.yaml")
 
@@ -188,6 +198,14 @@ def sim_cmvn_all(
     simulation conditional MVN for
     all ruptures with data
     """
+    obs_site_sel_params = {
+        "min_n_obs_stations": min_n_obs_stations,
+        "n_stations": n_obs_stations,
+
+        # "max_obs_dist": max_obs_dist,
+        # "min_n_obs": min_n_obs,
+    }
+
     # Find all events for which empirical and simulation data is available
     db = sr.db.DB(Path(os.path.expandvars("$wdata")) / rel_db_ffp)
     sim_events = db.get_avail_events(data_source=data_source)
@@ -202,11 +220,10 @@ def sim_cmvn_all(
             rel_sim_gm_params_dir / cur_event,
             rel_db_ffp,
             results_dir / cur_event,
+            obs_site_sel_params,
             val_int_sites_ffp=val_int_sites_ffp,
             rel_corr_dir=rel_corr_dir,
             IMs=IMs,
-            min_n_obs_stations=min_n_obs_stations,
-            n_obs_stations=n_obs_stations,
             quiet=quiet
         )
 
@@ -228,80 +245,24 @@ def sim_ranking(
     simulation conditional MVN for the
     specified rupture
     """
+    obs_site_sel_params = {
+        "min_n_obs_stations": min_n_obs_stations,
+        "n_stations": n_obs_stations,
+
+        # "max_obs_dist": max_obs_dist,
+        # "min_n_obs": min_n_obs,
+    }
+
     run_sim_cmvn(
         sr.constants.RankingMethod.sim_cMVN,
         rupture,
         rel_sim_gm_params_dir,
         rel_db_ffp,
         results_dir,
+        obs_site_sel_params,
         rel_corr_dir=rel_corr_dir,
         IMs=IMs,
-        min_n_obs_stations=min_n_obs_stations,
-        n_obs_stations=n_obs_stations,
         quiet=quiet
-    )
-
-
-@app.command("cmvn-sim-emp-corr-all")
-def sim_cmvn_emp_corr_all(
-    sim_gm_params_dir: Path,
-    obs_data_ffp: Path,
-    stations_ll_ffp: Path,
-    sim_imdb_ffp: Path,
-    results_dir: Path,
-    IMs: List[str] = None,
-    n_stations: int = 20,
-):
-    """
-    Same as cmvn-sim-all but uses correlation
-    coefficients from the empirical model
-    Runs for all ruptures with data
-    """
-    events = [
-        cur_dir.stem
-        for cur_dir in sim_gm_params_dir.iterdir()
-        if cur_dir.is_dir() and not cur_dir.stem.startswith("_")
-    ]
-
-    for cur_event in events:
-        run_sim_cmvn(
-            sr.constants.RankingMethod.sim_cMVN_emp_corr,
-            cur_event,
-            sim_gm_params_dir / cur_event,
-            obs_data_ffp,
-            stations_ll_ffp,
-            sim_imdb_ffp,
-            results_dir / cur_event,
-            IMs=IMs,
-            n_obs_stations=n_stations,
-        )
-
-
-@app.command("cmvn-sim-emp-corr")
-def sim_cmvn_ranking_emp_corr(
-    rupture: str,
-    sim_gm_params_dir: Path,
-    obs_data_ffp: Path,
-    stations_ll_ffp: Path,
-    sim_imdb_ffp: Path,
-    results_dir: Path,
-    IMs: List[str] = None,
-    n_stations: int = 20,
-):
-    """
-    Same as cmvn-sim but uses correlation
-    coefficients from the empirical model
-    """
-    run_sim_cmvn(
-        sr.constants.RankingMethod.sim_cMVN_emp_corr,
-        rupture,
-        sim_gm_params_dir,
-        obs_data_ffp,
-        stations_ll_ffp,
-        sim_imdb_ffp,
-        results_dir,
-        IMs=IMs,
-        n_obs_stations=n_stations,
     )
 
 
@@ -311,11 +272,10 @@ def run_sim_cmvn(
     rel_sim_gm_params_dir: Path,
     rel_db_ffp: Path,
     results_dir: Path,
+    obs_site_sel_params: Dict[str, Any],
     val_int_sites_ffp: Path = None,
     rel_corr_dir: Path = None,
     IMs: List[str] = None,
-    min_n_obs_stations: int = 5,
-    n_obs_stations: int = 20,
     quiet: bool = False
 ):
     db_ffp = Path(os.path.expandvars("$wdata")) / rel_db_ffp
@@ -383,9 +343,8 @@ def run_sim_cmvn(
         obs_df,
         int_stations,
         sr.utils.SourceInfo(rupture, tuple(event_df.loc[rupture, ["lon", "lat"]].values)),
+        obs_site_sel_params,
         R=R,
-        min_n_obs_stations=min_n_obs_stations,
-        n_obs_stations=n_obs_stations,
         verbose=not quiet
     )
 
@@ -397,8 +356,7 @@ def run_sim_cmvn(
         sim_gm_params_dir=str(sim_gm_params_dir),
         db_ffp=str(rel_db_ffp),
         corr_dir=str(rel_corr_dir) if corr_dir is not None else None,
-        min_n_obs_stations=min_n_obs_stations,
-        n_obs_stations=n_obs_stations,
+        obs_site_sel_params=obs_site_sel_params,
     )
 
     mlt.utils.write_to_yaml(meta, output_dir / "meta.yaml")
@@ -406,3 +364,67 @@ def run_sim_cmvn(
 
 if __name__ == "__main__":
     app()
+
+
+
+# @app.command("cmvn-sim-emp-corr-all")
+# def sim_cmvn_emp_corr_all(
+#     sim_gm_params_dir: Path,
+#     obs_data_ffp: Path,
+#     stations_ll_ffp: Path,
+#     sim_imdb_ffp: Path,
+#     results_dir: Path,
+#     IMs: List[str] = None,
+#     n_stations: int = 20,
+# ):
+#     """
+#     Same as cmvn-sim-all but uses correlation
+#     coefficients from the empirical model
+#     Runs for all ruptures with data
+#     """
+#     events = [
+#         cur_dir.stem
+#         for cur_dir in sim_gm_params_dir.iterdir()
+#         if cur_dir.is_dir() and not cur_dir.stem.startswith("_")
+#     ]
+#
+#     for cur_event in events:
+#         run_sim_cmvn(
+#             sr.constants.RankingMethod.sim_cMVN_emp_corr,
+#             cur_event,
+#             sim_gm_params_dir / cur_event,
+#             obs_data_ffp,
+#             stations_ll_ffp,
+#             sim_imdb_ffp,
+#             results_dir / cur_event,
+#             IMs=IMs,
+#             n_obs_stations=n_stations,
+#         )
+
+
+# @app.command("cmvn-sim-emp-corr")
+# def sim_cmvn_ranking_emp_corr(
+#     rupture: str,
+#     sim_gm_params_dir: Path,
+#     obs_data_ffp: Path,
+#     stations_ll_ffp: Path,
+#     sim_imdb_ffp: Path,
+#     results_dir: Path,
+#     IMs: List[str] = None,
+#     n_stations: int = 20,
+# ):
+#     """
+#     Same as cmvn-sim but uses correlation
+#     coefficients from the empirical model
+#     """
+#     run_sim_cmvn(
+#         sr.constants.RankingMethod.sim_cMVN_emp_corr,
+#         rupture,
+#         sim_gm_params_dir,
+#         obs_data_ffp,
+#         stations_ll_ffp,
+#         sim_imdb_ffp,
+#         results_dir,
+#         IMs=IMs,
+#         n_obs_stations=n_stations,
+#     )

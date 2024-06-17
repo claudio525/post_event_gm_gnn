@@ -1,4 +1,4 @@
-from typing import Sequence, Dict, Tuple
+from typing import Sequence, Dict, Tuple, Any
 from pathlib import Path
 from dataclasses import dataclass
 import pickle
@@ -47,9 +47,8 @@ def run_conditional_mvn_ranking(
     obs_data: pd.DataFrame,
     int_stations: np.ndarray,
     source_info: utils.SourceInfo,
+    obs_site_sel_params: Dict[str, Any],
     R: Dict[str, pd.DataFrame] = None,
-    min_n_obs_stations: int = 5,
-    n_obs_stations: int = 20,
     verbose: bool = True,
 ):
     """
@@ -82,9 +81,6 @@ def run_conditional_mvn_ranking(
     R: dict of DataFrames, optional
         The within-event spatial correlation matrices
         for each IM
-    n_obs_stations: int, optional
-        The number of observation stations to use for
-        the calculation of the conditional IM distributions
 
     Returns
     -------
@@ -103,9 +99,8 @@ def run_conditional_mvn_ranking(
         stations_df,
         int_stations,
         source_info,
+        obs_site_sel_params,
         R=R,
-        min_n_obs_stations=min_n_obs_stations,
-        n_obs_stations=n_obs_stations,
         verbose=verbose,
     )
     if cIMs_result is None:
@@ -132,29 +127,21 @@ def run_conditional_mvn_ranking(
                 cIMs_result.cond_lnIM_mean_df.loc[cur_site, IMs_str].values
                 - np.log(cur_sim_df[IMs_str].values)
             )
-            ** 2, "i, j i -> j",
+            ** 2,
+            "i, j i -> j",
         )
 
         # Aggregate along IM axis
         rel_misfits.append(
-            pd.Series(
-                index=cur_sim_df.index, data=cur_rel_misfit, name=cur_site
-            )
+            pd.Series(index=cur_sim_df.index, data=cur_rel_misfit, name=cur_site)
         )
 
     # Combine
     rel_misfits_df = pd.concat(rel_misfits, axis=1)
 
-    # # Select the best realisation for each site
-    # best_sim_id = pd.Series(
-    #     data=rel_misfits_df.index[np.argmin(rel_misfits_df.values, axis=0)],
-    #     index=rel_misfits_df.columns,
-    # )
-
     # Save the results
     cIMs_result.save(output_dir / "cMVN_distributions.pickle")
     rel_misfits_df.to_csv(output_dir / "rel_misfits.csv")
-    # best_sim_id.to_csv(output_dir / "best_sim_ids.csv")
 
 
 def compute_cond_MVN_distributions(
@@ -164,16 +151,11 @@ def compute_cond_MVN_distributions(
     stations_df: pd.DataFrame,
     int_stations: np.ndarray,
     source_info: utils.SourceInfo,
+    obs_site_sel_params: Dict[str, Any],
     R: Dict[str, pd.DataFrame] = None,
-    min_n_obs_stations: int = 5,
-    n_obs_stations: int = 20,
     verbose: bool = True,
 ):
     IMs_str = [str(cur_im) for cur_im in IMs]
-
-    # Get the hypocentre location & event id
-    # hypo_loc = tuple(obs_data[["ev_lon", "ev_lat"]].iloc[0].values)
-    # rutpure = obs_data["evid"].values[0]
 
     # Only need IMs from here
     obs_data = obs_data.loc[:, IMs_str]
@@ -205,8 +187,8 @@ def compute_cond_MVN_distributions(
             cur_gmm_params_df,
             np.log(obs_data[str(cur_im)]),
             source_info.hypo_loc,
-            obs_site_filter_fn=sh.im_dist.get_nn_obs_site_filter_fn(
-                min_n_obs_stations, n_obs_stations
+            sh.im_dist.get_max_dist_obs_site_filter_fn(
+                obs_site_sel_params["max_obs_dist"], obs_site_sel_params["min_n_obs"]
             ),
             R=R[str(cur_im)] if R is not None else None,
             allow_obs_sites=True,
