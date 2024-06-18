@@ -1338,6 +1338,7 @@ def train(
 
     lr_ix = 0
     for epoch_ix in range(hp_config.n_epochs):
+        # Learning rate adjustment
         if lr_ix < len(hp_config.lr_epochs) and epoch_ix == hp_config.lr_epochs[lr_ix]:
             for param_group in optimizer.param_groups:
                 param_group["lr"] = hp_config.lr[lr_ix + 1]
@@ -1368,6 +1369,7 @@ def train(
             im_misfit_score,
             im_site_corrs,
         ) in enumerate(iter_loop):
+            # Get model predictions
             pred = get_prediction(
                 prob_model,
                 site_obs_norm_obs_ims,
@@ -1381,6 +1383,7 @@ def train(
                 hp_config,
             )
 
+            # Check for NaN values
             if pred.isnan().any():
                 print("NaNs in model predictions, Quitting!")
                 if run_config.debug:
@@ -1392,6 +1395,7 @@ def train(
                         print(f"Saved grads to {tmp_dir}")
                 exit()
 
+            # Compute loss, and relevant values
             (
                 w_pred,
                 agg_probs,
@@ -1415,6 +1419,7 @@ def train(
                 hp_config,
             )
 
+            # Backpropagation
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()

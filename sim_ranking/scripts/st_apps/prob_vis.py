@@ -1447,6 +1447,7 @@ def agg_scenario_vis(
     sc_results_df: pd.DataFrame,
     sc_sum_df: pd.DataFrame,
     sample_results_df: pd.DataFrame,
+    sample_sum_results_df: pd.DataFrame,
     tab_type: str,
 ):
     with st.expander("Posterior Probabilities"):
@@ -1493,99 +1494,7 @@ def agg_scenario_vis(
     if not np.any(sc_sum_df["weight"].isna()):
         axis_cols.extend(["weight", "w_loss"])
 
-    st.markdown("### Loss trends")
-    st.text("Note: Loss always refers to unweighted loss in these plots!!")
-    with st.expander("Loss vs Minimum Distance"):
-        fig, ax = mlt.plotting.gen_scatter_trend_plot(
-            sc_sum_df,
-            mlt.plotting.ScatterOptions(
-                "min_s2s_dist",
-                "loss",
-                x_min=0.0,
-                y_min=0.0,
-                y_max_use_qt=True,
-                y_max=0.95,
-                use_fixed_color=False,
-                color_axis="n_obs_sites",
-                cmap="Blues",
-                vmin=0.0,
-                vmax=10.0,
-                alpha=0.9,
-                show_trend_mean_line=True,
-            ),
-        )
-        st.pyplot(fig, use_container_width=False)
-        plt.close(fig)
 
-    with st.expander("Loss vs Number of Observations"):
-        fig, ax = mlt.plotting.gen_scatter_trend_plot(
-            sc_sum_df,
-            mlt.plotting.ScatterOptions(
-                "n_obs_sites",
-                "loss",
-                x_min=0.0,
-                y_min=0.0,
-                y_max_use_qt=True,
-                y_max=0.95,
-                use_fixed_color=False,
-                color_axis="min_s2s_dist",
-                cmap="Blues_r",
-                vmin=None,
-                vmax=None,
-                alpha=0.9,
-                show_trend_mean_line=True,
-            ),
-        )
-        st.pyplot(fig, use_container_width=False)
-        plt.close(fig)
-
-    with st.expander("Loss vs Average Std"):
-        fig, ax = mlt.plotting.gen_scatter_trend_plot(
-            sc_sum_df,
-            mlt.plotting.ScatterOptions(
-                "std_avg",
-                "loss",
-                x_min_use_qt=True,
-                x_min=0.01,
-                x_max_use_qt=True,
-                x_max=0.99,
-                y_min=0.0,
-                y_max_use_qt=True,
-                y_max=0.95,
-                use_fixed_color=False,
-                color_axis="n_obs_sites",
-                cmap="Blues",
-                vmin=0,
-                vmax=10,
-                alpha=0.9,
-                show_trend_mean_line=True,
-            ),
-        )
-        st.pyplot(fig, use_container_width=False)
-        plt.close(fig)
-
-        fig, ax = mlt.plotting.gen_scatter_trend_plot(
-            sc_sum_df,
-            mlt.plotting.ScatterOptions(
-                "std_avg",
-                "loss",
-                x_min_use_qt=True,
-                x_min=0.01,
-                x_max_use_qt=True,
-                x_max=0.99,
-                y_min=0.0,
-                y_max_use_qt=True,
-                y_max=0.95,
-                use_fixed_color=False,
-                color_axis="min_s2s_dist",
-                cmap="Blues_r",
-                vmin=0,
-                alpha=0.9,
-                show_trend_mean_line=True,
-            ),
-        )
-        st.pyplot(fig, use_container_width=False)
-        plt.close(fig)
 
     with st.expander("Number of Observations vs Minimum Distance"):
         fig, ax = mlt.plotting.gen_scatter_trend_plot(
@@ -1610,6 +1519,81 @@ def agg_scenario_vis(
 
     st.divider()
 
+    st.markdown("### Loss trends")
+    st.text("Note: Loss always refers to unweighted loss in these plots!!")
+    with st.expander("Loss vs Minimum Distance"):
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "min_s2s_dist",
+                "loss",
+                x_min=0.0,
+                y_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.95,
+                use_fixed_color=False,
+                color_axis="n_obs_sites",
+                cmap="Blues",
+                vmin=0.0,
+                vmax=10.0,
+                alpha=0.9,
+                show_trend_mean_line=True,
+                # show_trend_std_line=True,
+                binning_method=mlt.plotting.BinningMethod.EqualCount
+            ),
+        )
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+    with st.expander("Loss vs Number of Observations"):
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "n_obs_sites",
+                "loss",
+                x_min=0.0,
+                y_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.95,
+                use_fixed_color=False,
+                color_axis="min_s2s_dist",
+                cmap="Blues_r",
+                vmin=None,
+                vmax=None,
+                alpha=0.9,
+                show_trend_mean_line=True,
+                binning_method=mlt.plotting.BinningMethod.EqualCount
+            ),
+        )
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+    with st.expander("Loss vs Scenario Weight"):
+        print(f"wtf")
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(
+            sc_sum_df,
+            mlt.plotting.ScatterOptions(
+                "weight",
+                "loss",
+                x_min=0.0,
+                y_min=0.0,
+                y_max_use_qt=True,
+                y_max=0.95,
+                use_fixed_color=False,
+                color_axis="n_obs_sites",
+                cmap="Blues",
+                vmin=0.0,
+                vmax=10.0,
+                alpha=0.9,
+                show_trend_mean_line=True,
+                binning_method=mlt.plotting.BinningMethod.EqualCount
+            ),
+        )
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
+
+    st.divider()
+
     st.markdown("### Average Std trends")
     with st.expander("Average Sigma vs Minimum Distance"):
         fig, ax = mlt.plotting.gen_scatter_trend_plot(
@@ -1627,6 +1611,7 @@ def agg_scenario_vis(
                 vmax=10,
                 alpha=0.9,
                 show_trend_mean_line=True,
+                binning_method=mlt.plotting.BinningMethod.EqualCount
             ),
         )
         st.pyplot(fig, use_container_width=False)
@@ -1648,6 +1633,7 @@ def agg_scenario_vis(
                 vmax=0.95,
                 alpha=0.9,
                 show_trend_mean_line=True,
+                binning_method=mlt.plotting.BinningMethod.EqualCount
             ),
         )
         st.pyplot(fig, use_container_width=False)
@@ -1668,6 +1654,7 @@ def agg_scenario_vis(
                 vmin=0,
                 alpha=0.9,
                 show_trend_mean_line=True,
+                binning_method=mlt.plotting.BinningMethod.EqualCount
             ),
         )
         st.pyplot(fig, use_container_width=False)
@@ -1689,6 +1676,7 @@ def agg_scenario_vis(
                 vmax=0.95,
                 alpha=0.9,
                 show_trend_mean_line=True,
+                binning_method=mlt.plotting.BinningMethod.EqualCount
             ),
         )
         st.pyplot(fig, use_container_width=False)
@@ -1714,6 +1702,7 @@ def agg_scenario_vis(
                 vmin=0,
                 alpha=0.9,
                 show_trend_mean_line=True,
+                binning_method=mlt.plotting.BinningMethod.EqualCount
             ),
         )
         st.pyplot(fig, use_container_width=False)
@@ -1739,6 +1728,7 @@ def agg_scenario_vis(
                 vmax=10,
                 alpha=0.9,
                 show_trend_mean_line=True,
+                binning_method=mlt.plotting.BinningMethod.EqualCount
             ),
         )
         st.pyplot(fig, use_container_width=False)
@@ -1746,14 +1736,12 @@ def agg_scenario_vis(
 
     st.divider()
 
-    st.markdown("### Custom")
-    scatter_options = st_utils.scatter_options_form(sc_sum_df, axis_cols, tab_type)
-    if scatter_options is not None:
-        fig, ax = mlt.plotting.gen_scatter_trend_plot(sc_sum_df, scatter_options)
-        st.pyplot(fig, use_container_width=False)
-        plt.close(fig)
-
-    return
+    # st.markdown("### Custom")
+    # scatter_options = st_utils.scatter_options_form(sc_sum_df, axis_cols, tab_type)
+    # if scatter_options is not None:
+    #     fig, ax = mlt.plotting.gen_scatter_trend_plot(sc_sum_df, scatter_options)
+    #     st.pyplot(fig, use_container_width=False)
+    #     plt.close(fig)
 
 
 def run_agg_scenario(
@@ -1778,6 +1766,7 @@ def run_agg_scenario(
             train_sc_results,
             train_sc_sum_df,
             train_sample_results,
+            train_sample_sum_results,
             "train_scenario",
         )
         # print(f"Took {time.time() - start_time} to run train_scenario")
@@ -1975,14 +1964,14 @@ def main(
     scenario_results = st_utils.ml_load_scenario_results(cur_results_dir)
 
     with ind_sample_tab:
-        # pass
+        pass
         # start_time = time.time()
-        run_ind_samples(
-            cur_results_dir,
-            sample_results,
-            gen_gm_params_ffp=gen_gm_params_ffp,
-            syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
-        )
+        # run_ind_samples(
+        #     cur_results_dir,
+        #     sample_results,
+        #     gen_gm_params_ffp=gen_gm_params_ffp,
+        #     syn_obs_gm_params_ffp=syn_obs_gm_params_ffp,
+        # )
         # print(f"Took {time.time() - start_time} to run ind sample tab")
 
     with ind_scenario_tab:
@@ -1997,7 +1986,8 @@ def main(
         )
         # print(f"Took {time.time() - start_time} to run ind scenario tab")
     with agg_single_tab:
-        run_agg_single(cur_results_dir, sample_results)
+        pass
+        # run_agg_single(cur_results_dir, sample_results)
 
     with agg_scenario_tab:
         # pass
