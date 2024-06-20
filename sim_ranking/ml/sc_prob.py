@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
-from torch.utils.data import Dataset
 from tqdm import tqdm
 from torchinfo import summary
 from torchview import draw_graph
@@ -188,18 +187,18 @@ class HyperParamsConfig:
 
 
 def data_prep(
-    event_sites: Dict[str, np.ndarray],
-    valid_event_int_sites: Dict[str, np.ndarray],
-    train_events: np.ndarray,
-    val_events: np.ndarray,
-    train_int_sites: np.ndarray,
-    val_int_sites: np.ndarray,
-    obs_sites: np.ndarray,
-    events: np.ndarray,
-    run_config: RunParamsConfig,
-    hp_config: HyperParamsConfig,
-    db: DB,
-    corr_dir: Path,
+        event_sites: Dict[str, np.ndarray],
+        valid_event_int_sites: Dict[str, np.ndarray],
+        train_events: np.ndarray,
+        val_events: np.ndarray,
+        train_int_sites: np.ndarray,
+        val_int_sites: np.ndarray,
+        obs_sites: np.ndarray,
+        events: np.ndarray,
+        run_config: RunParamsConfig,
+        hp_config: HyperParamsConfig,
+        db: DB,
+        corr_dir: Path,
 ):
     """
     Creates the training and validation dataset for
@@ -266,9 +265,9 @@ def data_prep(
     event_features_stats.loc["std"] = event_df.loc[events, event_feature_keys].std()
     event_features_df = event_df.loc[events, event_feature_keys]
     event_features_df[event_feature_keys] = (
-        event_df.loc[events, event_feature_keys]
-        - event_features_stats.loc["mean", event_feature_keys]
-    ) / event_features_stats.loc["std", event_feature_keys]
+                                                    event_df.loc[events, event_feature_keys]
+                                                    - event_features_stats.loc["mean", event_feature_keys]
+                                            ) / event_features_stats.loc["std", event_feature_keys]
 
     # Compute the site-to-site features
     print(f"Computing scalar features")
@@ -417,19 +416,57 @@ def data_prep(
     #     assert np.allclose(site_obs_obs[ix, :], cur_site_obs_obs)
 
 
-class SCProbDataset(Dataset):
+@dataclass
+class SCBatchData(utils.BaseBatchData):
+    batch_ind: Union[torch.Tensor, np.ndarray]
+    rel_shuffle_ind: Union[torch.Tensor, np.ndarray]
+    scenario_ids: Union[torch.Tensor, np.ndarray]
+    scenario_im_misfit_score: Union[torch.Tensor, np.ndarray]
+    record_scenario_ids: Union[torch.Tensor, np.ndarray]
+    site_int_norm_sim_ims: Union[torch.Tensor, np.ndarray]
+    site_obs_norm_sim_ims: Union[torch.Tensor, np.ndarray]
+    site_obs_norm_obs_ims: Union[torch.Tensor, np.ndarray]
+    site_int_sim_ims: Union[torch.Tensor, np.ndarray]
+    site_obs_sim_ims: Union[torch.Tensor, np.ndarray]
+    site_obs_obs_ims: Union[torch.Tensor, np.ndarray]
+    scalar_features: Union[torch.Tensor, np.ndarray]
+    w_scalar_features: Union[torch.Tensor, np.ndarray]
+    record_im_misfit_score: Union[torch.Tensor, np.ndarray]
+    im_site_corrs: Union[torch.Tensor, np.ndarray]
+
+    def to_tensor(self) -> "SCBatchData":
+        self.batch_ind = torch.from_numpy(self.batch_ind)
+        self.rel_shuffle_ind = torch.from_numpy(self.rel_shuffle_ind)
+        self.scenario_ids = torch.from_numpy(self.scenario_ids)
+        self.scenario_im_misfit_score = torch.from_numpy(self.scenario_im_misfit_score)
+        self.record_scenario_ids = torch.from_numpy(self.record_scenario_ids)
+        self.site_int_norm_sim_ims = torch.from_numpy(self.site_int_norm_sim_ims)
+        self.site_obs_norm_sim_ims = torch.from_numpy(self.site_obs_norm_sim_ims)
+        self.site_obs_norm_obs_ims = torch.from_numpy(self.site_obs_norm_obs_ims)
+        self.site_int_sim_ims = torch.from_numpy(self.site_int_sim_ims)
+        self.site_obs_sim_ims = torch.from_numpy(self.site_obs_sim_ims)
+        self.site_obs_obs_ims = torch.from_numpy(self.site_obs_obs_ims)
+        self.scalar_features = torch.from_numpy(self.scalar_features)
+        self.w_scalar_features = torch.from_numpy(self.w_scalar_features)
+        self.record_im_misfit_score = torch.from_numpy(self.record_im_misfit_score)
+        self.im_site_corrs = torch.from_numpy(self.im_site_corrs)
+
+        return self
+
+
+class SCProbDataset(utils.BaseDataset):
     def __init__(
-        self,
-        event_sites: Dict[str, np.ndarray],
-        event_site_combs: Dict[str, np.ndarray],
-        db: DB,
-        run_config: RunParamsConfig,
-        scalar_features: ml_data.ScalarFeatures,
-        w_scalar_feature_cols: np.ndarray,
-        ims_mean: np.ndarray,
-        ims_std: np.ndarray,
-        hp_config: HyperParamsConfig,
-        corr_dir: Path,
+            self,
+            event_sites: Dict[str, np.ndarray],
+            event_site_combs: Dict[str, np.ndarray],
+            db: DB,
+            run_config: RunParamsConfig,
+            scalar_features: ml_data.ScalarFeatures,
+            w_scalar_feature_cols: np.ndarray,
+            ims_mean: np.ndarray,
+            ims_std: np.ndarray,
+            hp_config: HyperParamsConfig,
+            corr_dir: Path,
     ):
         self.db = db
         self.event_sites = event_sites
@@ -471,7 +508,7 @@ class SCProbDataset(Dataset):
         self.n_scenarios_event = []
         self.im_misfit_score = []
         for ix, (cur_event, cur_sites) in enumerate(
-            tqdm(self.event_sites.items(), desc="Processing events")
+                tqdm(self.event_sites.items(), desc="Processing events")
         ):
             # Get the simulation data
             cur_sim_df = db.get_sim_data(cur_event, cur_sites)
@@ -542,12 +579,12 @@ class SCProbDataset(Dataset):
 
             # Normalise & Append
             cur_obs_data = (
-                cur_obs_data - self.ims_mean[self.ims].values
-            ) / self.ims_std[self.ims].values
+                                   cur_obs_data - self.ims_mean[self.ims].values
+                           ) / self.ims_std[self.ims].values
             self.norm_obs_ims.append(cur_obs_data)
             cur_sim_data = (
-                cur_sim_data - self.ims_mean[self.ims].values
-            ) / self.ims_std[self.ims].values
+                                   cur_sim_data - self.ims_mean[self.ims].values
+                           ) / self.ims_std[self.ims].values
             self.norm_sim_ims.append(cur_sim_data)
 
             # Get the (absolute) spatial correlations
@@ -591,7 +628,6 @@ class SCProbDataset(Dataset):
         site_combs_df, sim_ims_df = [], []
         site_combs_ix, sim_ims_ix = 0, 0
         for cur_event in self.events:
-
             ### TODO: Give scenario id
             # Site Combinations
             cur_site_comb_df = pd.DataFrame(
@@ -657,20 +693,20 @@ class SCProbDataset(Dataset):
                 cur_site_obs_ind = self.site_combs[cur_record_ind, 1]
             else:
                 cur_site_int_ind = (
-                    self.cum_n_sites_event[cur_ev_ix - 1]
-                    + self.site_combs[cur_record_ind, 0]
+                        self.cum_n_sites_event[cur_ev_ix - 1]
+                        + self.site_combs[cur_record_ind, 0]
                 )
                 cur_site_obs_ind = (
-                    self.cum_n_sites_event[cur_ev_ix - 1]
-                    + self.site_combs[cur_record_ind, 1]
+                        self.cum_n_sites_event[cur_ev_ix - 1]
+                        + self.site_combs[cur_record_ind, 1]
                 )
 
-            record_ind[i_counter : i_counter + cur_record_ind.size] = cur_record_ind
+            record_ind[i_counter: i_counter + cur_record_ind.size] = cur_record_ind
 
-            record_site_int_ind[i_counter : i_counter + cur_record_ind.size] = (
+            record_site_int_ind[i_counter: i_counter + cur_record_ind.size] = (
                 cur_site_int_ind
             )
-            record_site_obs_ind[i_counter : i_counter + cur_record_ind.size] = (
+            record_site_obs_ind[i_counter: i_counter + cur_record_ind.size] = (
                 cur_site_obs_ind
             )
 
@@ -680,9 +716,9 @@ class SCProbDataset(Dataset):
             i_counter += cur_record_ind.size
 
         assert (
-            np.all(record_site_int_ind >= 0)
-            and np.all(record_site_obs_ind >= 0)
-            and np.all(record_ind >= 0)
+                np.all(record_site_int_ind >= 0)
+                and np.all(record_site_obs_ind >= 0)
+                and np.all(record_ind >= 0)
         )
 
         return (
@@ -776,7 +812,7 @@ class SCProbDataset(Dataset):
             else np.arange(self.n_rels)
         )
 
-        return (
+        return SCBatchData(
             batch_ind,
             rel_shuffle_ind,
             self.scenario_ids[batch_ind],
@@ -802,11 +838,10 @@ class SCProbDataset(Dataset):
 
 
 def create_indRelModel(
-    hp_config: HyperParamsConfig,
-    scalar_features: ml_data.ScalarFeatures,
-    run_config: RunParamsConfig,
+        hp_config: HyperParamsConfig,
+        scalar_features: ml_data.ScalarFeatures,
+        run_config: RunParamsConfig,
 ):
-
     prob_model = models.ProbIndModel(
         hp_config.fc_units,
         scalar_features.n_scalar_features,
@@ -838,13 +873,13 @@ def create_indRelModel(
 
 
 def create_IMmodel(
-    hp_config: HyperParamsConfig,
-    scalar_features: ml_data.ScalarFeatures,
-    run_config: RunParamsConfig,
+        hp_config: HyperParamsConfig,
+        scalar_features: ml_data.ScalarFeatures,
+        run_config: RunParamsConfig,
 ):
     n_inputs = (
-        run_config.n_rels * hp_config.n_im_features
-    ) + scalar_features.n_scalar_features
+                       run_config.n_rels * hp_config.n_im_features
+               ) + scalar_features.n_scalar_features
 
     prob_model = models.ProbIMModel(
         n_inputs, hp_config.fc_units, run_config.n_rels, one_hot_n_ims=0
@@ -871,7 +906,7 @@ def create_IMmodel(
     return prob_model
 
 
-def get_scenario_mask(record_scenario_ids: torch.Tensor, scenario_ids: torch.Tensor):
+def get_scenario_mask(record_scenario_ids: torch.Tensor, scenario_ids: torch.Tensor) -> torch.Tensor:
     n_scenarios = scenario_ids.shape[0]
     n_samples = record_scenario_ids.shape[0]
 
@@ -888,11 +923,11 @@ def get_scenario_mask(record_scenario_ids: torch.Tensor, scenario_ids: torch.Ten
 
 
 def compute_single_loss(
-    agg_probs: Union[torch.Tensor, np.ndarray],
-    im_misfit_score: Union[torch.Tensor, np.ndarray],
-    im_weights: Union[torch.Tensor, np.ndarray],
-    sc_weights: Union[torch.Tensor, np.ndarray] = None,
-):
+        agg_probs: Union[torch.Tensor, np.ndarray],
+        im_misfit_score: Union[torch.Tensor, np.ndarray],
+        im_weights: Union[torch.Tensor, np.ndarray],
+        sc_weights: torch.Tensor | np.ndarray | None = None,
+) -> tuple[torch.Tensor | np.ndarray, torch.Tensor | None, torch.Tensor | np.ndarray]:
     """
     Computes the scenario loss for the single-prob model
     i.e. gives P(R_i)
@@ -908,13 +943,18 @@ def compute_single_loss(
     im_weights: array of floats
         IM weights
         Shape - [n_ims]
+    sc_weights: array of floats
+        Scenario weights
+        Shape - [n_scenarios]
 
     Returns
     -------
-    scenario_loss: torch.Tensor
+    scenario_loss: torch.Tensor | np.ndarray
         The loss for each scenario and
         Shape: [n_scenarios]
-    loss: torch.Tensor
+    weighted_scenario_loss: torch.Tensor | None | np.ndarray
+        The weighted loss for each scenario
+    loss: torch.Tensor | np.ndarray
         The average loss across all scenarios
     """
     # Computes the scenario loss
@@ -937,10 +977,10 @@ def compute_single_loss(
 
 
 def compute_single_agg_prob(
-    scenario_mask: Union[torch.Tensor, np.ndarray],
-    pred: Union[torch.Tensor, np.ndarray],
-    w_pred: Union[torch.Tensor, np.ndarray],
-    im_weights: Union[torch.Tensor, np.ndarray],
+        scenario_mask: Union[torch.Tensor, np.ndarray],
+        pred: Union[torch.Tensor, np.ndarray],
+        w_pred: Union[torch.Tensor, np.ndarray],
+        im_weights: Union[torch.Tensor, np.ndarray],
 ):
     """
     Computes the aggregated probability for
@@ -990,10 +1030,10 @@ def compute_single_agg_prob(
 
 
 def compute_multi_agg_prob(
-    scenario_mask: Union[torch.Tensor, np.ndarray],
-    pred: Union[torch.Tensor, np.ndarray],
-    w_pred: Union[torch.Tensor, np.ndarray],
-    im_weights: Union[torch.Tensor, np.ndarray],
+        scenario_mask: Union[torch.Tensor, np.ndarray],
+        pred: Union[torch.Tensor, np.ndarray],
+        w_pred: Union[torch.Tensor, np.ndarray],
+        im_weights: Union[torch.Tensor, np.ndarray],
 ):
     """
     Computes the aggregated probability for
@@ -1049,11 +1089,11 @@ def compute_multi_agg_prob(
 
 
 def compute_multi_loss(
-    agg_probs: Union[torch.Tensor, np.ndarray],
-    im_misfit_score: Union[torch.Tensor, np.ndarray],
-    im_weights: Union[torch.Tensor, np.ndarray],
-    sc_weights: Union[torch.Tensor, np.ndarray] = None,
-):
+        agg_probs: Union[torch.Tensor, np.ndarray],
+        im_misfit_score: Union[torch.Tensor, np.ndarray],
+        im_weights: Union[torch.Tensor, np.ndarray],
+        sc_weights: torch.Tensor | np.ndarray | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
     """
     Computes the scenario loss for the single-prob model
     i.e. gives P(R_i|IM_j)
@@ -1069,11 +1109,17 @@ def compute_multi_loss(
     im_weights: array of floats
         IM weights
         Shape - [n_ims]
+    sc_weights: array of floats
+        Scenario weights
 
     Returns
     -------
     scenario_loss: torch.Tensor
         The loss for each scenario and
+        Shape: [n_scenarios]
+    weighted_scenario_loss: torch.Tensor | None
+        The weighted loss for each scenario
+        None if no weight sc_weights is None
         Shape: [n_scenarios]
     loss: torch.Tensor
         The average loss across all scenarios
@@ -1098,10 +1144,10 @@ def compute_multi_loss(
 
 
 def get_weight_prediction(
-    weight_model: models.WeightModel,
-    scalar_features: torch.Tensor,
-    scenario_mask: torch.Tensor,
-    run_config: RunParamsConfig,
+        weight_model: models.WeightModel,
+        scalar_features: torch.Tensor,
+        scenario_mask: torch.Tensor,
+        run_config: RunParamsConfig,
 ):
     """Gets the normalised weight predictions"""
     w_pred = weight_model(
@@ -1118,8 +1164,8 @@ def get_weight_prediction(
 
 
 def get_loth_weights(
-    im_site_corrs: Union[torch.Tensor, np.ndarray],
-    scenario_mask: Union[torch.Tensor, np.ndarray],
+        im_site_corrs: Union[torch.Tensor, np.ndarray],
+        scenario_mask: Union[torch.Tensor, np.ndarray],
 ):
     """
     Normalises the loth & baker site-correlations
@@ -1151,50 +1197,58 @@ def get_loth_weights(
 
 
 def compute_loth_baker_scenario_weights(
-    im_site_corrs: torch.Tensor,
-    scenario_mask: torch.Tensor,
-    im_weights: torch.Tensor,
-    min_weight: float,
-    max_weight: float,
-):
+        im_site_corrs: torch.Tensor,
+        scenario_mask: torch.Tensor,
+        im_weights: torch.Tensor,
+        min_weight: float,
+        max_weight: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Computes scenario weights based on the
     site-correlation coefficients from the
     Loth & Baker model
+
+    Returns
+    -------
+    sc_weights: torch.Tensor
+        The clamped scenario weights
+        Shape: [n_scenarios]
+    raw_sc_weights: torch.Tensor
+        The raw scenario weights
+        Shape: [n_scenarios]
     """
-    return torch.clamp(
-        einops.einsum(
+    raw_sc_weights = einops.einsum(
             im_site_corrs,
             im_weights,
             scenario_mask,
             "obs im, im, obs scenario -> scenario",
-        ),
+        )
+    sc_weights = torch.clamp(
+        raw_sc_weights,
         min_weight,
         max_weight,
     )
 
+    return sc_weights, raw_sc_weights
+
 
 def get_batch_results(
-    pred: torch.Tensor,
-    model: models.ProbIMModel,
-    weight_model: models.WeightModel,
-    w_scalar_features: torch.Tensor,
-    sc_ids: torch.Tensor,
-    record_scenario_ids: torch.Tensor,
-    im_site_corrs: torch.Tensor,
-    sc_im_misfit_score: torch.Tensor,
-    im_weights: torch.Tensor,
-    run_config: RunParamsConfig,
-    hp_config: HyperParamsConfig,
+        pred: torch.Tensor,
+        model: models.ProbIMModel,
+        weight_model: models.WeightModel,
+        batch_data: SCBatchData,
+        im_weights: torch.Tensor,
+        run_config: RunParamsConfig,
+        hp_config: HyperParamsConfig,
 ):
-    scenario_mask = get_scenario_mask(record_scenario_ids, sc_ids)
+    scenario_mask = get_scenario_mask(batch_data.record_scenario_ids, batch_data.scenario_ids)
     scenario_mask = scenario_mask.to(run_config.device, torch.float32)
 
-    im_site_corrs = im_site_corrs.to(run_config.device, dtype=torch.float32)
+    im_site_corrs = batch_data.im_site_corrs.to(run_config.device, dtype=torch.float32)
 
     if run_config.sample_weighting_method is SampleWeighting.CUSTOM_MODEL:
         w_pred = get_weight_prediction(
-            weight_model, w_scalar_features, scenario_mask, run_config
+            weight_model, batch_data.w_scalar_features, scenario_mask, run_config
         )
     elif run_config.sample_weighting_method is SampleWeighting.LOTH_BAKER:
         w_pred = get_loth_weights(im_site_corrs, scenario_mask)
@@ -1203,7 +1257,7 @@ def get_batch_results(
 
     scenario_weights = None
     if run_config.apply_sc_weighting:
-        scenario_weights = compute_loth_baker_scenario_weights(
+        scenario_weights, _ = compute_loth_baker_scenario_weights(
             im_site_corrs,
             scenario_mask,
             im_weights,
@@ -1215,7 +1269,7 @@ def get_batch_results(
         agg_probs = compute_multi_agg_prob(scenario_mask, pred, w_pred, im_weights)
         scenario_loss, weighted_scenario_loss, loss = compute_multi_loss(
             agg_probs,
-            sc_im_misfit_score.to(run_config.device, torch.float32),
+            batch_data.scenario_im_misfit_score.to(run_config.device, torch.float32),
             im_weights,
             sc_weights=scenario_weights,
         )
@@ -1228,7 +1282,7 @@ def get_batch_results(
         )
         scenario_loss, weighted_scenario_loss, loss = compute_single_loss(
             agg_probs,
-            sc_im_misfit_score.to(run_config.device, torch.float32),
+            batch_data.scenario_im_misfit_score.to(run_config.device, torch.float32),
             im_weights,
             sc_weights=scenario_weights,
         )
@@ -1249,7 +1303,7 @@ def get_batch_results(
         #     l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(torch.sum(pred ** 2, dim=1))
         # else:
         l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(
-            torch.sum(pred**2, dim=1)
+            torch.sum(pred ** 2, dim=1)
         )
         loss = loss + l2_prob_penalty
 
@@ -1266,13 +1320,13 @@ def get_batch_results(
 
 
 def train(
-    prob_model: models.ProbIMModel,
-    weight_model: models.WeightModel,
-    train_dataset: SCProbDataset,
-    val_dataset: SCProbDataset,
-    hp_config: HyperParamsConfig,
-    run_config: RunParamsConfig,
-    quiet: bool = False,
+        prob_model: models.ProbIMModel,
+        weight_model: models.WeightModel,
+        train_dataset: SCProbDataset,
+        val_dataset: SCProbDataset,
+        hp_config: HyperParamsConfig,
+        run_config: RunParamsConfig,
+        quiet: bool = False,
 ):
     # Setup metrics to log
     metrics = {
@@ -1352,35 +1406,13 @@ def train(
         prob_model.train()
         iter_loop = tqdm(train_dataloader, disable=quiet)
         iter_loop.set_description(f"Epoch {epoch_ix}/{hp_config.n_epochs}")
-        for i, (
-            batch_ind,
-            rel_shuffle_ind,
-            sc_ids,
-            sc_im_misfit_score,
-            record_scenario_ids,
-            site_int_norm_sim_ims,
-            site_obs_norm_sim_ims,
-            site_obs_norm_obs_ims,
-            site_int_sim_ims,
-            site_obs_sim_ims,
-            site_obs_obs_ims,
-            scalar_features,
-            w_scalar_features,
-            im_misfit_score,
-            im_site_corrs,
-        ) in enumerate(iter_loop):
+        for i, batch_data in enumerate(iter_loop):
             # Get model predictions
             pred = get_prediction(
                 prob_model,
-                site_obs_norm_obs_ims,
-                site_int_norm_sim_ims,
-                site_obs_norm_sim_ims,
-                site_obs_obs_ims,
-                site_int_sim_ims,
-                site_obs_sim_ims,
-                scalar_features,
-                run_config,
+                batch_data,
                 hp_config,
+                run_config,
             )
 
             # Check for NaN values
@@ -1409,11 +1441,7 @@ def train(
                 pred,
                 prob_model,
                 weight_model,
-                w_scalar_features,
-                sc_ids,
-                record_scenario_ids,
-                im_site_corrs,
-                sc_im_misfit_score,
+                batch_data,
                 im_weights,
                 run_config,
                 hp_config,
@@ -1451,34 +1479,12 @@ def train(
 
         prob_model.eval()
         with torch.no_grad():
-            for i, (
-                batch_ind,
-                rel_shuffle_ind,
-                sc_ids,
-                sc_im_misfit_score,
-                record_scenario_ids,
-                site_int_norm_sim_ims,
-                site_obs_norm_sim_ims,
-                site_obs_norm_obs_ims,
-                site_int_sim_ims,
-                site_obs_sim_ims,
-                site_obs_obs_ims,
-                scalar_features,
-                w_scalar_features,
-                im_misfit_score,
-                im_site_corrs,
-            ) in enumerate(val_dataloader):
+            for i, batch_data in enumerate(val_dataloader):
                 pred = get_prediction(
                     prob_model,
-                    site_obs_norm_obs_ims,
-                    site_int_norm_sim_ims,
-                    site_obs_norm_sim_ims,
-                    site_obs_obs_ims,
-                    site_int_sim_ims,
-                    site_obs_sim_ims,
-                    scalar_features,
-                    run_config,
+                    batch_data,
                     hp_config,
+                    run_config,
                 )
 
                 (
@@ -1494,11 +1500,7 @@ def train(
                     pred,
                     prob_model,
                     weight_model,
-                    w_scalar_features,
-                    sc_ids,
-                    record_scenario_ids,
-                    im_site_corrs,
-                    sc_im_misfit_score,
+                    batch_data,
                     im_weights,
                     run_config,
                     hp_config,
@@ -1543,22 +1545,15 @@ def train(
 
 
 def get_prediction(
-    prob_model: nn.Module,
-    site_obs_norm_obs_ims: torch.Tensor,
-    site_int_norm_sim_ims: torch.Tensor,
-    site_obs_norm_sim_ims: torch.Tensor,
-    site_obs_obs_ims: torch.Tensor,
-    site_int_sim_ims: torch.Tensor,
-    site_obs_sim_ims: torch.Tensor,
-    scalar_features: torch.Tensor,
-    # obs_site_misfit_score: torch.Tensor,
-    run_config: RunParamsConfig,
-    hp_config: HyperParamsConfig,
+        prob_model: nn.Module,
+        batch_data: SCBatchData,
+        hp_config: HyperParamsConfig,
+        run_config: RunParamsConfig,
 ):
     # Pre-allocate IM tensor on device
     im_tensor = torch.full(
         (
-            site_obs_norm_obs_ims.shape[0],
+            batch_data.site_obs_norm_obs_ims.shape[0],
             hp_config.n_im_features,
             run_config.n_rels,
             len(run_config.ims),
@@ -1572,40 +1567,36 @@ def get_prediction(
 
     if hp_config.use_im_obs_site_obs:
         # Need observed value (at observation site) per realisation
-        im_tensor[:, ix, :, :] = site_obs_norm_obs_ims = einops.repeat(
-            site_obs_norm_obs_ims[:, None, :],
+        im_tensor[:, ix, :, :] = einops.repeat(
+            batch_data.site_obs_norm_obs_ims[:, None, :],
             "batch rel im -> batch (n_rels rel) im",
             n_rels=run_config.n_rels,
         )
         ix += 1
 
     if hp_config.use_im_sim_site_obs:
-        im_tensor[:, ix, :, :] = site_obs_norm_sim_ims
+        im_tensor[:, ix, :, :] = batch_data.site_obs_norm_sim_ims
         ix += 1
 
     if hp_config.use_im_sim_site_int:
-        im_tensor[:, ix, :, :] = site_int_norm_sim_ims
+        im_tensor[:, ix, :, :] = batch_data.site_int_norm_sim_ims
         ix += 1
 
     if hp_config.use_res_site_obs:
-        im_tensor[:, ix, :, :] = site_obs_obs_ims[:, None, :] - site_obs_sim_ims
+        im_tensor[:, ix, :, :] = batch_data.site_obs_obs_ims[:, None, :] - batch_data.site_obs_sim_ims
         ix += 1
 
     if hp_config.use_res_sim_site_obs_sim_site_int:
-        im_tensor[:, ix, :, :] = site_obs_sim_ims - site_int_sim_ims
+        im_tensor[:, ix, :, :] = batch_data.site_obs_sim_ims - batch_data.site_int_sim_ims
         ix += 1
 
     if hp_config.use_res_obs_site_obs_sim_site_int:
-        im_tensor[:, ix, :, :] = site_obs_obs_ims[:, None, :] - site_int_sim_ims
+        im_tensor[:, ix, :, :] = batch_data.site_obs_obs_ims[:, None, :] - batch_data.site_int_sim_ims
         ix += 1
 
     scalar_features = einops.repeat(
-        scalar_features, "batch ss -> batch rel ss", rel=run_config.n_rels
+        batch_data.scalar_features, "batch ss -> batch rel ss", rel=run_config.n_rels
     )
-    # if hp_config.use_obs_site_misfit_score:
-    #     scalar_features = torch.cat(
-    #         [scalar_features, obs_site_misfit_score[..., None]], dim=2
-    #     )
 
     scalar_features = scalar_features.to(
         run_config.device, dtype=torch.float32, non_blocking=True
@@ -1615,12 +1606,12 @@ def get_prediction(
 
 
 def get_dataset_prediction(
-    dataset: SCProbDataset,
-    prob_model: models.ProbIMModel,
-    weight_model: models.WeightModel,
-    run_config: RunParamsConfig,
-    dist_matrix: pd.DataFrame,
-    hp_config: HyperParamsConfig,
+        dataset: SCProbDataset,
+        prob_model: models.ProbIMModel,
+        weight_model: models.WeightModel,
+        run_config: RunParamsConfig,
+        dist_matrix: pd.DataFrame,
+        hp_config: HyperParamsConfig,
 ):
     pred_dataloader = utils.CustomTabularDataLoader(
         dataset, hp_config.batch_size, shuffle=False, shuffle_rels=False
@@ -1682,23 +1673,7 @@ def get_dataset_prediction(
     with torch.no_grad():
         prob_model.eval()
         start_ix = 0
-        for i, (
-            batch_ind,
-            rel_shuffle_ind,
-            sc_ids,
-            sc_im_misfit_score,
-            record_scenario_ids,
-            site_int_norm_sim_ims,
-            site_obs_norm_sim_ims,
-            site_obs_norm_obs_ims,
-            site_int_sim_ims,
-            site_obs_sim_ims,
-            site_obs_obs_ims,
-            scalar_features,
-            w_scalar_features,
-            im_misfit_score,
-            im_site_corrs,
-        ) in enumerate(tqdm(pred_dataloader)):
+        for i, batch_data in enumerate(tqdm(pred_dataloader)):
             # Metadata
             (
                 events,
@@ -1711,20 +1686,14 @@ def get_dataset_prediction(
                 residual,
                 record_residual,
                 n_sites_scenario,
-            ) = dataset.get_metadata(batch_ind, rel_shuffle_ind)
+            ) = dataset.get_metadata(batch_data.batch_ind, batch_data.rel_shuffle_ind)
 
             # Predictions
             pred = get_prediction(
                 prob_model,
-                site_obs_norm_obs_ims,
-                site_int_norm_sim_ims,
-                site_obs_norm_sim_ims,
-                site_obs_obs_ims,
-                site_int_sim_ims,
-                site_obs_sim_ims,
-                scalar_features,
-                run_config,
+                batch_data,
                 hp_config,
+                run_config,
             )
 
             # Scenario mask
@@ -1744,11 +1713,7 @@ def get_dataset_prediction(
                 pred,
                 prob_model,
                 weight_model,
-                w_scalar_features,
-                sc_ids,
-                record_scenario_ids,
-                im_site_corrs,
-                sc_im_misfit_score,
+                batch_data,
                 im_weights,
                 run_config,
                 hp_config,
@@ -1794,7 +1759,7 @@ def get_dataset_prediction(
 
             # Misfit score
             sample_results_df.loc[start_ix:end_ix, im_misfit_cols] = (
-                einops.rearrange(im_misfit_score, "batch rel im -> (batch rel) im")
+                einops.rearrange(batch_data.record_im_misfit_score, "batch rel im -> (batch rel) im")
                 .numpy(force=True)
                 .astype(np.float32)
             )
@@ -1802,7 +1767,7 @@ def get_dataset_prediction(
                 sample_results_df.loc[start_ix:end_ix, "misfit_score"] = (
                     einops.rearrange(
                         einops.einsum(
-                            im_misfit_score.to(run_config.device, torch.float32),
+                            batch_data.record_im_misfit_score.to(run_config.device, torch.float32),
                             im_weights,
                             "obs rel im, im -> obs rel",
                         ),
@@ -1846,7 +1811,7 @@ def get_dataset_prediction(
             cur_sample_sum[im_site_weights_cols] = w_pred.numpy(force=True).astype(
                 np.float32
             )
-            site_int_sim_ims_gpu = site_int_sim_ims.to(run_config.device, torch.float32)
+            site_int_sim_ims_gpu = batch_data.site_int_sim_ims.to(run_config.device, torch.float32)
             if run_config.per_im_prob:
                 cur_sample_wavg = einops.einsum(
                     pred,
@@ -1885,8 +1850,8 @@ def get_dataset_prediction(
             # Scenario weights
             sc_weights = None
             if run_config.apply_sc_weighting:
-                sc_weights = compute_loth_baker_scenario_weights(
-                    im_site_corrs.to(run_config.device, torch.float32),
+                sc_weights, raw_sc_weights = compute_loth_baker_scenario_weights(
+                    batch_data.im_site_corrs.to(run_config.device, torch.float32),
                     scenario_mask,
                     im_weights,
                     run_config.min_sc_weight,
@@ -1930,7 +1895,7 @@ def get_dataset_prediction(
 
                 cur_sc_result["misfit_score"] = einops.rearrange(
                     einops.einsum(
-                        sc_im_misfit_score.to(run_config.device, torch.float32),
+                        batch_data.scenario_im_misfit_score.to(run_config.device, torch.float32),
                         im_weights,
                         "sc rel im, im -> sc rel",
                     )
@@ -1941,7 +1906,7 @@ def get_dataset_prediction(
 
             # SC - Misfit
             cur_sc_result[im_misfit_cols] = (
-                einops.rearrange(sc_im_misfit_score, "sc rel im -> (sc rel) im")
+                einops.rearrange(batch_data.scenario_im_misfit_score, "sc rel im -> (sc rel) im")
                 .numpy(force=True)
                 .astype(np.float32)
             )
@@ -1989,7 +1954,7 @@ def get_dataset_prediction(
 
             ## Compute the scenario weighted average and std
             sc_site_int_sim_ims = dataset.get_sc_site_int_sim(
-                batch_ind, rel_shuffle_ind
+                batch_data.batch_ind, batch_data.rel_shuffle_ind
             )
 
             # Compute the scenario weighted IM average and std
@@ -2061,24 +2026,24 @@ def get_dataset_prediction(
 
 
 def post_processing(
-    prob_model: models.ProbIMModel,
-    weight_model: models.WeightModel,
-    train_dataset: SCProbDataset,
-    val_dataset: SCProbDataset,
-    hp_config: HyperParamsConfig,
-    run_config: RunParamsConfig,
-    metrics: Dict,
-    best_epoch: int,
-    scalar_features: ml_data.ScalarFeatures,
-    data_metadata: Dict,
-    val_int_sites: np.ndarray,
-    train_int_sites: np.ndarray,
-    obs_sites: np.ndarray,
-    id_suffix: str = "",
+        prob_model: models.ProbIMModel,
+        weight_model: models.WeightModel,
+        train_dataset: SCProbDataset,
+        val_dataset: SCProbDataset,
+        hp_config: HyperParamsConfig,
+        run_config: RunParamsConfig,
+        metrics: Dict,
+        best_epoch: int,
+        scalar_features: ml_data.ScalarFeatures,
+        data_metadata: Dict,
+        val_int_sites: np.ndarray,
+        train_int_sites: np.ndarray,
+        obs_sites: np.ndarray,
+        id_suffix: str = "",
 ):
     (
         cur_out_dir := run_config.results_dir
-        / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+                       / f"{mlt.utils.create_run_id(False)}{id_suffix}"
     ).mkdir()
 
     # Save the training sites and validation sites
@@ -2173,9 +2138,9 @@ def post_processing(
 
 
 def compute_scenario_distribution(
-    sample_results: pd.DataFrame,
-    run_config: RunParamsConfig,
-    im_site_weights_suffix: str = "_site_corr_weights",
+        sample_results: pd.DataFrame,
+        run_config: RunParamsConfig,
+        im_site_weights_suffix: str = "_site_corr_weights",
 ):
     """
     Computes the realisation distribution for each scenario
@@ -2197,8 +2162,8 @@ def compute_scenario_distribution(
             (cur_group.shape[0] // run_config.n_rels, 1), dtype=float
         )
         cur_im_site_weights = cur_group[im_site_weight_cols][
-            :: run_config.n_rels
-        ].values
+                              :: run_config.n_rels
+                              ].values
         assert np.allclose(cur_im_site_weights.sum(axis=0), 1.0)
 
         # Compute the scenario probabilities & loss
@@ -2283,10 +2248,10 @@ def compute_scenario_distribution(
 def load_emp_cim_data(data_dir: Path, event: str, method: constants.RankingMethod):
     """Loads the empirical conditional IM data for the given event"""
     result_ffp = (
-        data_dir
-        / event
-        / f"{constants.METHOD_RESULT_DIR_NAME_MAPPING[method]}"
-        / "cMVN_distributions.pickle"
+            data_dir
+            / event
+            / f"{constants.METHOD_RESULT_DIR_NAME_MAPPING[method]}"
+            / "cMVN_distributions.pickle"
     )
     if result_ffp.exists():
         return conditional.ConditionalMVNDistribution.load(result_ffp)
@@ -2294,10 +2259,10 @@ def load_emp_cim_data(data_dir: Path, event: str, method: constants.RankingMetho
 
 
 def compute_ks_p_values(
-    sc_df: pd.DataFrame,
-    emp_cim_dir: Path,
-    db_ffp: Path,
-    run_config: RunParamsConfig,
+        sc_df: pd.DataFrame,
+        emp_cim_dir: Path,
+        db_ffp: Path,
+        run_config: RunParamsConfig,
 ):
     """
     Computes the KS statistics and p-values for
@@ -2396,7 +2361,7 @@ def compute_ks_p_values(
 
 
 def compute_ml_residuals_wrt_obs(
-    sc_sum_df: pd.DataFrame, db_ffp: Path, ims: np.ndarray
+        sc_sum_df: pd.DataFrame, db_ffp: Path, ims: np.ndarray
 ):
     """
     Computes the residuals between the ML weighted average
@@ -2430,7 +2395,7 @@ def compute_ml_residuals_wrt_obs(
 
 
 def compute_cIM_residuals_wrt_obs(
-    emp_cim_dir: Path, db_ffp: Path, method: constants.RankingMethod, ims: np.ndarray
+        emp_cim_dir: Path, db_ffp: Path, method: constants.RankingMethod, ims: np.ndarray
 ):
     """
     Computes the residual of a conditional IM result
@@ -2460,7 +2425,7 @@ def compute_cIM_residuals_wrt_obs(
         cur_obs_df = obs_df.loc[obs_df.event_id == cur_event].set_index("site_id")
         cur_residual = pd.DataFrame(
             data=cur_obs_df.loc[cur_emp_mean_df.index, ims].values
-            - cur_emp_mean_df.loc[cur_emp_mean_df.index, ims].values,
+                 - cur_emp_mean_df.loc[cur_emp_mean_df.index, ims].values,
             columns=ims,
             index=cur_emp_mean_df.index,
         )
@@ -2476,9 +2441,9 @@ def compute_cIM_residuals_wrt_obs(
 
 
 def compute_mean_std_residuals_wrt_emp(
-    sc_sum_df: pd.DataFrame,
-    emp_cim_dir: Path,
-    ims: np.ndarray,
+        sc_sum_df: pd.DataFrame,
+        emp_cim_dir: Path,
+        ims: np.ndarray,
 ):
     """
     Computes the residual between the mean and
@@ -2542,7 +2507,7 @@ def compute_mean_std_residuals_wrt_emp(
 
         cur_std_residuals = pd.DataFrame(
             data=np.log(cur_emp_cim_std_df[ims].values)
-            - np.log(cur_ml_std_df[im_wstd_cols].values),
+                 - np.log(cur_ml_std_df[im_wstd_cols].values),
             index=mlt.array_utils.numpy_str_join("_", cur_event, cur_sites),
             columns=ims,
         )
