@@ -1935,6 +1935,10 @@ def get_dataset_prediction(
             cur_sc_sum["weight"] = (
                 sc_weights.numpy(force=True) if sc_weights is not None else np.nan
             )
+            # SC - Raw Weight
+            cur_sc_sum["raw_weight"] = (
+                raw_sc_weights.numpy(force=True) if raw_sc_weights is not None else np.nan
+            )
             # SC - Weighted Loss
             cur_sc_sum["w_loss"] = (
                 weighted_scenario_loss.numpy(force=True)
