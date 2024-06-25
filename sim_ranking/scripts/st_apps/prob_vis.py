@@ -1777,6 +1777,7 @@ def run_agg_scenario(
             val_sc_results,
             val_sc_sum_df,
             val_sample_results,
+            val_sample_sum_results,
             "val_scenario",
         )
 
