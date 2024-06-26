@@ -1299,9 +1299,6 @@ def get_batch_results(
     # Add L2 probability penalty
     l2_prob_penalty = None
     if run_config.l2_prob_penalty > 0:
-        # if run_config.per_im_prob:
-        #     l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(torch.sum(pred ** 2, dim=1))
-        # else:
         l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(
             torch.sum(pred ** 2, dim=1)
         )
@@ -1848,7 +1845,7 @@ def get_dataset_prediction(
 
             ### Scenario results
             # Scenario weights
-            sc_weights = None
+            sc_weights, raw_sc_weights = None, None
             if run_config.apply_sc_weighting:
                 sc_weights, raw_sc_weights = compute_loth_baker_scenario_weights(
                     batch_data.im_site_corrs.to(run_config.device, torch.float32),

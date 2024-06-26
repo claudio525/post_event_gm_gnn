@@ -66,7 +66,7 @@ def train_model(
     ),
     min_sc_weight: float = typer.Option(0.5, help="Minimum scenario weight"),
     max_sc_weight: float = typer.Option(2.0, help="Maximum scenario weight"),
-    l2_prob_penalty: float = typer.Option(
+    l2_prob_penalty: float  = typer.Option(
         default=0.0, help="L2 penalty to discourage sparse realisations probabilities"
     ),
     seed: int = typer.Option(None),
@@ -124,6 +124,7 @@ def train_model(
     train_int_sites = np.setdiff1d(valid_int_sites, val_int_sites)
     obs_sites = np.setdiff1d(all_sites, val_int_sites)
 
+    print(f"----------------- Sites Summary -----------------")
     print(f"Number of available sites: {len(all_sites)}")
     print(f"Number of valid sites of interests: {valid_int_sites.size}")
     print(f"Number of training sites of interests: {train_int_sites.size}")

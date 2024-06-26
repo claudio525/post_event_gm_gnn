@@ -276,7 +276,7 @@ def get_valid_site_ints(
     valid_event_int_sites: dict
         Valid sites of interests per event
     """
-    # Sanity check that input data is in agreement
+    # Check that all event-sites are available in the record dataframe
     assert all([
         np.all(np.isin(event_sites[cur_event], cur_df.site_id.values.astype(str)))
         for cur_event, cur_df in record_df.groupby("event_id")
@@ -287,7 +287,8 @@ def get_valid_site_ints(
     rupture_df = rupture_df.merge(
         station_df[["vs30", "z1.0"]], left_on="site_id", right_index=True, how="inner"
     )
-    assert rupture_df.shape[0] == record_df.shape[0]
+    if (n_records_diff := record_df.shape[0] - rupture_df.shape[0]) > 0:
+        print(f"Dropped {n_records_diff} records due to missing site data")
 
     # Constant inputs
     rupture_df["mag"] = 6.0
@@ -329,7 +330,7 @@ def get_valid_site_ints(
     # Get the valid site of interests
     pga_result = pga_result.loc[pga_result["PGA_mean"] >= np.log(0.01)]
     valid_event_int_sites = {
-        cur_event: cur_df.site_id.values.astype(str)
+        cur_event: np.intersect1d(cur_df.site_id.values.astype(str), event_sites[cur_event])
         for cur_event, cur_df in pga_result.groupby("event_id")
     }
     valid_int_sites = np.unique(pga_result.site_id.values.astype(str))
