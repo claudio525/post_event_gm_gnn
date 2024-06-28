@@ -32,6 +32,48 @@ class SampleWeighting(str, Enum):
     LOTH_BAKER = "loth_baker"
 
 
+class L2ProbLambdaFn:
+
+    def __init__(
+        self, min_lambda: float, max_lambda: float, min_loss: float, max_loss: float
+    ):
+        """
+        Creates a linear function between the given values
+
+        Parameters
+        ----------
+        min_lambda: float
+        max_lambda: float
+            Min/Max possible lambda value
+        min_loss: float
+        max_loss: float
+            Min/Max possible loss value
+        """
+        self.min_lambda = min_lambda
+        self.max_lambda = max_lambda
+
+        self.min_loss = min_loss
+        self.max_loss = max_loss
+
+        # Compute slope and intercept
+        self.slope = (self.max_lambda - self.min_lambda) / (
+            self.max_loss - self.min_loss
+        )
+        self.intercept = min_lambda - self.slope * min_loss
+
+    def __call__(self, loss: torch.Tensor) -> torch.Tensor:
+        """Compute the L2 probability penalty for the given loss value"""
+        return torch.clamp(
+            self.slope * loss + self.intercept, self.min_lambda, self.max_lambda
+        )
+
+    @classmethod
+    def parse_l2_prob_lambda_fn(cls, value: str) -> "L2ProbLambdaFn":
+        # Convert to tuple
+        values = tuple(map(float, value.strip("()").split(",")))
+        return L2ProbLambdaFn(*values)
+
+
 @dataclass
 class RunParamsConfig:
     max_dist: float
@@ -48,7 +90,8 @@ class RunParamsConfig:
     max_sc_weight: float
 
     sample_weighting_method: SampleWeighting
-    l2_prob_penalty: float
+    l2_prob_lambda: float
+    l2_prob_lambda_fn: L2ProbLambdaFn
 
     scalar_feature_set_key: constants.ScalarFeatureSetKey
     weight_model_feature_set_key: constants.ScalarFeatureSetKey
@@ -66,6 +109,10 @@ class RunParamsConfig:
     def n_ims(self):
         return len(self.ims)
 
+    @property
+    def apply_l2_prob_penalty(self):
+        return self.l2_prob_lambda > 0 or self.l2_prob_lambda_fn
+
     def to_dict(self):
         return {
             "max_dist": self.max_dist,
@@ -77,7 +124,7 @@ class RunParamsConfig:
             "apply_sc_weighting": self.apply_sc_weighting,
             "min_sc_weight": self.min_sc_weight,
             "max_sc_weight": self.max_sc_weight,
-            "l2_prob_penalty": self.l2_prob_penalty,
+            "l2_prob_penalty": self.l2_prob_lambda,
             "scalar_feature_set_key": self.scalar_feature_set_key.value,
             "weight_model_feature_set_key": self.weight_model_feature_set_key.value,
             "debug": self.debug,
@@ -187,18 +234,18 @@ class HyperParamsConfig:
 
 
 def data_prep(
-        event_sites: Dict[str, np.ndarray],
-        valid_event_int_sites: Dict[str, np.ndarray],
-        train_events: np.ndarray,
-        val_events: np.ndarray,
-        train_int_sites: np.ndarray,
-        val_int_sites: np.ndarray,
-        obs_sites: np.ndarray,
-        events: np.ndarray,
-        run_config: RunParamsConfig,
-        hp_config: HyperParamsConfig,
-        db: DB,
-        corr_dir: Path,
+    event_sites: Dict[str, np.ndarray],
+    valid_event_int_sites: Dict[str, np.ndarray],
+    train_events: np.ndarray,
+    val_events: np.ndarray,
+    train_int_sites: np.ndarray,
+    val_int_sites: np.ndarray,
+    obs_sites: np.ndarray,
+    events: np.ndarray,
+    run_config: RunParamsConfig,
+    hp_config: HyperParamsConfig,
+    db: DB,
+    corr_dir: Path,
 ):
     """
     Creates the training and validation dataset for
@@ -237,7 +284,9 @@ def data_prep(
     metadata: Dict
     """
     # Get the scalar feature keys
-    scalar_feature_keys = constants.SCALAR_FEATURE_SET_LOOKUP[run_config.scalar_feature_set_key]
+    scalar_feature_keys = constants.SCALAR_FEATURE_SET_LOOKUP[
+        run_config.scalar_feature_set_key
+    ]
     event_feature_keys = scalar_feature_keys["event"]
     site_feature_keys = scalar_feature_keys["site"]
 
@@ -265,9 +314,9 @@ def data_prep(
     event_features_stats.loc["std"] = event_df.loc[events, event_feature_keys].std()
     event_features_df = event_df.loc[events, event_feature_keys]
     event_features_df[event_feature_keys] = (
-                                                    event_df.loc[events, event_feature_keys]
-                                                    - event_features_stats.loc["mean", event_feature_keys]
-                                            ) / event_features_stats.loc["std", event_feature_keys]
+        event_df.loc[events, event_feature_keys]
+        - event_features_stats.loc["mean", event_feature_keys]
+    ) / event_features_stats.loc["std", event_feature_keys]
 
     # Compute the site-to-site features
     print(f"Computing scalar features")
@@ -332,7 +381,9 @@ def data_prep(
         db,
         run_config,
         scalar_features,
-        constants.WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP[run_config.weight_model_feature_set_key],
+        constants.WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP[
+            run_config.weight_model_feature_set_key
+        ],
         ims_mean,
         ims_std,
         hp_config,
@@ -345,7 +396,9 @@ def data_prep(
         db,
         run_config,
         scalar_features,
-        constants.WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP[run_config.weight_model_feature_set_key],
+        constants.WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP[
+            run_config.weight_model_feature_set_key
+        ],
         ims_mean,
         ims_std,
         hp_config,
@@ -360,8 +413,6 @@ def data_prep(
         "val_events": val_events.tolist(),
         "n_train_scenarios": len(train_dataset),
         "n_val_scenarios": len(val_dataset),
-        "max_dist": run_config.max_dist,
-        "n_rels": run_config.n_rels,
         "features": {
             "event_features": scalar_features.event_feature_keys,
             "site_features": scalar_features.site_feature_keys,
@@ -456,17 +507,17 @@ class SCBatchData(utils.BaseBatchData):
 
 class SCProbDataset(utils.BaseDataset):
     def __init__(
-            self,
-            event_sites: Dict[str, np.ndarray],
-            event_site_combs: Dict[str, np.ndarray],
-            db: DB,
-            run_config: RunParamsConfig,
-            scalar_features: ml_data.ScalarFeatures,
-            w_scalar_feature_cols: np.ndarray,
-            ims_mean: np.ndarray,
-            ims_std: np.ndarray,
-            hp_config: HyperParamsConfig,
-            corr_dir: Path,
+        self,
+        event_sites: Dict[str, np.ndarray],
+        event_site_combs: Dict[str, np.ndarray],
+        db: DB,
+        run_config: RunParamsConfig,
+        scalar_features: ml_data.ScalarFeatures,
+        w_scalar_feature_cols: np.ndarray,
+        ims_mean: np.ndarray,
+        ims_std: np.ndarray,
+        hp_config: HyperParamsConfig,
+        corr_dir: Path,
     ):
         self.db = db
         self.event_sites = event_sites
@@ -508,7 +559,7 @@ class SCProbDataset(utils.BaseDataset):
         self.n_scenarios_event = []
         self.im_misfit_score = []
         for ix, (cur_event, cur_sites) in enumerate(
-                tqdm(self.event_sites.items(), desc="Processing events")
+            tqdm(self.event_sites.items(), desc="Processing events")
         ):
             # Get the simulation data
             cur_sim_df = db.get_sim_data(cur_event, cur_sites)
@@ -579,12 +630,12 @@ class SCProbDataset(utils.BaseDataset):
 
             # Normalise & Append
             cur_obs_data = (
-                                   cur_obs_data - self.ims_mean[self.ims].values
-                           ) / self.ims_std[self.ims].values
+                cur_obs_data - self.ims_mean[self.ims].values
+            ) / self.ims_std[self.ims].values
             self.norm_obs_ims.append(cur_obs_data)
             cur_sim_data = (
-                                   cur_sim_data - self.ims_mean[self.ims].values
-                           ) / self.ims_std[self.ims].values
+                cur_sim_data - self.ims_mean[self.ims].values
+            ) / self.ims_std[self.ims].values
             self.norm_sim_ims.append(cur_sim_data)
 
             # Get the (absolute) spatial correlations
@@ -693,20 +744,20 @@ class SCProbDataset(utils.BaseDataset):
                 cur_site_obs_ind = self.site_combs[cur_record_ind, 1]
             else:
                 cur_site_int_ind = (
-                        self.cum_n_sites_event[cur_ev_ix - 1]
-                        + self.site_combs[cur_record_ind, 0]
+                    self.cum_n_sites_event[cur_ev_ix - 1]
+                    + self.site_combs[cur_record_ind, 0]
                 )
                 cur_site_obs_ind = (
-                        self.cum_n_sites_event[cur_ev_ix - 1]
-                        + self.site_combs[cur_record_ind, 1]
+                    self.cum_n_sites_event[cur_ev_ix - 1]
+                    + self.site_combs[cur_record_ind, 1]
                 )
 
-            record_ind[i_counter: i_counter + cur_record_ind.size] = cur_record_ind
+            record_ind[i_counter : i_counter + cur_record_ind.size] = cur_record_ind
 
-            record_site_int_ind[i_counter: i_counter + cur_record_ind.size] = (
+            record_site_int_ind[i_counter : i_counter + cur_record_ind.size] = (
                 cur_site_int_ind
             )
-            record_site_obs_ind[i_counter: i_counter + cur_record_ind.size] = (
+            record_site_obs_ind[i_counter : i_counter + cur_record_ind.size] = (
                 cur_site_obs_ind
             )
 
@@ -716,9 +767,9 @@ class SCProbDataset(utils.BaseDataset):
             i_counter += cur_record_ind.size
 
         assert (
-                np.all(record_site_int_ind >= 0)
-                and np.all(record_site_obs_ind >= 0)
-                and np.all(record_ind >= 0)
+            np.all(record_site_int_ind >= 0)
+            and np.all(record_site_obs_ind >= 0)
+            and np.all(record_ind >= 0)
         )
 
         return (
@@ -838,9 +889,9 @@ class SCProbDataset(utils.BaseDataset):
 
 
 def create_indRelModel(
-        hp_config: HyperParamsConfig,
-        scalar_features: ml_data.ScalarFeatures,
-        run_config: RunParamsConfig,
+    hp_config: HyperParamsConfig,
+    scalar_features: ml_data.ScalarFeatures,
+    run_config: RunParamsConfig,
 ):
     prob_model = models.ProbIndModel(
         hp_config.fc_units,
@@ -873,13 +924,13 @@ def create_indRelModel(
 
 
 def create_IMmodel(
-        hp_config: HyperParamsConfig,
-        scalar_features: ml_data.ScalarFeatures,
-        run_config: RunParamsConfig,
+    hp_config: HyperParamsConfig,
+    scalar_features: ml_data.ScalarFeatures,
+    run_config: RunParamsConfig,
 ):
     n_inputs = (
-                       run_config.n_rels * hp_config.n_im_features
-               ) + scalar_features.n_scalar_features
+        run_config.n_rels * hp_config.n_im_features
+    ) + scalar_features.n_scalar_features
 
     prob_model = models.ProbIMModel(
         n_inputs, hp_config.fc_units, run_config.n_rels, one_hot_n_ims=0
@@ -906,7 +957,9 @@ def create_IMmodel(
     return prob_model
 
 
-def get_scenario_mask(record_scenario_ids: torch.Tensor, scenario_ids: torch.Tensor) -> torch.Tensor:
+def get_scenario_mask(
+    record_scenario_ids: torch.Tensor, scenario_ids: torch.Tensor
+) -> torch.Tensor:
     n_scenarios = scenario_ids.shape[0]
     n_samples = record_scenario_ids.shape[0]
 
@@ -923,10 +976,10 @@ def get_scenario_mask(record_scenario_ids: torch.Tensor, scenario_ids: torch.Ten
 
 
 def compute_single_loss(
-        agg_probs: Union[torch.Tensor, np.ndarray],
-        im_misfit_score: Union[torch.Tensor, np.ndarray],
-        im_weights: Union[torch.Tensor, np.ndarray],
-        sc_weights: torch.Tensor | np.ndarray | None = None,
+    agg_probs: Union[torch.Tensor, np.ndarray],
+    im_misfit_score: Union[torch.Tensor, np.ndarray],
+    im_weights: Union[torch.Tensor, np.ndarray],
+    sc_weights: torch.Tensor | np.ndarray | None = None,
 ) -> tuple[torch.Tensor | np.ndarray, torch.Tensor | None, torch.Tensor | np.ndarray]:
     """
     Computes the scenario loss for the single-prob model
@@ -977,10 +1030,10 @@ def compute_single_loss(
 
 
 def compute_single_agg_prob(
-        scenario_mask: Union[torch.Tensor, np.ndarray],
-        pred: Union[torch.Tensor, np.ndarray],
-        w_pred: Union[torch.Tensor, np.ndarray],
-        im_weights: Union[torch.Tensor, np.ndarray],
+    scenario_mask: Union[torch.Tensor, np.ndarray],
+    pred: Union[torch.Tensor, np.ndarray],
+    w_pred: Union[torch.Tensor, np.ndarray],
+    im_weights: Union[torch.Tensor, np.ndarray],
 ):
     """
     Computes the aggregated probability for
@@ -1030,10 +1083,10 @@ def compute_single_agg_prob(
 
 
 def compute_multi_agg_prob(
-        scenario_mask: Union[torch.Tensor, np.ndarray],
-        pred: Union[torch.Tensor, np.ndarray],
-        w_pred: Union[torch.Tensor, np.ndarray],
-        im_weights: Union[torch.Tensor, np.ndarray],
+    scenario_mask: Union[torch.Tensor, np.ndarray],
+    pred: Union[torch.Tensor, np.ndarray],
+    w_pred: Union[torch.Tensor, np.ndarray],
+    im_weights: Union[torch.Tensor, np.ndarray],
 ):
     """
     Computes the aggregated probability for
@@ -1089,10 +1142,10 @@ def compute_multi_agg_prob(
 
 
 def compute_multi_loss(
-        agg_probs: Union[torch.Tensor, np.ndarray],
-        im_misfit_score: Union[torch.Tensor, np.ndarray],
-        im_weights: Union[torch.Tensor, np.ndarray],
-        sc_weights: torch.Tensor | np.ndarray | None = None,
+    agg_probs: Union[torch.Tensor, np.ndarray],
+    im_misfit_score: Union[torch.Tensor, np.ndarray],
+    im_weights: Union[torch.Tensor, np.ndarray],
+    sc_weights: torch.Tensor | np.ndarray | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
     """
     Computes the scenario loss for the single-prob model
@@ -1144,10 +1197,10 @@ def compute_multi_loss(
 
 
 def get_weight_prediction(
-        weight_model: models.WeightModel,
-        scalar_features: torch.Tensor,
-        scenario_mask: torch.Tensor,
-        run_config: RunParamsConfig,
+    weight_model: models.WeightModel,
+    scalar_features: torch.Tensor,
+    scenario_mask: torch.Tensor,
+    run_config: RunParamsConfig,
 ):
     """Gets the normalised weight predictions"""
     w_pred = weight_model(
@@ -1164,8 +1217,8 @@ def get_weight_prediction(
 
 
 def get_loth_weights(
-        im_site_corrs: Union[torch.Tensor, np.ndarray],
-        scenario_mask: Union[torch.Tensor, np.ndarray],
+    im_site_corrs: Union[torch.Tensor, np.ndarray],
+    scenario_mask: Union[torch.Tensor, np.ndarray],
 ):
     """
     Normalises the loth & baker site-correlations
@@ -1197,11 +1250,11 @@ def get_loth_weights(
 
 
 def compute_loth_baker_scenario_weights(
-        im_site_corrs: torch.Tensor,
-        scenario_mask: torch.Tensor,
-        im_weights: torch.Tensor,
-        min_weight: float,
-        max_weight: float,
+    im_site_corrs: torch.Tensor,
+    scenario_mask: torch.Tensor,
+    im_weights: torch.Tensor,
+    min_weight: float,
+    max_weight: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Computes scenario weights based on the
@@ -1218,11 +1271,11 @@ def compute_loth_baker_scenario_weights(
         Shape: [n_scenarios]
     """
     raw_sc_weights = einops.einsum(
-            im_site_corrs,
-            im_weights,
-            scenario_mask,
-            "obs im, im, obs scenario -> scenario",
-        )
+        im_site_corrs,
+        im_weights,
+        scenario_mask,
+        "obs im, im, obs scenario -> scenario",
+    )
     sc_weights = torch.clamp(
         raw_sc_weights,
         min_weight,
@@ -1233,15 +1286,17 @@ def compute_loth_baker_scenario_weights(
 
 
 def get_batch_results(
-        pred: torch.Tensor,
-        model: models.ProbIMModel,
-        weight_model: models.WeightModel,
-        batch_data: SCBatchData,
-        im_weights: torch.Tensor,
-        run_config: RunParamsConfig,
-        hp_config: HyperParamsConfig,
+    pred: torch.Tensor,
+    model: models.ProbIMModel,
+    weight_model: models.WeightModel,
+    batch_data: SCBatchData,
+    im_weights: torch.Tensor,
+    run_config: RunParamsConfig,
+    hp_config: HyperParamsConfig,
 ):
-    scenario_mask = get_scenario_mask(batch_data.record_scenario_ids, batch_data.scenario_ids)
+    scenario_mask = get_scenario_mask(
+        batch_data.record_scenario_ids, batch_data.scenario_ids
+    )
     scenario_mask = scenario_mask.to(run_config.device, torch.float32)
 
     im_site_corrs = batch_data.im_site_corrs.to(run_config.device, dtype=torch.float32)
@@ -1296,13 +1351,20 @@ def get_batch_results(
         l1_reg = hp_config.l1_reg * l1_reg
         loss = loss + l1_reg
 
-    # Add L2 probability penalty
-    l2_prob_penalty = None
-    if run_config.l2_prob_penalty > 0:
-        l2_prob_penalty = run_config.l2_prob_penalty * torch.mean(
-            torch.sum(pred ** 2, dim=1)
-        )
-        loss = loss + l2_prob_penalty
+    ### Add L2 probability penalty
+    # Get lambda term
+    if run_config.l2_prob_lambda_fn:
+        l2_prob_lambda = run_config.l2_prob_lambda_fn(scenario_loss)
+    else:
+        l2_prob_lambda = run_config.l2_prob_lambda
+    # Apply penalty
+    l2_prob_penalty_term = None
+    if l2_prob_lambda is not None:
+        if run_config.per_im_prob:
+            pass
+        else:
+            l2_prob_penalty_term = l2_prob_lambda * torch.sum(agg_probs**2, dim=1)
+        loss = loss + torch.mean(l2_prob_penalty_term)
 
     return (
         w_pred,
@@ -1311,19 +1373,19 @@ def get_batch_results(
         weighted_scenario_loss,
         loss,
         l1_reg,
-        l2_prob_penalty,
+        l2_prob_penalty_term,
         scenario_mask,
     )
 
 
 def train(
-        prob_model: models.ProbIMModel,
-        weight_model: models.WeightModel,
-        train_dataset: SCProbDataset,
-        val_dataset: SCProbDataset,
-        hp_config: HyperParamsConfig,
-        run_config: RunParamsConfig,
-        quiet: bool = False,
+    prob_model: models.ProbIMModel,
+    weight_model: models.WeightModel,
+    train_dataset: SCProbDataset,
+    val_dataset: SCProbDataset,
+    hp_config: HyperParamsConfig,
+    run_config: RunParamsConfig,
+    quiet: bool = False,
 ):
     # Setup metrics to log
     metrics = {
@@ -1337,7 +1399,7 @@ def train(
     if hp_config.l1_reg > 0:
         metrics["l1_reg_hist_train"] = torch.zeros(hp_config.n_epochs)
         metrics["l1_reg_hist_val"] = torch.zeros(hp_config.n_epochs)
-    if run_config.l2_prob_penalty > 0:
+    if run_config.apply_l2_prob_penalty:
         metrics["l2_prob_penalty_hist_train"] = torch.zeros(hp_config.n_epochs)
         metrics["l2_prob_penalty_hist_val"] = torch.zeros(hp_config.n_epochs)
 
@@ -1350,7 +1412,10 @@ def train(
         optimizer = torch.optim.Adam(
             [
                 {"params": prob_model.parameters(), "weight_decay": hp_config.l2_reg},
-                {"params": weight_model.parameters(), "weight_decay": hp_config.wm_l2_reg},
+                {
+                    "params": weight_model.parameters(),
+                    "weight_decay": hp_config.wm_l2_reg,
+                },
             ],
             lr=hp_config.lr[0],
         )
@@ -1460,10 +1525,10 @@ def train(
                 ] += weighted_scenario_loss.mean().item()
             if hp_config.l1_reg > 0:
                 metrics["l1_reg_hist_train"][epoch_ix] += l1_reg.item()
-            if run_config.l2_prob_penalty > 0:
+            if run_config.apply_l2_prob_penalty:
                 metrics["l2_prob_penalty_hist_train"][
                     epoch_ix
-                ] += l2_prob_penalty.item()
+                ] += l2_prob_penalty.mean().item()
 
         metrics["loss_hist_train"][epoch_ix] /= len(train_dataloader)
         metrics["unweighted_loss_hist_train"][epoch_ix] /= len(train_dataloader)
@@ -1471,7 +1536,7 @@ def train(
             metrics["weighted_loss_hist_train"][epoch_ix] /= len(train_dataloader)
         if hp_config.l1_reg > 0:
             metrics["l1_reg_hist_train"][epoch_ix] /= len(train_dataloader)
-        if run_config.l2_prob_penalty > 0:
+        if run_config.apply_l2_prob_penalty:
             metrics["l2_prob_penalty_hist_train"][epoch_ix] /= len(train_dataloader)
 
         prob_model.eval()
@@ -1514,10 +1579,10 @@ def train(
                     ] += weighted_scenario_loss.mean().item()
                 if hp_config.l1_reg > 0:
                     metrics["l1_reg_hist_val"][epoch_ix] += l1_reg.item()
-                if run_config.l2_prob_penalty > 0:
+                if run_config.apply_l2_prob_penalty:
                     metrics["l2_prob_penalty_hist_val"][
                         epoch_ix
-                    ] += l2_prob_penalty.item()
+                    ] += l2_prob_penalty.mean().item()
 
             metrics["loss_hist_val"][epoch_ix] /= len(val_dataloader)
             metrics["unweighted_loss_hist_val"][epoch_ix] /= len(val_dataloader)
@@ -1525,7 +1590,7 @@ def train(
                 metrics["weighted_loss_hist_val"][epoch_ix] /= len(val_dataloader)
             if hp_config.l1_reg > 0:
                 metrics["l1_reg_hist_val"][epoch_ix] /= len(val_dataloader)
-            if run_config.l2_prob_penalty > 0:
+            if run_config.apply_l2_prob_penalty:
                 metrics["l2_prob_penalty_hist_val"][epoch_ix] /= len(val_dataloader)
 
             # Keep track of the best epoch
@@ -1542,10 +1607,10 @@ def train(
 
 
 def get_prediction(
-        prob_model: nn.Module,
-        batch_data: SCBatchData,
-        hp_config: HyperParamsConfig,
-        run_config: RunParamsConfig,
+    prob_model: nn.Module,
+    batch_data: SCBatchData,
+    hp_config: HyperParamsConfig,
+    run_config: RunParamsConfig,
 ):
     # Pre-allocate IM tensor on device
     im_tensor = torch.full(
@@ -1580,15 +1645,21 @@ def get_prediction(
         ix += 1
 
     if hp_config.use_res_site_obs:
-        im_tensor[:, ix, :, :] = batch_data.site_obs_obs_ims[:, None, :] - batch_data.site_obs_sim_ims
+        im_tensor[:, ix, :, :] = (
+            batch_data.site_obs_obs_ims[:, None, :] - batch_data.site_obs_sim_ims
+        )
         ix += 1
 
     if hp_config.use_res_sim_site_obs_sim_site_int:
-        im_tensor[:, ix, :, :] = batch_data.site_obs_sim_ims - batch_data.site_int_sim_ims
+        im_tensor[:, ix, :, :] = (
+            batch_data.site_obs_sim_ims - batch_data.site_int_sim_ims
+        )
         ix += 1
 
     if hp_config.use_res_obs_site_obs_sim_site_int:
-        im_tensor[:, ix, :, :] = batch_data.site_obs_obs_ims[:, None, :] - batch_data.site_int_sim_ims
+        im_tensor[:, ix, :, :] = (
+            batch_data.site_obs_obs_ims[:, None, :] - batch_data.site_int_sim_ims
+        )
         ix += 1
 
     scalar_features = einops.repeat(
@@ -1603,12 +1674,12 @@ def get_prediction(
 
 
 def get_dataset_prediction(
-        dataset: SCProbDataset,
-        prob_model: models.ProbIMModel,
-        weight_model: models.WeightModel,
-        run_config: RunParamsConfig,
-        dist_matrix: pd.DataFrame,
-        hp_config: HyperParamsConfig,
+    dataset: SCProbDataset,
+    prob_model: models.ProbIMModel,
+    weight_model: models.WeightModel,
+    run_config: RunParamsConfig,
+    dist_matrix: pd.DataFrame,
+    hp_config: HyperParamsConfig,
 ):
     pred_dataloader = utils.CustomTabularDataLoader(
         dataset, hp_config.batch_size, shuffle=False, shuffle_rels=False
@@ -1756,7 +1827,9 @@ def get_dataset_prediction(
 
             # Misfit score
             sample_results_df.loc[start_ix:end_ix, im_misfit_cols] = (
-                einops.rearrange(batch_data.record_im_misfit_score, "batch rel im -> (batch rel) im")
+                einops.rearrange(
+                    batch_data.record_im_misfit_score, "batch rel im -> (batch rel) im"
+                )
                 .numpy(force=True)
                 .astype(np.float32)
             )
@@ -1764,7 +1837,9 @@ def get_dataset_prediction(
                 sample_results_df.loc[start_ix:end_ix, "misfit_score"] = (
                     einops.rearrange(
                         einops.einsum(
-                            batch_data.record_im_misfit_score.to(run_config.device, torch.float32),
+                            batch_data.record_im_misfit_score.to(
+                                run_config.device, torch.float32
+                            ),
                             im_weights,
                             "obs rel im, im -> obs rel",
                         ),
@@ -1808,7 +1883,9 @@ def get_dataset_prediction(
             cur_sample_sum[im_site_weights_cols] = w_pred.numpy(force=True).astype(
                 np.float32
             )
-            site_int_sim_ims_gpu = batch_data.site_int_sim_ims.to(run_config.device, torch.float32)
+            site_int_sim_ims_gpu = batch_data.site_int_sim_ims.to(
+                run_config.device, torch.float32
+            )
             if run_config.per_im_prob:
                 cur_sample_wavg = einops.einsum(
                     pred,
@@ -1892,7 +1969,9 @@ def get_dataset_prediction(
 
                 cur_sc_result["misfit_score"] = einops.rearrange(
                     einops.einsum(
-                        batch_data.scenario_im_misfit_score.to(run_config.device, torch.float32),
+                        batch_data.scenario_im_misfit_score.to(
+                            run_config.device, torch.float32
+                        ),
                         im_weights,
                         "sc rel im, im -> sc rel",
                     )
@@ -1903,7 +1982,9 @@ def get_dataset_prediction(
 
             # SC - Misfit
             cur_sc_result[im_misfit_cols] = (
-                einops.rearrange(batch_data.scenario_im_misfit_score, "sc rel im -> (sc rel) im")
+                einops.rearrange(
+                    batch_data.scenario_im_misfit_score, "sc rel im -> (sc rel) im"
+                )
                 .numpy(force=True)
                 .astype(np.float32)
             )
@@ -1928,18 +2009,26 @@ def get_dataset_prediction(
             ).T
             # SC - Loss
             cur_sc_sum["loss"] = scenario_loss.numpy(force=True).astype(np.float32)
-            # SC - Weight
+            # SC - Scenario Weight
             cur_sc_sum["weight"] = (
                 sc_weights.numpy(force=True) if sc_weights is not None else np.nan
             )
-            # SC - Raw Weight
+            # SC - Raw Weight (before clamping)
             cur_sc_sum["raw_weight"] = (
-                raw_sc_weights.numpy(force=True) if raw_sc_weights is not None else np.nan
+                raw_sc_weights.numpy(force=True)
+                if raw_sc_weights is not None
+                else np.nan
             )
             # SC - Weighted Loss
             cur_sc_sum["w_loss"] = (
                 weighted_scenario_loss.numpy(force=True)
                 if weighted_scenario_loss is not None
+                else np.nan
+            )
+            # SC - L2 Probability Penalty
+            cur_sc_sum["l2_prob_penalty_term"] = (
+                l2_prob_penalty.numpy(force=True)
+                if l2_prob_penalty is not None
                 else np.nan
             )
 
@@ -2027,24 +2116,24 @@ def get_dataset_prediction(
 
 
 def post_processing(
-        prob_model: models.ProbIMModel,
-        weight_model: models.WeightModel,
-        train_dataset: SCProbDataset,
-        val_dataset: SCProbDataset,
-        hp_config: HyperParamsConfig,
-        run_config: RunParamsConfig,
-        metrics: Dict,
-        best_epoch: int,
-        scalar_features: ml_data.ScalarFeatures,
-        data_metadata: Dict,
-        val_int_sites: np.ndarray,
-        train_int_sites: np.ndarray,
-        obs_sites: np.ndarray,
-        id_suffix: str = "",
+    prob_model: models.ProbIMModel,
+    weight_model: models.WeightModel,
+    train_dataset: SCProbDataset,
+    val_dataset: SCProbDataset,
+    hp_config: HyperParamsConfig,
+    run_config: RunParamsConfig,
+    metrics: Dict,
+    best_epoch: int,
+    scalar_features: ml_data.ScalarFeatures,
+    data_metadata: Dict,
+    val_int_sites: np.ndarray,
+    train_int_sites: np.ndarray,
+    obs_sites: np.ndarray,
+    id_suffix: str = "",
 ):
     (
         cur_out_dir := run_config.results_dir
-                       / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+        / f"{mlt.utils.create_run_id(False)}{id_suffix}"
     ).mkdir()
 
     # Save the training sites and validation sites
@@ -2139,9 +2228,9 @@ def post_processing(
 
 
 def compute_scenario_distribution(
-        sample_results: pd.DataFrame,
-        run_config: RunParamsConfig,
-        im_site_weights_suffix: str = "_site_corr_weights",
+    sample_results: pd.DataFrame,
+    run_config: RunParamsConfig,
+    im_site_weights_suffix: str = "_site_corr_weights",
 ):
     """
     Computes the realisation distribution for each scenario
@@ -2163,8 +2252,8 @@ def compute_scenario_distribution(
             (cur_group.shape[0] // run_config.n_rels, 1), dtype=float
         )
         cur_im_site_weights = cur_group[im_site_weight_cols][
-                              :: run_config.n_rels
-                              ].values
+            :: run_config.n_rels
+        ].values
         assert np.allclose(cur_im_site_weights.sum(axis=0), 1.0)
 
         # Compute the scenario probabilities & loss
@@ -2249,10 +2338,10 @@ def compute_scenario_distribution(
 def load_emp_cim_data(data_dir: Path, event: str, method: constants.RankingMethod):
     """Loads the empirical conditional IM data for the given event"""
     result_ffp = (
-            data_dir
-            / event
-            / f"{constants.METHOD_RESULT_DIR_NAME_MAPPING[method]}"
-            / "cMVN_distributions.pickle"
+        data_dir
+        / event
+        / f"{constants.METHOD_RESULT_DIR_NAME_MAPPING[method]}"
+        / "cMVN_distributions.pickle"
     )
     if result_ffp.exists():
         return conditional.ConditionalMVNDistribution.load(result_ffp)
@@ -2260,10 +2349,10 @@ def load_emp_cim_data(data_dir: Path, event: str, method: constants.RankingMetho
 
 
 def compute_ks_p_values(
-        sc_df: pd.DataFrame,
-        emp_cim_dir: Path,
-        db_ffp: Path,
-        run_config: RunParamsConfig,
+    sc_df: pd.DataFrame,
+    emp_cim_dir: Path,
+    db_ffp: Path,
+    run_config: RunParamsConfig,
 ):
     """
     Computes the KS statistics and p-values for
@@ -2362,7 +2451,7 @@ def compute_ks_p_values(
 
 
 def compute_ml_residuals_wrt_obs(
-        sc_sum_df: pd.DataFrame, db_ffp: Path, ims: np.ndarray
+    sc_sum_df: pd.DataFrame, db_ffp: Path, ims: np.ndarray
 ):
     """
     Computes the residuals between the ML weighted average
@@ -2396,7 +2485,7 @@ def compute_ml_residuals_wrt_obs(
 
 
 def compute_cIM_residuals_wrt_obs(
-        emp_cim_dir: Path, db_ffp: Path, method: constants.RankingMethod, ims: np.ndarray
+    emp_cim_dir: Path, db_ffp: Path, method: constants.RankingMethod, ims: np.ndarray
 ):
     """
     Computes the residual of a conditional IM result
@@ -2426,7 +2515,7 @@ def compute_cIM_residuals_wrt_obs(
         cur_obs_df = obs_df.loc[obs_df.event_id == cur_event].set_index("site_id")
         cur_residual = pd.DataFrame(
             data=cur_obs_df.loc[cur_emp_mean_df.index, ims].values
-                 - cur_emp_mean_df.loc[cur_emp_mean_df.index, ims].values,
+            - cur_emp_mean_df.loc[cur_emp_mean_df.index, ims].values,
             columns=ims,
             index=cur_emp_mean_df.index,
         )
@@ -2442,9 +2531,9 @@ def compute_cIM_residuals_wrt_obs(
 
 
 def compute_mean_std_residuals_wrt_emp(
-        sc_sum_df: pd.DataFrame,
-        emp_cim_dir: Path,
-        ims: np.ndarray,
+    sc_sum_df: pd.DataFrame,
+    emp_cim_dir: Path,
+    ims: np.ndarray,
 ):
     """
     Computes the residual between the mean and
@@ -2508,7 +2597,7 @@ def compute_mean_std_residuals_wrt_emp(
 
         cur_std_residuals = pd.DataFrame(
             data=np.log(cur_emp_cim_std_df[ims].values)
-                 - np.log(cur_ml_std_df[im_wstd_cols].values),
+            - np.log(cur_ml_std_df[im_wstd_cols].values),
             index=mlt.array_utils.numpy_str_join("_", cur_event, cur_sites),
             columns=ims,
         )

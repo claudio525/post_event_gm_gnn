@@ -120,12 +120,47 @@ def run_general_tab(results_dir: Path):
             f"{'Use Residual obs_site_obs sim_site_int:':<{padding}} {meta['hp_config']['res_obs_site_obs_sim_site_int']}"
         )
 
-        st.markdown("### Run Config")
-        st.text(
-            f"{'Number of realisations:':<{padding}} {meta['run_config']['n_rels']}"
-        )
-        st.text(f"{'Max distance:':<{padding}} {meta['run_config']['max_dist']}")
+        st.markdown("### Hyper Config")
+        pretty_print_single_dict(meta["hp_config"], indent=4)
 
+        st.markdown("#### Run Config")
+        pretty_print_single_dict(meta["run_config"], indent=4)
+
+        markdown_str = """
+        #### Data Metadata
+        **DB:** {db}  
+        **Train Scenarios:** {train_scenarios}  
+        **Val Scenarios:** {val_scenarios}
+        """.format(
+            db=meta['data']['db'],
+            train_scenarios=meta['data']['n_train_scenarios'],
+            val_scenarios=meta['data']['n_val_scenarios']
+        )
+        st.markdown(markdown_str)
+
+
+
+def pretty_print_single_dict(d, indent=0, exclude_keys=None):
+    """
+    Prints a dictionary with key-value pairs on a single line in Streamlit using a single Markdown call.
+
+    :param d: Dictionary to print
+    :param indent: Current level of indentation
+    """
+    # Define the indentation string
+    indent_str = ' ' * indent
+    # Initialize the markdown string
+    markdown_str = ""
+    # Iterate over the items in the dictionary
+    for key, value in d.items():
+        if exclude_keys is not None and key in exclude_keys:
+            continue
+
+        # Append each key-value pair to the markdown string
+        markdown_str += f"{indent_str}**{key}:** {value}  \n"
+
+    # Call st.markdown once with the complete markdown string
+    st.markdown(markdown_str)
 
 def _create_event_map(
     event: str,
