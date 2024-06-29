@@ -84,42 +84,6 @@ def run_general_tab(results_dir: Path):
             st.image(str(model_vis_ffp))
 
     with col_2:
-        padding = 30
-        st.markdown("### Hyperparams")
-        st.text(f"{'Batch size:':<{padding}} {meta['hp_config']['batch_size']}")
-        st.text(f"{'Learning rate:':<{padding}} {meta['hp_config']['lr']}")
-        if "fc_units" in meta["hp_config"]:
-            st.text(f"{'FC Units:':<{padding}} {str(meta['hp_config']['fc_units'])}")
-        else:
-            st.text(
-                f"{'Ind FC Units:':<{padding}} {str(meta['hp_config']['ind_fc_units'])}"
-            )
-            st.text(
-                f"{'Comb FC Units:':<{padding}} {str(meta['hp_config']['comb_fc_units'])}"
-            )
-        st.text(f"{'L2:':<{padding}} {meta['hp_config']['l2_reg']}")
-        st.divider()
-
-        st.text(
-            f"{'Use IM Sim Site Obs:':<{padding}} {meta['hp_config']['im_sim_site_obs']}"
-        )
-        st.text(
-            f"{'Use IM Sim Site Int:':<{padding}} {meta['hp_config']['im_sim_site_int']}"
-        )
-        st.text(
-            f"{'Use IM Obs Site Obs:':<{padding}} {meta['hp_config']['im_obs_site_obs']}"
-        )
-
-        st.text(
-            f"{'Use Residual sim_site_obs obs_site_obs:':<{padding}} {meta['hp_config']['res_site_obs']}"
-        )
-        st.text(
-            f"{'Use Residual sim_site_obs sim_site_int:':<{padding}} {meta['hp_config']['res_sim_site_obs_sim_site_int']}"
-        )
-        st.text(
-            f"{'Use Residual obs_site_obs sim_site_int:':<{padding}} {meta['hp_config']['res_obs_site_obs_sim_site_int']}"
-        )
-
         st.markdown("### Hyper Config")
         pretty_print_single_dict(meta["hp_config"], indent=4)
 
@@ -129,10 +93,14 @@ def run_general_tab(results_dir: Path):
         markdown_str = """
         #### Data Metadata
         **DB:** {db}  
+        **Correlation Dir:** {corr_dir}  
+        **Seed**: {seed}  
         **Train Scenarios:** {train_scenarios}  
-        **Val Scenarios:** {val_scenarios}
+        **Val Scenarios:** {val_scenarios}  
         """.format(
             db=meta['data']['db'],
+            corr_dir=meta['data'].get('corr_dir'),
+            seed=meta['data'].get("seed"),
             train_scenarios=meta['data']['n_train_scenarios'],
             val_scenarios=meta['data']['n_val_scenarios']
         )
@@ -1771,12 +1739,13 @@ def agg_scenario_vis(
 
     st.divider()
 
-    # st.markdown("### Custom")
+    st.markdown("### Custom")
     # scatter_options = st_utils.scatter_options_form(sc_sum_df, axis_cols, tab_type)
-    # if scatter_options is not None:
-    #     fig, ax = mlt.plotting.gen_scatter_trend_plot(sc_sum_df, scatter_options)
-    #     st.pyplot(fig, use_container_width=False)
-    #     plt.close(fig)
+    scatter_options = st_utils.scatter_options_form(sc_sum_df, sc_sum_df.select_dtypes(include=['number']).columns, tab_type)
+    if scatter_options is not None:
+        fig, ax = mlt.plotting.gen_scatter_trend_plot(sc_sum_df, scatter_options)
+        st.pyplot(fig, use_container_width=False)
+        plt.close(fig)
 
 
 def run_agg_scenario(

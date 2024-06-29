@@ -10,7 +10,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-import gmhazard_calc as gc
 import tqdm
 from qcore.timeseries import BBSeis, read_ascii
 import ml_tools as mlt
@@ -759,28 +758,6 @@ def compute_event_gm_params_rel_mera(
             results.append(_process_sim_gm_params_mera_event(cur_event, db_ffp, ims))
 
     return results
-
-
-def load_site_sim_data(
-    sim_imdb_ffp: Path, sites: Sequence[str] = None, event: str = None
-):
-    """Loads the simulation IM values for the specified sites"""
-    sim_data = {}
-    with gc.dbs.IMDB.get_imdb(str(sim_imdb_ffp)) as db:
-        sites = sites if sites is not None else db.get_stored_stations()
-
-        for cur_site in sites:
-            if (cur_im_df := db.im_data(cur_site)) is not None:
-                if event is not None:
-                    # Not data for this event/site combination
-                    if event not in cur_im_df.index:
-                        continue
-
-                    cur_im_df = cur_im_df.loc[event]
-
-                sim_data[cur_site] = cur_im_df
-
-    return sim_data
 
 
 def load_obs_data(obs_ffp: Path):

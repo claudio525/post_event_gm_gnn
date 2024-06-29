@@ -191,6 +191,8 @@ def train_model(
 
     print(f"Run post-processing")
     data_metadata["db"] = str(rel_db_ffp)
+    data_metadata["corr_dir"] = str(rel_corr_dir)
+    data_metadata["seed"] = seed
     sc_prob.post_processing(
         prob_model,
         weight_model,
