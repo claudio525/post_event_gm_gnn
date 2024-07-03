@@ -26,6 +26,7 @@ from . import utils
 from ..db import DB
 from .. import constants
 from .. import conditional
+from .. import data
 
 
 class SampleWeighting(str, Enum):
@@ -75,7 +76,9 @@ class L2ProbLambdaFn:
         )
 
     def to_tuple_str(self):
-        return f"({self.min_lambda}, {self.max_lambda}, {self.min_loss}, {self.max_loss})"
+        return (
+            f"({self.min_lambda}, {self.max_lambda}, {self.min_loss}, {self.max_loss})"
+        )
 
     @classmethod
     def parse_l2_prob_lambda_fn(cls, value: str) -> "L2ProbLambdaFn":
@@ -148,6 +151,51 @@ class BatchResult(NamedTuple):
 
 @dataclass
 class RunParamsConfig:
+    """
+    Attributes
+    ----------
+    max_dist: float
+        The maximum at which observations sites are considered
+        for a given site of interest
+    n_rels: int
+        The number of realisations to use
+    ims: Sequence[str]
+        The IMs to use
+    im_weights: np.ndarray
+        The weights for each IM
+    per_im_prob: bool
+        If true, realisation weight estimation
+        on a per IM basis
+    apply_sc_weighting: bool
+        If true, scenario weights will be applied,
+        based on the sum of Loth & Baker 2013 site-correlation values
+        of all observation sites for a given scenario
+        Clamped based on min_sc_weight and max_sc_weight
+    min_sc_weight: float
+    max_sc_weight: float
+        Minimum and maximum scenario weights
+    sample_weighting_method: SampleWeighting
+        The method to use for sample weighting
+    sc_l2_prob_lambda: float, optional
+        The fixed lambda value for the
+        L2 penalty term for the scenario probabilities
+    sc_l2_prob_lambda_fn: L2ProbLambdaFn, optional
+        The parameters for the scenario loss dependent
+        lambda value for the L2 probability penalty term
+    sample_l2_prob_lambda_fn: L2ProbLambdaFn, optional
+        The parameters for the sample loss dependent
+        lambda value for the L2 probability penalty
+    scalar_feature_set_key: constants.ScalarFeatureSetKey
+        The scalar feature set to use
+    weight_model_feature_set_key: constants.ScalarFeatureSetKey
+        The scalar feature set to use for the weight model
+        Only applicable if sample_weighting is 'custom_model'
+    debug: bool
+    device: str
+    results_dir: Path, optional
+        The directory to save the results
+    """
+
     max_dist: float
     n_rels: int
     ims: Sequence[str]
@@ -162,8 +210,9 @@ class RunParamsConfig:
     max_sc_weight: float
 
     sample_weighting_method: SampleWeighting
-    l2_prob_lambda: float
-    l2_prob_lambda_fn: L2ProbLambdaFn
+    sc_l2_prob_lambda: float | None
+    sc_l2_prob_lambda_fn: L2ProbLambdaFn | None
+    sample_l2_prob_lambda_fn: L2ProbLambdaFn | None
 
     scalar_feature_set_key: constants.ScalarFeatureSetKey
     weight_model_feature_set_key: constants.ScalarFeatureSetKey
@@ -174,6 +223,20 @@ class RunParamsConfig:
     results_dir: Path = None
 
     def __post_init__(self):
+        assert (
+            sum(
+                [
+                    self.sc_l2_prob_lambda is not None,
+                    self.sc_l2_prob_lambda_fn is not None,
+                    self.sample_l2_prob_lambda_fn is not None,
+                ]
+            )
+            == 1
+        ), (
+            "Only one of sc_l2_prob_lambda, sc_l2_prob_lambda_fn "
+            "or sample_l2_prob_lambda_fn can be set"
+        )
+
         if self.results_dir is None:
             self.results_dir = Path(os.path.expandvars("$wdata/sim_ranking/results/ml"))
 
@@ -183,7 +246,7 @@ class RunParamsConfig:
 
     @property
     def apply_l2_prob_penalty(self):
-        return self.l2_prob_lambda > 0 or self.l2_prob_lambda_fn
+        return self.sc_l2_prob_lambda or self.sc_l2_prob_lambda_fn or self.sample_l2_prob_lambda_fn
 
     def to_dict(self):
         return {
@@ -196,8 +259,17 @@ class RunParamsConfig:
             "apply_sc_weighting": self.apply_sc_weighting,
             "min_sc_weight": self.min_sc_weight,
             "max_sc_weight": self.max_sc_weight,
-            "l2_prob_lambda": self.l2_prob_lambda,
-            "l2_prob_lambda_fn": self.l2_prob_lambda_fn.to_tuple_str() if self.l2_prob_lambda_fn else None,
+            "sc_l2_prob_lambda": self.sc_l2_prob_lambda,
+            "sc_l2_prob_lambda_fn": (
+                self.sc_l2_prob_lambda_fn.to_tuple_str()
+                if self.sc_l2_prob_lambda_fn
+                else None
+            ),
+            "sample_l2_prob_lambda_fn": (
+                self.sample_l2_prob_lambda_fn.to_tuple_str()
+                if self.sample_l2_prob_lambda_fn
+                else None
+            ),
             "scalar_feature_set_key": self.scalar_feature_set_key.value,
             "weight_model_feature_set_key": self.weight_model_feature_set_key.value,
             "debug": self.debug,
@@ -216,8 +288,19 @@ class RunParamsConfig:
             params["min_sc_weight"],
             params["max_sc_weight"],
             SampleWeighting(params["sample_weighting_method"]),
-            params["l2_prob_lambda"],
-            L2ProbLambdaFn.parse_l2_prob_lambda_fn(params["l2_prob_lambda_fn"]) if params["l2_prob_lambda_fn"] else None,
+            params["sc_l2_prob_lambda"],
+            (
+                L2ProbLambdaFn.parse_l2_prob_lambda_fn(params["sc_l2_prob_lambda_fn"])
+                if params["sc_l2_prob_lambda_fn"]
+                else None
+            ),
+            (
+                L2ProbLambdaFn.parse_l2_prob_lambda_fn(
+                    params["sample_l2_prob_lambda_fn"]
+                )
+                if params["sample_l2_prob_lambda_fn"]
+                else None
+            ),
             constants.ScalarFeatureSetKey(params["scalar_feature_set_key"]),
             constants.ScalarFeatureSetKey(params["weight_model_feature_set_key"]),
             params["debug"],
@@ -1458,20 +1541,39 @@ def get_batch_results(
         loss = loss + l1_reg
 
     ### Add L2 probability penalty
-    # Get lambda term
-    if run_config.l2_prob_lambda_fn:
-        l2_prob_lambda = run_config.l2_prob_lambda_fn(im_scenario_loss)
-    else:
-        l2_prob_lambda = run_config.l2_prob_lambda
-    # Apply penalty
     im_l2_prob_penalty_term, l2_prob_penalty_term = None, None
-    if l2_prob_lambda is not None:
-        if run_config.per_im_prob:
-            im_l2_prob_penalty_term = l2_prob_lambda * torch.sum(agg_probs**2, dim=1)
-            l2_prob_penalty_term = torch.sum(im_l2_prob_penalty_term, dim=1)
+    # Scenario-based
+    if run_config.sc_l2_prob_lambda_fn or run_config.sc_l2_prob_lambda:
+        # Get lambda term
+        if run_config.sc_l2_prob_lambda_fn:
+            l2_prob_lambda = run_config.sc_l2_prob_lambda_fn(im_scenario_loss)
         else:
-            l2_prob_penalty_term = l2_prob_lambda * torch.sum(agg_probs**2, dim=1)
+            l2_prob_lambda = run_config.sc_l2_prob_lambda
+        # Apply penalty
+
+        if l2_prob_lambda is not None:
+            if run_config.per_im_prob:
+                im_l2_prob_penalty_term = l2_prob_lambda * torch.sum(agg_probs**2, dim=1)
+                l2_prob_penalty_term = torch.sum(im_l2_prob_penalty_term, dim=1)
+            else:
+                l2_prob_penalty_term = l2_prob_lambda * torch.sum(agg_probs**2, dim=1)
+            loss = loss + torch.mean(l2_prob_penalty_term)
+    # Sample based
+    elif run_config.sample_l2_prob_lambda_fn:
+        sample_loss = einops.einsum(pred, batch_data.record_im_misfit_score.to(run_config.device, torch.float32), im_weights,
+                                    "record rel im, record rel im, im -> record im")
+        l2_prob_lambda = run_config.sample_l2_prob_lambda_fn(sample_loss)
+
+        # l2_prob_penalty_term =  einops.einsum(l2_prob_lambda, torch.sum((pred**2), dim=1), w_pred,
+        #                                         "record im, record im, record im -> record")
+        # l2_prob_penalty_term = einops.einsum(l2_prob_penalty_term, scenario_mask, "record, record scenario -> scenario")
+
+        im_l2_prob_penalty_term = einops.einsum(l2_prob_lambda, pred**2, w_pred, scenario_mask,
+                          "record im, record rel im, record im, record scenario -> scenario im")
+        l2_prob_penalty_term = torch.sum(im_l2_prob_penalty_term, dim=1)
+
         loss = loss + torch.mean(l2_prob_penalty_term)
+
 
     return BatchResult(
         pred,
@@ -1664,14 +1766,26 @@ def train(
                 best_model_state = prob_model.state_dict()
                 best_model_epoch = epoch_ix
 
-            train_l2_term = f"\tL2 Prob Term: {metrics['l2_prob_penalty_hist_train'][epoch_ix]:.4f}" if run_config.apply_l2_prob_penalty else ""
-            val_l2_term = f"\tL2 Prob Term: {metrics['l2_prob_penalty_hist_val'][epoch_ix]:.4f}" if run_config.apply_l2_prob_penalty else ""
+            train_l2_term = (
+                f"\tL2 Prob Term: {metrics['l2_prob_penalty_hist_train'][epoch_ix]:.4f}"
+                if run_config.apply_l2_prob_penalty
+                else ""
+            )
+            val_l2_term = (
+                f"\tL2 Prob Term: {metrics['l2_prob_penalty_hist_val'][epoch_ix]:.4f}"
+                if run_config.apply_l2_prob_penalty
+                else ""
+            )
 
             print(f"Epoch {epoch_ix + 1}/{hp_config.n_epochs}")
-            print(f"\tTraining" f"\t\tLoss: {metrics['loss_hist_train'][epoch_ix]:.4f}{train_l2_term}")
-            print(f"\tValidation" f"\t\tLoss: {metrics['loss_hist_val'][epoch_ix]:.4f}{val_l2_term}")
-
-
+            print(
+                f"\tTraining"
+                f"\t\tLoss: {metrics['loss_hist_train'][epoch_ix]:.4f}{train_l2_term}"
+            )
+            print(
+                f"\tValidation"
+                f"\t\tLoss: {metrics['loss_hist_val'][epoch_ix]:.4f}{val_l2_term}"
+            )
 
     return metrics, best_model_state, best_model_epoch
 
@@ -1992,12 +2106,16 @@ def get_dataset_prediction(
 
             # Scenario probabilities & loss
             if run_config.per_im_prob:
-                assert np.allclose(batch_result.agg_probs.sum(dim=1).numpy(force=True), 1.0)
+                assert np.allclose(
+                    batch_result.agg_probs.sum(dim=1).numpy(force=True), 1.0
+                )
                 cur_sc_result[prob_cols] = einops.rearrange(
                     batch_result.agg_probs.numpy(force=True), "sc rel im -> (sc rel) im"
                 )
             else:
-                assert np.allclose(batch_result.agg_probs.sum(dim=1).numpy(force=True), 1.0)
+                assert np.allclose(
+                    batch_result.agg_probs.sum(dim=1).numpy(force=True), 1.0
+                )
 
                 cur_sc_result["prob"] = einops.rearrange(
                     batch_result.agg_probs.numpy(force=True), "sc rel -> (sc rel)"
@@ -2054,7 +2172,9 @@ def get_dataset_prediction(
                 # SC - Raw Weight (before clamping)
                 cur_sc_sum["raw_weight"] = batch_result.raw_sc_weights.numpy(force=True)
                 # SC - Weighted Loss
-                cur_sc_sum["w_loss"] = batch_result.weighted_scenario_loss.numpy(force=True)
+                cur_sc_sum["w_loss"] = batch_result.weighted_scenario_loss.numpy(
+                    force=True
+                )
 
             # SC - L2 Probability Penalty
             if run_config.apply_l2_prob_penalty:
@@ -2068,8 +2188,8 @@ def get_dataset_prediction(
 
             # SC - IM Scenario Loss
             if run_config.per_im_prob:
-                cur_sc_sum[im_scenario_loss_cols] = (
-                    batch_result.im_scenario_loss.numpy(force=True)
+                cur_sc_sum[im_scenario_loss_cols] = batch_result.im_scenario_loss.numpy(
+                    force=True
                 )
 
             assert np.all(
@@ -2375,8 +2495,6 @@ def post_processing(
 #     return scenario_sum_df, scenario_df
 
 
-
-
 def compute_ks_p_values(
     sc_df: pd.DataFrame,
     emp_cim_dir: Path,
@@ -2535,7 +2653,9 @@ def compute_cIM_residuals_wrt_obs(
         if cur_event not in obs_df.event_id:
             pass
 
-        if (cur_emp_cim := conditional.load_emp_cim_data(emp_cim_dir, cur_event, method)) is None:
+        if (
+            cur_emp_cim := conditional.load_emp_cim_data(emp_cim_dir, cur_event, method)
+        ) is None:
             print(f"Skipping event {cur_event} as no cIM data found")
             continue
 
@@ -2586,55 +2706,26 @@ def compute_mean_std_residuals_wrt_emp(
     im_wavg_cols = mlt.array_utils.numpy_str_join("_", ims, "wavg")
     im_wstd_cols = mlt.array_utils.numpy_str_join("_", ims, "wstd")
 
-    events = sc_sum_df.event_id.unique().astype(str)
+    emp_mean_df, emp_std_df, sc_sum_df = data.get_overlap_emp_ml_data(emp_cim_dir, sc_sum_df)
+    assert emp_mean_df.index.equals(sc_sum_df.index) and emp_std_df.index.equals(
+        sc_sum_df.index
+    )
 
-    mean_residuals, std_residuals = [], []
-    for cur_event in events:
-        # Load the cIM data
-        cur_emp_cim = conditional.load_emp_cim_data(
-            emp_cim_dir, cur_event, constants.RankingMethod.emp_cMVN
-        )
-        if cur_emp_cim is None:
-            print(f"Skipping event {cur_event} as no cIM data found")
-            continue
+    mean_residuals = pd.DataFrame(
+        data=emp_mean_df[ims].values - sc_sum_df[im_wavg_cols].values,
+        index=sc_sum_df.index,
+        columns=ims,
+    )
+    mean_residuals["event_id"] = sc_sum_df.event_id
+    mean_residuals["site_int"] = sc_sum_df.site_int
 
-        cur_sc_sum_df = (
-            sc_sum_df[sc_sum_df["event_id"] == cur_event]
-            .set_index("site_int")
-            .sort_index()
-        )
-        cur_sites = cur_sc_sum_df.index.values.astype(str)
+    std_residuals = pd.DataFrame(
+        data=np.log(emp_std_df[ims].values)
+             - np.log(sc_sum_df[im_wstd_cols].values),
+        index=sc_sum_df.index,
+        columns=ims,
+    )
+    std_residuals["event_id"] = sc_sum_df.event_id
+    std_residuals["site_int"] = sc_sum_df.site_int
 
-        # Mean residual
-        cur_ml_mean_df = cur_sc_sum_df[im_wavg_cols]
-        cur_emp_cim_mean_df = cur_emp_cim.cond_lnIM_mean_df.loc[cur_sites, ims]
-        assert np.all(cur_ml_mean_df.index == cur_emp_cim_mean_df.index)
-
-        cur_mean_residuals = pd.DataFrame(
-            data=cur_emp_cim_mean_df[ims].values - cur_ml_mean_df[im_wavg_cols].values,
-            index=mlt.array_utils.numpy_str_join("_", cur_event, cur_sites),
-            columns=ims,
-        )
-        cur_mean_residuals["event_id"] = cur_event
-        cur_mean_residuals["site_int"] = cur_sites
-        mean_residuals.append(cur_mean_residuals)
-
-        # Std residual
-        cur_ml_std_df = cur_sc_sum_df[im_wstd_cols]
-        cur_emp_cim_std_df = cur_emp_cim.cond_lnIM_std_df.loc[cur_sites, ims]
-        assert np.all(cur_ml_std_df.index == cur_emp_cim_std_df.index)
-
-        cur_std_residuals = pd.DataFrame(
-            data=np.log(cur_emp_cim_std_df[ims].values)
-            - np.log(cur_ml_std_df[im_wstd_cols].values),
-            index=mlt.array_utils.numpy_str_join("_", cur_event, cur_sites),
-            columns=ims,
-        )
-        cur_std_residuals["event_id"] = cur_event
-        cur_std_residuals["site_int"] = cur_sites
-        std_residuals.append(cur_std_residuals)
-
-    return pd.concat(mean_residuals, axis=0), pd.concat(std_residuals, axis=0)
-
-
-
+    return mean_residuals, std_residuals

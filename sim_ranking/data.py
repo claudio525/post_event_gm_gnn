@@ -937,7 +937,6 @@ def get_overlap_emp_ml_data(emp_results_dir: Path, ml_sc_sum_df: pd.DataFrame):
     ml_sc_sum_df: DataFrame
         Updated ML scenario summary dataframe
     """
-
     events = ml_sc_sum_df["event_id"].unique()
 
     emp_mean_df, emp_std_df = [], []

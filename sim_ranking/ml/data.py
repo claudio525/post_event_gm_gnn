@@ -5,10 +5,6 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from empirical.util.classdef import TectType, GMM
-from empirical.util.openquake_wrapper_vectorized import oq_run
-
-
 @dataclass
 class ScalarFeatures:
     event_features_data: pd.DataFrame
@@ -276,6 +272,9 @@ def get_valid_site_ints(
     valid_event_int_sites: dict
         Valid sites of interests per event
     """
+    from empirical.util.classdef import TectType, GMM
+    from empirical.util.openquake_wrapper_vectorized import oq_run
+
     # Check that all event-sites are available in the record dataframe
     assert all([
         np.all(np.isin(event_sites[cur_event], cur_df.site_id.values.astype(str)))

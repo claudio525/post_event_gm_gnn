@@ -66,13 +66,19 @@ def train_model(
     ),
     min_sc_weight: float = typer.Option(0.5, help="Minimum scenario weight"),
     max_sc_weight: float = typer.Option(2.0, help="Maximum scenario weight"),
-    l2_prob_lambda: float = typer.Option(
-        default=0.0, help="L2 penalty to discourage sparse realisations probabilities"
+    sc_l2_prob_lambda: float = typer.Option(
+        default=None,
+        help="Scenario L2 penalty to discourage sparse realisations probabilities",
     ),
-    l2_prob_lambda_fn: sc_prob.L2ProbLambdaFn = typer.Option(
+    sc_l2_prob_lambda_fn: sc_prob.L2ProbLambdaFn = typer.Option(
         default=None,
         parser=sc_prob.L2ProbLambdaFn.parse_l2_prob_lambda_fn,
-        help="L2 penalty function, overwrites l2_prob_penalty argument",
+        help="Scenario L2 penalty function",
+    ),
+    sample_l2_prob_lambda_fn: sc_prob.L2ProbLambdaFn  = typer.Option(
+        default=None,
+        parser=sc_prob.L2ProbLambdaFn.parse_l2_prob_lambda_fn,
+        help="Sample L2 penalty function",
     ),
     seed: int = typer.Option(None),
     out_dir: Path = typer.Option(..., help="Output directory"),
@@ -87,8 +93,9 @@ def train_model(
         min_sc_weight,
         max_sc_weight,
         sample_weighting,
-        l2_prob_lambda,
-        l2_prob_lambda_fn,
+        sc_l2_prob_lambda,
+        sc_l2_prob_lambda_fn,
+        sample_l2_prob_lambda_fn,
         scalar_feature_set_key,
         custom_weight_model_feature_set_key,
         debug,
