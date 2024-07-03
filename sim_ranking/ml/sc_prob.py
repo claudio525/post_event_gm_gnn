@@ -74,6 +74,9 @@ class L2ProbLambdaFn:
             f"min_loss: {self.min_loss}, max_loss: {self.max_loss})"
         )
 
+    def to_tuple_str(self):
+        return f"({self.min_lambda}, {self.max_lambda}, {self.min_loss}, {self.max_loss})"
+
     @classmethod
     def parse_l2_prob_lambda_fn(cls, value: str) -> "L2ProbLambdaFn":
         # Convert to tuple
@@ -193,7 +196,8 @@ class RunParamsConfig:
             "apply_sc_weighting": self.apply_sc_weighting,
             "min_sc_weight": self.min_sc_weight,
             "max_sc_weight": self.max_sc_weight,
-            "l2_prob_penalty": self.l2_prob_lambda,
+            "l2_prob_lambda": self.l2_prob_lambda,
+            "l2_prob_lambda_fn": self.l2_prob_lambda_fn.to_tuple_str() if self.l2_prob_lambda_fn else None,
             "scalar_feature_set_key": self.scalar_feature_set_key.value,
             "weight_model_feature_set_key": self.weight_model_feature_set_key.value,
             "debug": self.debug,
@@ -212,7 +216,8 @@ class RunParamsConfig:
             params["min_sc_weight"],
             params["max_sc_weight"],
             SampleWeighting(params["sample_weighting_method"]),
-            params["l2_prob_penalty"],
+            params["l2_prob_lambda"],
+            L2ProbLambdaFn.parse_l2_prob_lambda_fn(params["l2_prob_lambda_fn"]) if params["l2_prob_lambda_fn"] else None,
             constants.ScalarFeatureSetKey(params["scalar_feature_set_key"]),
             constants.ScalarFeatureSetKey(params["weight_model_feature_set_key"]),
             params["debug"],
@@ -1463,7 +1468,7 @@ def get_batch_results(
     if l2_prob_lambda is not None:
         if run_config.per_im_prob:
             im_l2_prob_penalty_term = l2_prob_lambda * torch.sum(agg_probs**2, dim=1)
-            l2_prob_penalty_term = torch.mean(im_l2_prob_penalty_term, dim=1)
+            l2_prob_penalty_term = torch.sum(im_l2_prob_penalty_term, dim=1)
         else:
             l2_prob_penalty_term = l2_prob_lambda * torch.sum(agg_probs**2, dim=1)
         loss = loss + torch.mean(l2_prob_penalty_term)
@@ -1659,9 +1664,14 @@ def train(
                 best_model_state = prob_model.state_dict()
                 best_model_epoch = epoch_ix
 
+            train_l2_term = f"\tL2 Prob Term: {metrics['l2_prob_penalty_hist_train'][epoch_ix]:.4f}" if run_config.apply_l2_prob_penalty else ""
+            val_l2_term = f"\tL2 Prob Term: {metrics['l2_prob_penalty_hist_val'][epoch_ix]:.4f}" if run_config.apply_l2_prob_penalty else ""
+
             print(f"Epoch {epoch_ix + 1}/{hp_config.n_epochs}")
-            print(f"\tTraining" f"\t\tLoss: {metrics['loss_hist_train'][epoch_ix]:.4f}")
-            print(f"\tValidation" f"\t\tLoss: {metrics['loss_hist_val'][epoch_ix]:.4f}")
+            print(f"\tTraining" f"\t\tLoss: {metrics['loss_hist_train'][epoch_ix]:.4f}{train_l2_term}")
+            print(f"\tValidation" f"\t\tLoss: {metrics['loss_hist_val'][epoch_ix]:.4f}{val_l2_term}")
+
+
 
     return metrics, best_model_state, best_model_epoch
 
@@ -2365,17 +2375,6 @@ def post_processing(
 #     return scenario_sum_df, scenario_df
 
 
-def load_emp_cim_data(data_dir: Path, event: str, method: constants.RankingMethod):
-    """Loads the empirical conditional IM data for the given event"""
-    result_ffp = (
-        data_dir
-        / event
-        / f"{constants.METHOD_RESULT_DIR_NAME_MAPPING[method]}"
-        / "cMVN_distributions.pickle"
-    )
-    if result_ffp.exists():
-        return conditional.ConditionalMVNDistribution.load(result_ffp)
-    return None
 
 
 def compute_ks_p_values(
@@ -2417,7 +2416,7 @@ def compute_ks_p_values(
         cur_sites = cur_df.site_int.unique().astype(str)
 
         # Load the cIM data
-        cur_emp_cim = load_emp_cim_data(
+        cur_emp_cim = conditional.load_emp_cim_data(
             emp_cim_dir, cur_event, constants.RankingMethod.emp_cMVN
         )
         if cur_emp_cim is None:
@@ -2536,7 +2535,7 @@ def compute_cIM_residuals_wrt_obs(
         if cur_event not in obs_df.event_id:
             pass
 
-        if (cur_emp_cim := load_emp_cim_data(emp_cim_dir, cur_event, method)) is None:
+        if (cur_emp_cim := conditional.load_emp_cim_data(emp_cim_dir, cur_event, method)) is None:
             print(f"Skipping event {cur_event} as no cIM data found")
             continue
 
@@ -2592,7 +2591,7 @@ def compute_mean_std_residuals_wrt_emp(
     mean_residuals, std_residuals = [], []
     for cur_event in events:
         # Load the cIM data
-        cur_emp_cim = load_emp_cim_data(
+        cur_emp_cim = conditional.load_emp_cim_data(
             emp_cim_dir, cur_event, constants.RankingMethod.emp_cMVN
         )
         if cur_emp_cim is None:
@@ -2636,3 +2635,6 @@ def compute_mean_std_residuals_wrt_emp(
         std_residuals.append(cur_std_residuals)
 
     return pd.concat(mean_residuals, axis=0), pd.concat(std_residuals, axis=0)
+
+
+

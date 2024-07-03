@@ -11,6 +11,7 @@ import gmhazard_calc as gc
 import spatial_hazard as sh
 
 from . import utils
+from . import constants
 
 
 @dataclass
@@ -239,3 +240,20 @@ def compute_cond_MVN_distributions(
         cond_lnIM_std_df,
         cond_lnIM_results,
     )
+
+
+def load_emp_cim_data(data_dir: Path, event: str, method: constants.RankingMethod):
+    """Loads the empirical conditional IM data for the given event"""
+    result_ffp = (
+        data_dir
+        / event
+        / f"{constants.METHOD_RESULT_DIR_NAME_MAPPING[method]}"
+        / "cMVN_distributions.pickle"
+    )
+    if result_ffp.exists():
+        try:
+            return ConditionalMVNDistribution.load(result_ffp)
+        except Exception as e:
+            print(f"Error loading {event}: {e}")
+            return None
+    return None

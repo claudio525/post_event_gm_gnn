@@ -1135,6 +1135,8 @@ def run_stats_tab(
         st.pyplot(fig, use_container_width=False)
 
     with st.expander("ML Residuals wrt. Empirical CIM"):
+        st.markdown("Empirical cIM - ML")
+
         n_rows = n_ims
 
         fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)

@@ -17,6 +17,7 @@ import spatial_hazard as sh
 import sha_calc as sha
 
 from . import constants
+from . import conditional
 from .db import DB
 
 
@@ -915,3 +916,50 @@ def get_gm_params(results_dir: Path):
     else:
         sim_gm_params = load_sim_gm_params(Path(meta["sim_gm_params_dir"]))
         return sim_gm_params.gm_params
+
+
+def get_overlap_emp_ml_data(emp_results_dir: Path, ml_sc_sum_df: pd.DataFrame):
+    """
+    Loads & combines the conditional mean & standard deviation data for
+    the overlapping scenarios for the given ML scenario summary dataframe
+
+    Parameters
+    ----------
+    emp_results_dir: Path
+    ml_sc_sum_df: DataFrame
+
+    Returns
+    -------
+    emp_mean_df: DataFrame
+    emp_std_df: DataFrame
+        Mean & standard deviation dataframes
+        for the empirical conditional IM distributions
+    ml_sc_sum_df: DataFrame
+        Updated ML scenario summary dataframe
+    """
+
+    events = ml_sc_sum_df["event_id"].unique()
+
+    emp_mean_df, emp_std_df = [], []
+    for cur_event in events:
+        cur_cim = conditional.load_emp_cim_data(
+            emp_results_dir, cur_event, constants.RankingMethod.emp_cMVN
+        )
+        if cur_cim is not None:
+            assert cur_cim.cond_lnIM_mean_df.index.equals(
+                cur_cim.cond_lnIM_std_df.index
+            ), f"Index mismatch for {cur_event}"
+            cur_index = mlt.array_utils.numpy_str_join("_", cur_event, cur_cim.cond_lnIM_mean_df.index)
+            emp_mean_df.append(cur_cim.cond_lnIM_mean_df.set_index(cur_index))
+            emp_std_df.append(cur_cim.cond_lnIM_std_df.set_index(cur_index))
+
+    emp_mean_df = pd.concat(emp_mean_df, axis=0).sort_index()
+    emp_std_df = pd.concat(emp_std_df, axis=0).sort_index()
+
+    # Get overlapping scenarios
+    ml_in_emp = np.isin(ml_sc_sum_df.index.values.astype(str), emp_mean_df.index.values.astype(str))
+    print(f"Overlapping scenarios: {np.sum(ml_in_emp)}/{ml_sc_sum_df.shape[0]}")
+
+    ids = ml_sc_sum_df.index[ml_in_emp]
+
+    return emp_mean_df.loc[ids], emp_std_df.loc[ids], ml_sc_sum_df.loc[ids]
