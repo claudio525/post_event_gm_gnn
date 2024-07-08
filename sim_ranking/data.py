@@ -948,7 +948,7 @@ def get_overlap_emp_ml_data(emp_results_dir: Path, ml_sc_sum_df: pd.DataFrame):
             assert cur_cim.cond_lnIM_mean_df.index.equals(
                 cur_cim.cond_lnIM_std_df.index
             ), f"Index mismatch for {cur_event}"
-            cur_index = mlt.array_utils.numpy_str_join("_", cur_event, cur_cim.cond_lnIM_mean_df.index)
+            cur_index = mlt.array_utils.numpy_str_join("_", cur_event, cur_cim.cond_lnIM_mean_df.index.values.astype(str))
             emp_mean_df.append(cur_cim.cond_lnIM_mean_df.set_index(cur_index))
             emp_std_df.append(cur_cim.cond_lnIM_std_df.set_index(cur_index))
 

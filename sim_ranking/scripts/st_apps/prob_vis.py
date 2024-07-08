@@ -1572,7 +1572,6 @@ def agg_scenario_vis(
         plt.close(fig)
 
     with st.expander("Loss vs Scenario Weight"):
-        print(f"wtf")
         fig, ax = mlt.plotting.gen_scatter_trend_plot(
             sc_sum_df,
             mlt.plotting.ScatterOptions(

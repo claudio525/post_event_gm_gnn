@@ -873,80 +873,80 @@ def run_stats_tab(
         key=f"{tab_type}_ims",
     )
     n_ims = len(ims)
-    n_rows = int(np.ceil(n_ims / 2))
 
-    if n_ims > 0:
-        with st.expander("KS-Statistic"):
-            fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
-            axs = axs.ravel()
+    # if n_ims > 0:
+    #     n_rows = int(np.ceil(n_ims / 2))
+        # with st.expander("KS-Statistic"):
+        #     fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
+        #     axs = axs.ravel()
+        #
+        #     for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
+        #         cur_ax.hist(ks_df[cur_im].values, bins=50)
+        #         cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        #
+        #         if ix >= 4:
+        #             cur_ax.set_xlabel(f"KS-Statisitc")
+        #         if ix % 2 == 0:
+        #             cur_ax.set_ylabel(f"Count")
+        #
+        #         if ix % 2 == 1:
+        #             # cur_ax.set_yticklabels([])
+        #             cur_ax.yaxis.tick_right()
+        #
+        #         cur_ax.set_xlim(0, None)
+        #
+        #         if ix > 0:
+        #             cur_ax.set_ylim(axs[ix - 1].get_ylim())
+        #
+        #         cur_ax.text(
+        #             0.5,
+        #             0.95,
+        #             f"{cur_im}",
+        #             horizontalalignment="center",
+        #             verticalalignment="top",
+        #             transform=cur_ax.transAxes,
+        #             fontsize=12,
+        #         )
+        #
+        #     fig.tight_layout()
+        #     fig.subplots_adjust(wspace=0, hspace=0)
+        #     st.pyplot(fig, use_container_width=False)
 
-            for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
-                cur_ax.hist(ks_df[cur_im].values, bins=50)
-                cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-
-                if ix >= 4:
-                    cur_ax.set_xlabel(f"KS-Statisitc")
-                if ix % 2 == 0:
-                    cur_ax.set_ylabel(f"Count")
-
-                if ix % 2 == 1:
-                    # cur_ax.set_yticklabels([])
-                    cur_ax.yaxis.tick_right()
-
-                cur_ax.set_xlim(0, None)
-
-                if ix > 0:
-                    cur_ax.set_ylim(axs[ix - 1].get_ylim())
-
-                cur_ax.text(
-                    0.5,
-                    0.95,
-                    f"{cur_im}",
-                    horizontalalignment="center",
-                    verticalalignment="top",
-                    transform=cur_ax.transAxes,
-                    fontsize=12,
-                )
-
-            fig.tight_layout()
-            fig.subplots_adjust(wspace=0, hspace=0)
-            st.pyplot(fig, use_container_width=False)
-
-        with st.expander("P-Values"):
-            fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
-            axs = axs.ravel()
-
-            for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
-                cur_ax.hist(p_df[cur_im].loc[p_df[cur_im] < 0.1].values, bins=50)
-                cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-
-                if ix >= 4:
-                    cur_ax.set_xlabel(f"P-Value")
-                if ix % 2 == 0:
-                    cur_ax.set_ylabel(f"Count")
-
-                if ix % 2 == 1:
-                    # cur_ax.set_yticklabels([])
-                    cur_ax.yaxis.tick_right()
-
-                cur_ax.set_xlim(0, None)
-
-                if ix > 0:
-                    cur_ax.set_ylim(axs[ix - 1].get_ylim())
-
-                cur_ax.text(
-                    0.5,
-                    0.95,
-                    f"{cur_im}",
-                    horizontalalignment="center",
-                    verticalalignment="top",
-                    transform=cur_ax.transAxes,
-                    fontsize=12,
-                )
-
-            fig.tight_layout()
-            fig.subplots_adjust(wspace=0, hspace=0)
-            st.pyplot(fig, use_container_width=False)
+        # with st.expander("P-Values"):
+        #     fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
+        #     axs = axs.ravel()
+        #
+        #     for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
+        #         cur_ax.hist(p_df[cur_im].loc[p_df[cur_im] < 0.1].values, bins=50)
+        #         cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        #
+        #         if ix >= 4:
+        #             cur_ax.set_xlabel(f"P-Value")
+        #         if ix % 2 == 0:
+        #             cur_ax.set_ylabel(f"Count")
+        #
+        #         if ix % 2 == 1:
+        #             # cur_ax.set_yticklabels([])
+        #             cur_ax.yaxis.tick_right()
+        #
+        #         cur_ax.set_xlim(0, None)
+        #
+        #         if ix > 0:
+        #             cur_ax.set_ylim(axs[ix - 1].get_ylim())
+        #
+        #         cur_ax.text(
+        #             0.5,
+        #             0.95,
+        #             f"{cur_im}",
+        #             horizontalalignment="center",
+        #             verticalalignment="top",
+        #             transform=cur_ax.transAxes,
+        #             fontsize=12,
+        #         )
+        #
+        #     fig.tight_layout()
+        #     fig.subplots_adjust(wspace=0, hspace=0)
+        #     st.pyplot(fig, use_container_width=False)
 
     with st.expander("Residuals wrt. Observed"):
         if n_ims > 0:

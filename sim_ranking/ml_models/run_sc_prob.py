@@ -75,7 +75,7 @@ def train_model(
         parser=sc_prob.L2ProbLambdaFn.parse_l2_prob_lambda_fn,
         help="Scenario L2 penalty function",
     ),
-    sample_l2_prob_lambda_fn: sc_prob.L2ProbLambdaFn  = typer.Option(
+    sample_l2_prob_lambda_fn: sc_prob.L2ProbLambdaFn = typer.Option(
         default=None,
         parser=sc_prob.L2ProbLambdaFn.parse_l2_prob_lambda_fn,
         help="Sample L2 penalty function",

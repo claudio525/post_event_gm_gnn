@@ -1560,19 +1560,21 @@ def get_batch_results(
             loss = loss + torch.mean(l2_prob_penalty_term)
     # Sample based
     elif run_config.sample_l2_prob_lambda_fn:
-        sample_loss = einops.einsum(pred, batch_data.record_im_misfit_score.to(run_config.device, torch.float32), im_weights,
-                                    "record rel im, record rel im, im -> record im")
-        l2_prob_lambda = run_config.sample_l2_prob_lambda_fn(sample_loss)
+        raise NotImplementedError()
 
-        # l2_prob_penalty_term =  einops.einsum(l2_prob_lambda, torch.sum((pred**2), dim=1), w_pred,
-        #                                         "record im, record im, record im -> record")
-        # l2_prob_penalty_term = einops.einsum(l2_prob_penalty_term, scenario_mask, "record, record scenario -> scenario")
-
-        im_l2_prob_penalty_term = einops.einsum(l2_prob_lambda, pred**2, w_pred, scenario_mask,
-                          "record im, record rel im, record im, record scenario -> scenario im")
-        l2_prob_penalty_term = torch.sum(im_l2_prob_penalty_term, dim=1)
-
-        loss = loss + torch.mean(l2_prob_penalty_term)
+    #     sample_loss = einops.einsum(pred, batch_data.record_im_misfit_score.to(run_config.device, torch.float32), im_weights,
+    #                                 "record rel im, record rel im, im -> record im")
+    #     l2_prob_lambda = run_config.sample_l2_prob_lambda_fn(sample_loss)
+    #
+    #     # l2_prob_penalty_term =  einops.einsum(l2_prob_lambda, torch.sum((pred**2), dim=1), w_pred,
+    #     #                                         "record im, record im, record im -> record")
+    #     # l2_prob_penalty_term = einops.einsum(l2_prob_penalty_term, scenario_mask, "record, record scenario -> scenario")
+    #
+    #     im_l2_prob_penalty_term = einops.einsum(l2_prob_lambda, pred**2, w_pred, scenario_mask,
+    #                       "record im, record rel im, record im, record scenario -> scenario im")
+    #     l2_prob_penalty_term = torch.sum(im_l2_prob_penalty_term, dim=1)
+    #
+    #     loss = loss + torch.mean(l2_prob_penalty_term)
 
 
     return BatchResult(
