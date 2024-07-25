@@ -246,7 +246,11 @@ class RunParamsConfig:
 
     @property
     def apply_l2_prob_penalty(self):
-        return self.sc_l2_prob_lambda or self.sc_l2_prob_lambda_fn or self.sample_l2_prob_lambda_fn
+        return (
+            self.sc_l2_prob_lambda
+            or self.sc_l2_prob_lambda_fn
+            or self.sample_l2_prob_lambda_fn
+        )
 
     def to_dict(self):
         return {
@@ -1546,14 +1550,18 @@ def get_batch_results(
     if run_config.sc_l2_prob_lambda_fn or run_config.sc_l2_prob_lambda:
         # Get lambda term
         if run_config.sc_l2_prob_lambda_fn:
-            l2_prob_lambda = run_config.sc_l2_prob_lambda_fn(im_scenario_loss)
+            l2_prob_lambda = run_config.sc_l2_prob_lambda_fn(
+                im_scenario_loss if run_config.per_im_prob else scenario_loss
+            )
         else:
             l2_prob_lambda = run_config.sc_l2_prob_lambda
         # Apply penalty
 
         if l2_prob_lambda is not None:
             if run_config.per_im_prob:
-                im_l2_prob_penalty_term = l2_prob_lambda * torch.sum(agg_probs**2, dim=1)
+                im_l2_prob_penalty_term = l2_prob_lambda * torch.sum(
+                    agg_probs**2, dim=1
+                )
                 l2_prob_penalty_term = torch.sum(im_l2_prob_penalty_term, dim=1)
             else:
                 l2_prob_penalty_term = l2_prob_lambda * torch.sum(agg_probs**2, dim=1)
@@ -1575,7 +1583,6 @@ def get_batch_results(
     #     l2_prob_penalty_term = torch.sum(im_l2_prob_penalty_term, dim=1)
     #
     #     loss = loss + torch.mean(l2_prob_penalty_term)
-
 
     return BatchResult(
         pred,
@@ -2708,7 +2715,9 @@ def compute_mean_std_residuals_wrt_emp(
     im_wavg_cols = mlt.array_utils.numpy_str_join("_", ims, "wavg")
     im_wstd_cols = mlt.array_utils.numpy_str_join("_", ims, "wstd")
 
-    emp_mean_df, emp_std_df, sc_sum_df = data.get_overlap_emp_ml_data(emp_cim_dir, sc_sum_df)
+    emp_mean_df, emp_std_df, sc_sum_df = data.get_overlap_emp_ml_data(
+        emp_cim_dir, sc_sum_df
+    )
     assert emp_mean_df.index.equals(sc_sum_df.index) and emp_std_df.index.equals(
         sc_sum_df.index
     )
@@ -2722,8 +2731,7 @@ def compute_mean_std_residuals_wrt_emp(
     mean_residuals["site_int"] = sc_sum_df.site_int
 
     std_residuals = pd.DataFrame(
-        data=np.log(emp_std_df[ims].values)
-             - np.log(sc_sum_df[im_wstd_cols].values),
+        data=np.log(emp_std_df[ims].values) - np.log(sc_sum_df[im_wstd_cols].values),
         index=sc_sum_df.index,
         columns=ims,
     )

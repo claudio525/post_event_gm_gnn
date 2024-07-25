@@ -647,7 +647,11 @@ def run_ind_scenario(
             ### ML
             # Get values
             ml_im_values = np.log(site_int_sims[cur_im].values.astype(float))
-            ml_prob_values = cur_scenario_df[f"{cur_im}_prob"]
+            ml_prob_values = (
+                c
+                if (c := cur_scenario_df.get(f"{cur_im}_prob") is not None)
+                else cur_scenario_df[f"prob"]
+            )
             # Sort
             sort_int = np.argsort(ml_im_values)
             ml_im_values = ml_im_values[sort_int]
@@ -678,7 +682,9 @@ def run_ind_scenario(
                 # cur_ax.set_yticklabels([])
                 cur_ax.yaxis.tick_right()
 
-            cur_ax.axvline(np.log(site_int_obs[cur_im]), c="red", linestyle="--", label="Observed")
+            cur_ax.axvline(
+                np.log(site_int_obs[cur_im]), c="red", linestyle="--", label="Observed"
+            )
 
             cur_ax.set_ylim(0.0, 1.0)
             cur_ax.set_xlim(cur_emp_cim_im_values.min(), cur_emp_cim_im_values.max())
@@ -799,7 +805,9 @@ def get_obs_residuals(
     emp_cim_results_dir: Path,
     sim_cim_results_dir: Path,
 ):
-    ml_obs_residuals = sr.ml.sc_prob.compute_ml_residuals_wrt_obs(sc_sum_df, db_ffp, ims)
+    ml_obs_residuals = sr.ml.sc_prob.compute_ml_residuals_wrt_obs(
+        sc_sum_df, db_ffp, ims
+    )
 
     emp_cIM_obs_residuals = sr.ml.sc_prob.compute_cIM_residuals_wrt_obs(
         emp_cim_results_dir, db_ffp, sr.constants.RankingMethod.emp_cMVN, ims
@@ -849,12 +857,12 @@ def run_stats_tab(
 
     run_config = sr.ml.sc_prob.RunParamsConfig.from_dict(metadata["run_config"])
 
-    ks_df, p_df = sr.ml.sc_prob.compute_ks_p_values(
-        sc_df,
-        emp_cim_results_dir,
-        db_ffp,
-        run_config,
-    )
+    # ks_df, p_df = sr.ml.sc_prob.compute_ks_p_values(
+    #     sc_df,
+    #     emp_cim_results_dir,
+    #     db_ffp,
+    #     run_config,
+    # )
 
     # Get residuals wrt observed
     ml_obs_residuals, emp_cIM_obs_residuals, sim_cIM_obs_residuals = get_obs_residuals(
@@ -876,77 +884,77 @@ def run_stats_tab(
 
     # if n_ims > 0:
     #     n_rows = int(np.ceil(n_ims / 2))
-        # with st.expander("KS-Statistic"):
-        #     fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
-        #     axs = axs.ravel()
-        #
-        #     for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
-        #         cur_ax.hist(ks_df[cur_im].values, bins=50)
-        #         cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-        #
-        #         if ix >= 4:
-        #             cur_ax.set_xlabel(f"KS-Statisitc")
-        #         if ix % 2 == 0:
-        #             cur_ax.set_ylabel(f"Count")
-        #
-        #         if ix % 2 == 1:
-        #             # cur_ax.set_yticklabels([])
-        #             cur_ax.yaxis.tick_right()
-        #
-        #         cur_ax.set_xlim(0, None)
-        #
-        #         if ix > 0:
-        #             cur_ax.set_ylim(axs[ix - 1].get_ylim())
-        #
-        #         cur_ax.text(
-        #             0.5,
-        #             0.95,
-        #             f"{cur_im}",
-        #             horizontalalignment="center",
-        #             verticalalignment="top",
-        #             transform=cur_ax.transAxes,
-        #             fontsize=12,
-        #         )
-        #
-        #     fig.tight_layout()
-        #     fig.subplots_adjust(wspace=0, hspace=0)
-        #     st.pyplot(fig, use_container_width=False)
+    # with st.expander("KS-Statistic"):
+    #     fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
+    #     axs = axs.ravel()
+    #
+    #     for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
+    #         cur_ax.hist(ks_df[cur_im].values, bins=50)
+    #         cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    #
+    #         if ix >= 4:
+    #             cur_ax.set_xlabel(f"KS-Statisitc")
+    #         if ix % 2 == 0:
+    #             cur_ax.set_ylabel(f"Count")
+    #
+    #         if ix % 2 == 1:
+    #             # cur_ax.set_yticklabels([])
+    #             cur_ax.yaxis.tick_right()
+    #
+    #         cur_ax.set_xlim(0, None)
+    #
+    #         if ix > 0:
+    #             cur_ax.set_ylim(axs[ix - 1].get_ylim())
+    #
+    #         cur_ax.text(
+    #             0.5,
+    #             0.95,
+    #             f"{cur_im}",
+    #             horizontalalignment="center",
+    #             verticalalignment="top",
+    #             transform=cur_ax.transAxes,
+    #             fontsize=12,
+    #         )
+    #
+    #     fig.tight_layout()
+    #     fig.subplots_adjust(wspace=0, hspace=0)
+    #     st.pyplot(fig, use_container_width=False)
 
-        # with st.expander("P-Values"):
-        #     fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
-        #     axs = axs.ravel()
-        #
-        #     for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
-        #         cur_ax.hist(p_df[cur_im].loc[p_df[cur_im] < 0.1].values, bins=50)
-        #         cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-        #
-        #         if ix >= 4:
-        #             cur_ax.set_xlabel(f"P-Value")
-        #         if ix % 2 == 0:
-        #             cur_ax.set_ylabel(f"Count")
-        #
-        #         if ix % 2 == 1:
-        #             # cur_ax.set_yticklabels([])
-        #             cur_ax.yaxis.tick_right()
-        #
-        #         cur_ax.set_xlim(0, None)
-        #
-        #         if ix > 0:
-        #             cur_ax.set_ylim(axs[ix - 1].get_ylim())
-        #
-        #         cur_ax.text(
-        #             0.5,
-        #             0.95,
-        #             f"{cur_im}",
-        #             horizontalalignment="center",
-        #             verticalalignment="top",
-        #             transform=cur_ax.transAxes,
-        #             fontsize=12,
-        #         )
-        #
-        #     fig.tight_layout()
-        #     fig.subplots_adjust(wspace=0, hspace=0)
-        #     st.pyplot(fig, use_container_width=False)
+    # with st.expander("P-Values"):
+    #     fig, axs = plt.subplots(n_rows, 2, figsize=(12, n_rows * 6), sharex=True)
+    #     axs = axs.ravel()
+    #
+    #     for ix, (cur_im, cur_ax) in enumerate(zip(ims, axs)):
+    #         cur_ax.hist(p_df[cur_im].loc[p_df[cur_im] < 0.1].values, bins=50)
+    #         cur_ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    #
+    #         if ix >= 4:
+    #             cur_ax.set_xlabel(f"P-Value")
+    #         if ix % 2 == 0:
+    #             cur_ax.set_ylabel(f"Count")
+    #
+    #         if ix % 2 == 1:
+    #             # cur_ax.set_yticklabels([])
+    #             cur_ax.yaxis.tick_right()
+    #
+    #         cur_ax.set_xlim(0, None)
+    #
+    #         if ix > 0:
+    #             cur_ax.set_ylim(axs[ix - 1].get_ylim())
+    #
+    #         cur_ax.text(
+    #             0.5,
+    #             0.95,
+    #             f"{cur_im}",
+    #             horizontalalignment="center",
+    #             verticalalignment="top",
+    #             transform=cur_ax.transAxes,
+    #             fontsize=12,
+    #         )
+    #
+    #     fig.tight_layout()
+    #     fig.subplots_adjust(wspace=0, hspace=0)
+    #     st.pyplot(fig, use_container_width=False)
 
     with st.expander("Residuals wrt. Observed"):
         if n_ims > 0:
@@ -1213,21 +1221,26 @@ def run_explore_tab(
     )
     mean_ml_emp_cIM_res = mean_ml_emp_cIM_res.sort_index()
 
-
-    ml_obs_residuals, emp_cIM_obs_residuals, sim_cIM_obs_residuals = get_obs_residuals(sc_sum_df, st_utils.ml_get_db_ffp(ml_results_dir), ims, emp_cim_results_dir, sim_cim_results_dir)
+    ml_obs_residuals, emp_cIM_obs_residuals, sim_cIM_obs_residuals = get_obs_residuals(
+        sc_sum_df,
+        st_utils.ml_get_db_ffp(ml_results_dir),
+        ims,
+        emp_cim_results_dir,
+        sim_cim_results_dir,
+    )
 
     res_df = ml_obs_residuals[["event_id", "site_int"]].copy(deep=True)
     res_df["ml_obs_mse"] = (ml_obs_residuals[sr.constants.PSA_KEYS] ** 2).mean(axis=1)
-    res_df["emp_cIM_obs_mse"] = (emp_cIM_obs_residuals[sr.constants.PSA_KEYS] ** 2).mean(
-        axis=1
-    )
+    res_df["emp_cIM_obs_mse"] = (
+        emp_cIM_obs_residuals[sr.constants.PSA_KEYS] ** 2
+    ).mean(axis=1)
     assert np.all(sim_cIM_obs_residuals.index == res_df.index)
-    res_df["sim_cIM_obs_mse"] = (sim_cIM_obs_residuals[sr.constants.PSA_KEYS] ** 2).mean(
-        axis=1
-    )
-    res_df["ml_emp_cIM_mse"] = (mean_ml_emp_cIM_res.loc[res_df.index, sr.constants.PSA_KEYS] ** 2).mean(
-        axis=1
-    )
+    res_df["sim_cIM_obs_mse"] = (
+        sim_cIM_obs_residuals[sr.constants.PSA_KEYS] ** 2
+    ).mean(axis=1)
+    res_df["ml_emp_cIM_mse"] = (
+        mean_ml_emp_cIM_res.loc[res_df.index, sr.constants.PSA_KEYS] ** 2
+    ).mean(axis=1)
     res_df["n_obs_sites"] = sc_sum_df.loc[res_df.index, "n_obs_sites"]
     res_df["min_s2s_dist"] = sc_sum_df.loc[res_df.index, "min_s2s_dist"]
     res_df["sc_weight"] = sc_sum_df.loc[res_df.index, "weight"]
