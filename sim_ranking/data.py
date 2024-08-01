@@ -114,17 +114,17 @@ class SimGMParams(NamedTuple):
             meta["event"],
             meta["ims"],
             meta["sites"],
-            pd.read_csv(data_dir / "gm_params.csv", index_col=0),
+            pd.read_csv(data_dir / "gm_params.csv", index_col=0, engine="c"),
             pd.read_parquet(cur_path)
             if (cur_path := data_dir / "residuals.parquet").exists()
             else None,
-            pd.read_csv(cur_path, index_col=0)
+            pd.read_csv(cur_path, index_col=0, engine="c")
             if (cur_path := data_dir / "event_residuals.csv").exists()
             else None,
             pd.read_parquet(cur_path)
             if (cur_path := data_dir / "rem_residuals.parquet").exists()
             else None,
-            pd.read_csv(cur_path, index_col=0)
+            pd.read_csv(cur_path, index_col=0, engine="c")
             if (cur_path := data_dir / "bias_std.csv").exists()
             else None,
         )
@@ -642,6 +642,7 @@ def compute_event_gm_params_rel_total(
 
 
 def _process_sim_gm_params_mera_event(event: str, db_ffp: Path, ims: List[str]):
+    """Helper function"""
     from mera.mera_pymer4 import run_mera
 
     print(f"Processing event {event}")

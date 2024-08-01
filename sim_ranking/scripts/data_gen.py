@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -88,6 +89,76 @@ def gen_emp_synthetic_observed(
     mod_gm_params_df.to_csv(syn_gm_params_ffp)
 
 
+@app.command("run-sim-obs-mera")
+def run_sim_obs_mera(db_ffp: Path, output_dir: Path):
+    """
+    Runs mixed-effect regression analysis
+    using the simulation and observed data
+
+    Each realisation is treated as its own event.
+    Note: This means that observed data is repeated.
+    """
+    import mera
+
+    db = sr.DB(db_ffp)
+
+    event_sites = db.get_event_sites()
+    obs_df = db.get_obs_df(log=True, fix_index=True)
+    sim_df = db.get_sim_df(log=True)
+
+    # Shared records
+    sim_df["event_site"] = mlt.array_utils.numpy_str_join(
+        "_", sim_df["event_id"].values.astype(str), sim_df["site_id"].values.astype(str)
+    )
+
+    shared_event_site = np.intersect1d(
+        sim_df["event_site"].values.astype(str), obs_df.index.values.astype(str)
+    )
+    sim_df = sim_df.loc[sim_df["event_site"].isin(shared_event_site), :]
+    obs_df = obs_df.loc[shared_event_site, :]
+
+    # Repeat observations
+    obs_df = obs_df.sort_index()
+    sim_df = sim_df.sort_values(["event_id", "site_id", "rel_id"])
+    assert np.all(sim_df.event_site.unique() == obs_df.index.values)
+    event_n_rels = sim_df.groupby("event_site").size()
+    rep_obs_df = obs_df.loc[obs_df.index.repeat(event_n_rels), :]
+    rep_obs_df.index = sim_df.index
+    rep_obs_df["rel_id"] = sim_df["rel_id"]
+
+    # Compute the residuals
+    res_df = rep_obs_df[sr.constants.IMs] - sim_df[sr.constants.IMs]
+
+    # Update the event colum such that each realisation is treated as its own event
+    res_df["event_rel_id"] = mlt.array_utils.numpy_str_join(
+        "_",
+        rep_obs_df.event_id.values.astype(str),
+        rep_obs_df.rel_id.values.astype(str),
+    )
+    res_df["site_id"] = rep_obs_df.site_id
+
+    # Run MERA
+    mask = mera.mask_too_few_records(
+        res_df,
+        event_cname="event_rel_id",
+        site_cname="site_id",
+        min_num_records_per_event=3,
+        min_num_records_per_site=3,
+    )
+
+    with warnings.catch_warnings(action="ignore", category=FutureWarning):
+        mera_results = mera.run_mera(
+            res_df,
+            sr.constants.IMs,
+            "event_rel_id",
+            "site_id",
+            mask=mask,
+            compute_site_term=False,
+        )
+
+    mera_results.save(output_dir)
+
+
 @app.command("compute-event-gm-params-rel-mera")
 def get_event_gm_params_rel_mera(
     output_dir: Path,
@@ -100,6 +171,8 @@ def get_event_gm_params_rel_mera(
     Computes the GM parameters for each event from the
     realisations using MERA with each realisation treated as
     its own event during MERA
+
+    Does not utilise observed data at all!
     """
     ims = sr.constants.IM_SETS[im_set]
 
@@ -117,6 +190,9 @@ def get_event_gm_params_rel_total(output_dir: Path, db_ffp: Path, im_set: str = 
     """
     Computes the GM parameters for each event from the realisations,
     by setting between-event residual = 0 and within-event residual = total residual
+
+    This results in massive within-event residuals due to the
+    simulation parameter perturbations.
     """
     ims = sr.constants.IM_SETS[im_set]
     sim_gm_params = sr.data.compute_event_gm_params_rel_total(db_ffp, ims)
@@ -132,7 +208,7 @@ def compute_event_site_correlations(
     sim_params_dir: Path,
 ):
     """
-    Computes the site correlations for each event using the
+    Computes the direct site correlations for each event using the
     within-event residuals from the realisations
     """
     correlation_results = sr.data.compute_event_site_corrs_from_rels(sim_params_dir)
@@ -159,7 +235,7 @@ def compute_im_site_correlations(
     output_dir: Path,
 ):
     """
-    Computes the site-correlations using IM values
+    Computes the site-correlations from IM values
     of all event & realisations
     """
     print(f"Loading simulation data")
@@ -353,4 +429,3 @@ if __name__ == "__main__":
 #     rem_res_df.to_parquet(output_dir / "rem_res_df.parquet")
 #     bias_std_df.to_parquet(output_dir / "bias_std_df.parquet")
 #     residual_df.to_parquet(output_dir / "residual_df.parquet")
-

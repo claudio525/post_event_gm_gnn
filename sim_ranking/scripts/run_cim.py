@@ -22,7 +22,7 @@ def emp_cmvn(
     min_n_obs_stations: int = 5,
     n_stations: int = 20,
     IMs: List[str] = None,
-    quiet: bool = False
+    quiet: bool = False,
 ):
     """
     Performs simulation ranking based on
@@ -38,7 +38,6 @@ def emp_cmvn(
     obs_site_sel_params = {
         "min_n_obs_stations": min_n_obs_stations,
         "n_stations": n_stations,
-
         # "max_obs_dist": max_obs_dist,
         # "min_n_obs": min_n_obs,
     }
@@ -50,7 +49,7 @@ def emp_cmvn(
         results_dir,
         obs_site_sel_params,
         IMs=IMs,
-        quiet=quiet
+        quiet=quiet,
     )
 
 
@@ -64,7 +63,7 @@ def emp_cmvn_all(
     IMs: List[str] = None,
     min_n_obs_stations: int = 5,
     n_stations: int = 20,
-    quiet: bool = True
+    quiet: bool = True,
 ):
     # Find all events for which empirical and simulation data is available
     db = sr.db.DB(Path(os.path.expandvars("$wdata")) / rel_db_ffp)
@@ -76,7 +75,6 @@ def emp_cmvn_all(
     obs_site_sel_params = {
         "min_n_obs_stations": min_n_obs_stations,
         "n_stations": n_stations,
-
         # "max_obs_dist": max_obs_dist,
         # "min_n_obs": min_n_obs,
     }
@@ -90,7 +88,7 @@ def emp_cmvn_all(
             obs_site_sel_params,
             val_int_sites_ffp=val_int_sites_ffp,
             IMs=IMs,
-            quiet=quiet
+            quiet=quiet,
         )
 
 
@@ -102,7 +100,7 @@ def run_emp_cmvn(
     obs_site_sel_params: Dict[str, Any],
     val_int_sites_ffp: Path = None,
     IMs: List[str] = None,
-    quiet: bool = False
+    quiet: bool = False,
 ):
     db_ffp = Path(os.path.expandvars("$wdata")) / rel_db_ffp
     gm_params_ffp = Path(os.path.expandvars("$wdata")) / rel_gm_params_ffp
@@ -146,8 +144,10 @@ def run_emp_cmvn(
         val_int_sites = np.load(val_int_sites_ffp)
         mask = obs_df.index.isin(val_int_sites)
         if not quiet:
-            print(f"Excluding {mask.sum()} sites from the analysis"
-                  f" as specified by val_int_sites")
+            print(
+                f"Excluding {mask.sum()} sites from the analysis"
+                f" as specified by val_int_sites"
+            )
         obs_df = obs_df.loc[~mask]
 
     # Load the simulation IM data
@@ -164,9 +164,11 @@ def run_emp_cmvn(
         sim_data,
         obs_df,
         int_stations,
-        sr.utils.SourceInfo(rupture, tuple(event_df.loc[rupture, ["lon", "lat"]].values)),
+        sr.utils.SourceInfo(
+            rupture, tuple(event_df.loc[rupture, ["lon", "lat"]].values)
+        ),
         obs_site_sel_params,
-        verbose=not quiet
+        verbose=not quiet,
     )
 
     meta = dict(
@@ -187,21 +189,28 @@ def sim_cmvn_all(
     results_dir: Path,
     rel_corr_dir: Path,
     data_source: str,
+    suffix: str = None,
     val_int_sites_ffp: Path = None,
     IMs: List[str] = None,
     min_n_obs_stations: int = 5,
     n_obs_stations: int = 20,
-    quiet: bool = True
+    quiet: bool = True,
 ):
     """
     Performs simulation ranking based on
     simulation conditional MVN for
     all ruptures with data
     """
-    obs_site_sel_params = {
-        "min_n_obs_stations": min_n_obs_stations,
-        "n_stations": n_obs_stations,
+    # Create run_id
+    run_id = mlt.utils.create_run_id()
+    if suffix is not None:
+        run_id = f"{run_id}{suffix}"
+    results_dir = results_dir / run_id
+    results_dir.mkdir(parents=False, exist_ok=False)
 
+    obs_site_sel_params = {
+        "min_n_obs_sites": min_n_obs_stations,
+        "n_obs_sites": n_obs_stations,
         # "max_obs_dist": max_obs_dist,
         # "min_n_obs": min_n_obs,
     }
@@ -224,7 +233,7 @@ def sim_cmvn_all(
             val_int_sites_ffp=val_int_sites_ffp,
             rel_corr_dir=rel_corr_dir,
             IMs=IMs,
-            quiet=quiet
+            quiet=quiet,
         )
 
 
@@ -238,7 +247,7 @@ def sim_ranking(
     IMs: List[str] = None,
     min_n_obs_stations: int = 5,
     n_obs_stations: int = 20,
-    quiet: bool = False
+    quiet: bool = False,
 ):
     """
     Performs simulation ranking based on
@@ -248,7 +257,6 @@ def sim_ranking(
     obs_site_sel_params = {
         "min_n_obs_stations": min_n_obs_stations,
         "n_stations": n_obs_stations,
-
         # "max_obs_dist": max_obs_dist,
         # "min_n_obs": min_n_obs,
     }
@@ -262,7 +270,7 @@ def sim_ranking(
         obs_site_sel_params,
         rel_corr_dir=rel_corr_dir,
         IMs=IMs,
-        quiet=quiet
+        quiet=quiet,
     )
 
 
@@ -276,17 +284,18 @@ def run_sim_cmvn(
     val_int_sites_ffp: Path = None,
     rel_corr_dir: Path = None,
     IMs: List[str] = None,
-    quiet: bool = False
+    quiet: bool = False,
 ):
     db_ffp = Path(os.path.expandvars("$wdata")) / rel_db_ffp
     sim_gm_params_dir = Path(os.path.expandvars("$wdata")) / rel_sim_gm_params_dir
-    corr_dir = None if rel_corr_dir is None else Path(os.path.expandvars("$wdata")) / rel_corr_dir
+    corr_dir = (
+        None
+        if rel_corr_dir is None
+        else Path(os.path.expandvars("$wdata")) / rel_corr_dir
+    )
 
-    (
-        output_dir := results_dir
-        / sr.constants.METHOD_RESULT_DIR_NAME_MAPPING[method_type]
-    ).mkdir(exist_ok=True, parents=True)
-    assert len(list(output_dir.iterdir())) == 0, "Output directory has to be empty"
+    results_dir.mkdir(parents=False, exist_ok=True)
+    assert len(list(results_dir.iterdir())) == 0, "Output directory has to be empty"
 
     # Load the station & event data
     db = sr.db.DB(db_ffp)
@@ -310,10 +319,11 @@ def run_sim_cmvn(
         val_int_sites = np.load(val_int_sites_ffp)
         mask = obs_df.index.isin(val_int_sites)
         if not quiet:
-            print(f"Excluding {mask.sum()} sites from the analysis"
-                  f" as specified by val_int_sites")
+            print(
+                f"Excluding {mask.sum()} sites from the analysis"
+                f" as specified by val_int_sites"
+            )
         obs_df = obs_df.loc[~mask]
-
 
     # Load the simulation IM data
     sim_data = db.get_sim_data(rupture, int_stations)
@@ -334,7 +344,7 @@ def run_sim_cmvn(
 
     # Run the conditional MVN based ranking
     sr.conditional.run_conditional_mvn_ranking(
-        output_dir,
+        results_dir,
         stations_df,
         IMs,
         im_weights,
@@ -342,10 +352,12 @@ def run_sim_cmvn(
         sim_data,
         obs_df,
         int_stations,
-        sr.utils.SourceInfo(rupture, tuple(event_df.loc[rupture, ["lon", "lat"]].values)),
+        sr.utils.SourceInfo(
+            rupture, tuple(event_df.loc[rupture, ["lon", "lat"]].values)
+        ),
         obs_site_sel_params,
         R=R,
-        verbose=not quiet
+        verbose=not quiet,
     )
 
     # Save the meta data
@@ -359,12 +371,14 @@ def run_sim_cmvn(
         obs_site_sel_params=obs_site_sel_params,
     )
 
-    mlt.utils.write_to_yaml(meta, output_dir / "meta.yaml")
+    mlt.utils.write_to_yaml(meta, results_dir / "meta.yaml")
+
+
+
 
 
 if __name__ == "__main__":
     app()
-
 
 
 # @app.command("cmvn-sim-emp-corr-all")
