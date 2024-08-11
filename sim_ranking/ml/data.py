@@ -253,8 +253,8 @@ def get_valid_site_ints(
     Gets the list of site of interests per event that experience
     strong enough GM to be of interest.
 
-    Based on Bradley 2013 model, with a threshold of PGA > 0.01g for
-    Magnitude 6 event
+    Based on Bradley 2013 model, with a threshold of
+    PGA > 0.01g for Magnitude 6 event
 
     Parameters
     ----------

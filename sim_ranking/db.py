@@ -263,7 +263,7 @@ class DB:
     def get_event_sites(self):
         """
         Retrieves the available sites in both
-        simulated and obseverd data for each event
+        simulated and observed data for each event
         """
         events = self.get_avail_events()
         event_sites = {}
