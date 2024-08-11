@@ -82,6 +82,8 @@ def train_model(
     ),
     seed: int = typer.Option(None),
     out_dir: Path = typer.Option(..., help="Output directory"),
+    n_val_events: int = typer.Option(75, help="Number of validation events"),
+    n_val_sites: int = typer.Option(75, help="Number of validation sites"),
 ):
     run_config = sc_prob.RunParamsConfig(
         max_dist,
@@ -133,7 +135,19 @@ def train_model(
     if seed is not None:
         print(f"Using numpy random seed: {seed}")
         np.random.seed(seed)
-    val_int_sites = np.random.choice(valid_int_sites, 75, replace=False)
+    val_events = np.random.choice(events, n_val_events, replace=False)
+    train_events = np.setdiff1d(events, val_events)
+
+    print(f"----------------- Events Summary -----------------")
+    print(f"Number of available events: {len(events)}")
+    print(f"Number of training events: {train_events.size}")
+    print(f"Number of validation events: {val_events.size}")
+
+    # Special case
+    if n_val_events == 1:
+        val_int_sites = np.random.choice(np.intersect1d(valid_int_sites, event_sites[val_events[0]]), n_val_sites, replace=False)
+    else:
+        val_int_sites = np.random.choice(valid_int_sites, n_val_sites, replace=False)
     train_int_sites = np.setdiff1d(valid_int_sites, val_int_sites)
     obs_sites = np.setdiff1d(all_sites, val_int_sites)
 
@@ -144,8 +158,6 @@ def train_model(
     print(f"Number of validation sites of interests: {val_int_sites.size}")
     print(f"Number of observation sites: {obs_sites.size}")
 
-    val_events = np.random.choice(events, 75, replace=False)
-    train_events = np.setdiff1d(events, val_events)
 
     train_dataset, val_dataset, scalar_features, data_metadata = sc_prob.data_prep(
         event_sites,

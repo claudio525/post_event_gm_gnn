@@ -127,21 +127,10 @@ def _load_dist_matrix(results_dir: Path, sites: Sequence[str]):
 
 def main(
     results_dir: Path,
-    multi_result_types: bool = False,
 ):
     st.set_page_config(layout="wide")
 
-    if not multi_result_types:
-        cur_results_dir = results_dir
-    else:
-        cur_results_dir = st.selectbox(
-            "Results Directory",
-            [
-                cur_ffp
-                for cur_ffp in results_dir.iterdir()
-                if cur_ffp.is_dir() and not cur_ffp.stem.startswith("_")
-            ],
-        )
+    cur_results_dir = results_dir
 
     start_time = time.time()
     mlt.st_tools.utils.update_st_width(1600, 2, 0, 1, 1)
@@ -159,17 +148,7 @@ def main(
     with col_1:
         event = st.selectbox("Event", events)
 
-    # Method selection
-    methods = [
-        cur_ffp.stem
-        for cur_ffp in (cur_results_dir / event).iterdir()
-        if cur_ffp.is_dir()
-        and cur_ffp.stem in sr.constants.RESULTS_DIR_NAME_METHOD_MAPPING.keys()
-    ]
-    with col_2:
-        method_dir = st.selectbox("Method", methods)
-
-    cur_results_dir = cur_results_dir / event / method_dir
+    cur_results_dir = cur_results_dir / event
 
     summary_tab, site_tab = st.tabs(["Summary", "Individual Site"])
     print(f"Took {time.time() - start_time} to run initial")

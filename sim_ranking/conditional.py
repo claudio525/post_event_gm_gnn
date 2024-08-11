@@ -188,8 +188,8 @@ def compute_cond_MVN_distributions(
             cur_gmm_params_df,
             np.log(obs_data[str(cur_im)]),
             source_info.hypo_loc,
-            sh.im_dist.get_max_dist_obs_site_filter_fn(
-                obs_site_sel_params["max_obs_dist"], obs_site_sel_params["min_n_obs"]
+            sh.im_dist.get_nn_obs_site_filter_fn(
+            obs_site_sel_params["min_n_obs_sites"], obs_site_sel_params["n_obs_sites"]
             ),
             R=R[str(cur_im)] if R is not None else None,
             allow_obs_sites=True,

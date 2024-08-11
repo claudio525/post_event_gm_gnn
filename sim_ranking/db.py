@@ -261,7 +261,10 @@ class DB:
         ).index.values.astype(str)
 
     def get_event_sites(self):
-        """Retrieves the available sites per event"""
+        """
+        Retrieves the available sites in both
+        simulated and observed data for each event
+        """
         events = self.get_avail_events()
         event_sites = {}
         for cur_event in events:

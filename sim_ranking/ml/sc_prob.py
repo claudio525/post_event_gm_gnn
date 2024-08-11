@@ -231,7 +231,7 @@ class RunParamsConfig:
                     self.sample_l2_prob_lambda_fn is not None,
                 ]
             )
-            == 1
+            <= 1
         ), (
             "Only one of sc_l2_prob_lambda, sc_l2_prob_lambda_fn "
             "or sample_l2_prob_lambda_fn can be set"
