@@ -10,6 +10,7 @@ import torch_geometric.loader as gloader
 import tqdm
 import typer
 
+import ml_tools as mlt
 import sim_ranking as sr
 import spatial_hazard as sh
 
@@ -31,16 +32,21 @@ def run_gnn(
         help="Maximum allowed distance of an observation "
         "site from the site of interest",
     ),
+    out_dir: Path = typer.Option(..., help="Output directory"),
     seed: int = typer.Option(None),
     n_val_events: int = typer.Option(100, help="Number of validation events"),
     n_val_sites: int = typer.Option(100, help="Number of validation sites"),
 ):
     # Config
-    n_epochs = 50
-    batch_size = 64
-
-    ims = sr.constants.PSA_KEYS
-    cur_im = "pSA_1.0"
+    run_config = sr.ml.gnn_gm.RunConfig(
+        n_epochs=50,
+        batch_size=64,
+        n_val_events=n_val_events,
+        n_val_sites=n_val_sites,
+        device=device,
+        ims=sr.constants.PSA_KEYS,
+        results_dir=out_dir,
+    )
 
     ### Data loading
     db_ffp = Path(os.path.expandvars("$wdata")) / rel_db_ffp
@@ -152,8 +158,8 @@ def run_gnn(
     # Compute mean and standard deviation for each period
     # for normalisation (only training events)
     obs_data = db.get_obs_df()
-    ims_mean = np.mean(np.log(obs_data.loc[:, ims]), axis=0)
-    ims_std = np.std(np.log(obs_data.loc[:, ims]), axis=0)
+    ims_mean = np.mean(np.log(obs_data.loc[:, run_config.ims]), axis=0)
+    ims_std = np.std(np.log(obs_data.loc[:, run_config.ims]), axis=0)
 
     print(f"Creating site combinations")
     train_site_combs, train_event_sites = sr.ml.data.compute_site_combinations(
@@ -194,7 +200,7 @@ def run_gnn(
     ]
 
     site_int_n_node_features = len(site_int_scalar_feature_keys)
-    site_obs_n_node_features = len(site_obs_scalar_feature_keys) + 1
+    site_obs_n_node_features = len(site_obs_scalar_feature_keys) + len(run_config.ims)
 
     print(f"Getting graph data")
     train_graph_data = sr.ml.gnn_gm.get_graph_data(
@@ -207,7 +213,7 @@ def run_gnn(
         edge_feature_keys,
         ims_mean,
         ims_std,
-        [cur_im],
+        run_config.ims,
     )
 
     val_graph_data = sr.ml.gnn_gm.get_graph_data(
@@ -220,73 +226,53 @@ def run_gnn(
         edge_feature_keys,
         ims_mean,
         ims_std,
-        [cur_im],
+        run_config.ims,
     )
 
-    train_loader = gloader.DataLoader(train_graph_data, batch_size=batch_size, shuffle=True)
-    val_loader = gloader.DataLoader(val_graph_data, batch_size=batch_size, shuffle=True)
-
+    train_loader = gloader.DataLoader(train_graph_data, batch_size=run_config.batch_size, shuffle=True)
+    val_loader = gloader.DataLoader(val_graph_data, batch_size=run_config.batch_size, shuffle=True)
 
     gnn_model = sr.ml.gnn_modules.CustomGNN(
-        site_obs_n_node_features, site_int_n_node_features, len(edge_feature_keys), 32
+        site_obs_n_node_features, site_int_n_node_features, len(edge_feature_keys), 32,
+        len(run_config.ims)
+
     )
     gnn_model.to(device)
-
-    # cur_data = train_graph_data[12]
-    # gnn_model.forward(cur_data)
-
-    # cur_batch = next(iter(train_loader))
-    # gnn_model.forward(cur_batch)
 
     print(f"----------------- Training -----------------")
     print(f"Number of training graphs: {len(train_graph_data)}")
     print(f"Number of validation graphs: {len(val_graph_data)}")
 
+    metrics, best_model_state, best_model_epoch = sr.ml.gnn_gm.train(run_config, gnn_model, train_loader, val_loader)
+    print(
+        f"Best model epoch: {best_model_epoch + 1}, "
+        f"Validation: \tLoss: {metrics['loss_hist_val'][best_model_epoch]:.4f}\n"
+    )
 
-    optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.01)
-    for cur_epoch in range(n_epochs):
-        print(f"Epoch: {cur_epoch}")
+    # Load the best model
+    gnn_model.load_state_dict(best_model_state)
 
-        epoch_loss, n_graphs = 0, 0
-        gnn_model.train()
-        for cur_batch in tqdm.tqdm(train_loader):
-            cur_batch = cur_batch.to(device)
+    id_suffix = ""
+    (
+        cur_out_dir := run_config.results_dir
+        / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+    ).mkdir()
 
-            optimizer.zero_grad()
-            out = gnn_model(cur_batch)
-            loss = torch.nn.functional.mse_loss(out, cur_batch.y[:, None])
-            loss.backward()
-            optimizer.step()
+    # Save the run config
+    run_config.to_yaml(cur_out_dir / "run_config.yaml")
 
-            epoch_loss += loss.item()
-            n_graphs += cur_batch.num_graphs
+    # Save loss history
+    pd.to_pickle(metrics, cur_out_dir / "metrics.pickle")
 
-        train_avg_loss = epoch_loss / n_graphs
+    # Save the model
+    torch.save(gnn_model, cur_out_dir / "model.pt")
 
-        gnn_model.eval()
-        epoch_loss, n_graphs = 0, 0
-        for cur_batch in val_loader:
-            cur_batch = cur_batch.to(device)
+    # Save the results
+    train_results_df = sr.ml.gnn_gm.get_predictions(run_config, gnn_model, train_graph_data)
+    train_results_df.to_parquet(cur_out_dir / "train_results.parquet")
 
-            out = gnn_model(cur_batch)
-            loss = torch.nn.functional.mse_loss(out, cur_batch.y[:, None])
-
-            epoch_loss += loss.item()
-            n_graphs += cur_batch.num_graphs
-
-        val_avg_loss = epoch_loss / n_graphs
-
-        print(f"Epoch {cur_epoch}/{n_epochs}")
-        print(
-            f"\tTraining"
-            f"\t\tLoss: {train_avg_loss:.4f}"
-        )
-        print(
-            f"\tValidation"
-            f"\t\tLoss: {val_avg_loss:.4f}"
-        )
-
-    print(f"WTF")
+    val_results_df = sr.ml.gnn_gm.get_predictions(run_config, gnn_model, val_graph_data)
+    val_results_df.to_parquet(cur_out_dir / "val_results.parquet")
 
 
 if __name__ == "__main__":

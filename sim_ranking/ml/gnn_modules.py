@@ -19,6 +19,7 @@ class CustomGNN(torch.nn.Module):
         n_int_node_features: int,
         n_edge_features: int,
         n_int_node_channels: int,
+        n_ims: int
     ):
         super().__init__()
 
@@ -30,9 +31,9 @@ class CustomGNN(torch.nn.Module):
                         in_channels=(n_obs_node_features, n_int_node_features),
                         out_channels=n_int_node_channels,
                         nn_model=nn.Sequential(
-                            nn.Linear(n_edge_features, 8),
+                            nn.Linear(n_edge_features, 16),
                             nn.ReLU(),
-                            nn.Linear(8, n_obs_node_features * n_int_node_channels),
+                            nn.Linear(16, n_obs_node_features * n_int_node_channels),
                         ),
                         bias=True,
                         aggr="add",
@@ -42,8 +43,8 @@ class CustomGNN(torch.nn.Module):
             )
         )
 
-        self.fc1 = nn.Linear(n_int_node_channels, 8)
-        self.out_fc = nn.Linear(8, 1)
+        self.fc1 = nn.Linear(n_int_node_channels, 16)
+        self.out_fc = nn.Linear(16, n_ims)
 
     def forward(self, data: gdata.Data):
         for cur_conv in self.convs:
@@ -58,8 +59,6 @@ class CustomGNN(torch.nn.Module):
         out = self.out_fc(x)
 
         return out
-
-
 
 
 class CustomConv(MessagePassing):
