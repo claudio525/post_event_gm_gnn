@@ -34,6 +34,10 @@ class RunConfig(NamedTuple):
 
     results_dir: Path
 
+    @property
+    def n_ims(self):
+        return len(self.ims)
+
     def to_dict(self):
         return {
             "n_epochs": int(self.n_epochs),
@@ -65,18 +69,34 @@ def get_graph_data(
     event_sites: dict[str, np.ndarray],
     event_site_combs: dict[str, np.ndarray],
     scalar_features: ml_data.ScalarFeatures,
-    site_int_scalar_feature_keys: list[str],
+    site_int_feature_keys: list[str],
     site_obs_scalar_feature_keys: list[str],
     edge_feature_keys: list[str],
     ims_mean: pd.DataFrame,
     ims_std: pd.DataFrame,
     ims: Sequence[str],
+    # site_int_site_feature_keys: list[str] = None,
+    # site_obs_site_feature_keys: list[str] = None,
 ):
+    # Either both or neither of site_int_site_features
+    # and site_obs_site_features should be specified
+    # assert (site_int_site_feature_keys is None and site_obs_site_feature_keys is None) or (
+    #         site_int_site_feature_keys and site_obs_site_feature_keys
+    # )
+
     scalar_event_feature_values, scalar_feature_columns = (
         ml_data.create_scalar_feature_tensor(
             event_sites, scalar_features, event_site_combs
         )
     )
+
+    # site_int_site_feature_ind = None
+    # site_obs_site_feature_ind = None
+    # if site_int_site_feature_keys is not None:
+    #     site_int_site_feature_ind = [site_int_feature_keys.index(cur_site_feature) for cur_site_feature in site_int_site_feature_keys]
+    #     site_obs_site_feature_ind = [site_obs_scalar_feature_keys.index(cur_site_feature) for cur_site_feature in site_obs_site_feature_keys]
+    n_site_obs_scalar_features = len(site_obs_scalar_feature_keys)
+    site_obs_scalar_feature_ind = np.arange(n_site_obs_scalar_features)
 
     # Create the graph data objects
     graph_data = []
@@ -98,7 +118,7 @@ def get_graph_data(
 
             # Create the site_int node features
             cur_site_int_features = cur_scalar_feature_values.loc[
-                cur_site_combs_mask, site_int_scalar_feature_keys
+                cur_site_combs_mask, site_int_feature_keys
             ].values[0]
 
             # Create the site_obs node features
@@ -135,6 +155,30 @@ def get_graph_data(
                 cur_edge_features, dtype=torch.float32
             )
 
+            # cur_sc_data["site_obs"].scalar_feature_ind = torch.tensor(
+            #     site_obs_scalar_feature_ind, dtype=torch.int
+            # )[None, :]
+            # cur_sc_data["site_int"].scalar_feature_ind = torch.tensor(
+            #     np.arange(len(site_int_feature_keys)), dtype=torch.int
+            # )[None, :]
+            #
+            # cur_sc_data["site_obs"].im_ind = torch.tensor(
+            #     np.arange(
+            #         n_site_obs_scalar_features + 1,
+            #         n_site_obs_scalar_features + len(ims),
+            #     ),
+            #     dtype=torch.int,
+            # )[None, :]
+
+            # Indices for the site-specific features
+            # if site_int_site_feature_ind is not None:
+            #     cur_sc_data["site_int"].site_feature_ind = torch.tensor(
+            #         site_int_site_feature_ind, dtype=torch.int16
+            #     )
+            #     cur_sc_data["site_obs"].site_feature_ind = torch.tensor(
+            #         site_obs_site_feature_ind, dtype=torch.int16
+            #     )
+
             cur_sc_data["metadata"] = {
                 "event": cur_event,
                 "site_int": cur_site_int,
@@ -147,7 +191,7 @@ def get_graph_data(
 
             graph_data.append(cur_sc_data)
 
-    return graph_data
+    return graph_data, site_obs_scalar_feature_ind
 
 
 def train(
@@ -270,7 +314,6 @@ def get_predictions(
         # Add column for number of observation sites
 
         results.append(cur_result)
-
 
     results = pd.concat(results, axis=0)
     return results

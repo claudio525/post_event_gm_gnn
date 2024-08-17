@@ -265,22 +265,20 @@ class DB:
         Retrieves the available sites in both
         simulated and observed data for each event
         """
-        events = self.get_avail_events()
         event_sites = {}
+        events = self.get_avail_events()
+        sim_df = self.get_sim_df()
         for cur_event in events:
-            cur_sim_sites = pd.read_sql(
-                f"SELECT site_id FROM sim_im_data WHERE event_id = (?)",
-                self.con,
-                params=(cur_event,),
-                index_col="site_id",
-            ).index.values.astype(str)
             cur_obs_sites = pd.read_sql(
                 f"SELECT site_id FROM obs_im_data WHERE event_id = (?)",
                 self.con,
                 params=(cur_event,),
                 index_col="site_id",
             ).index.values.astype(str)
-            event_sites[cur_event] = np.intersect1d(cur_sim_sites, cur_obs_sites)
+            event_sites[cur_event] = np.intersect1d(
+                sim_df.loc[sim_df.event_id == cur_event]["site_id"].values.astype(str),
+                cur_obs_sites,
+            )
 
         return event_sites
 

@@ -1,3 +1,4 @@
+import time
 import os
 from pathlib import Path
 
@@ -20,6 +21,7 @@ if torch.cuda.is_available():
     device = "cuda"
 
 print(f"Using device: {device.upper()}")
+
 
 def run_gnn(
     rel_db_ffp: Path = typer.Argument(
@@ -60,7 +62,9 @@ def run_gnn(
 
     ### Data setup
     # Get the sites per event
+    start_time = time.time()
     event_sites = db.get_event_sites()
+    print(f"Took {time.time() - start_time} to get event sites")
 
     # Get the set of valid site-interests per event
     print(f"Getting valid sites of interest")
@@ -182,68 +186,100 @@ def run_gnn(
     )
 
     edge_feature_keys = ["dist", "angular_dist"]
-    site_int_scalar_feature_keys = [
+    site_int_site_feature_keys = [
         "vs30_site_int",
         "z1.0_site_int",
         "z2.5_site_int",
         "tsite_site_int",
+    ]
+    site_int_feature_keys = site_int_site_feature_keys + [
         "r_rup_site_int",
         "mag",
     ]
-    site_obs_scalar_feature_keys = [
+    site_obs_site_feature_keys = [
         "vs30_site_obs",
         "z1.0_site_obs",
         "z2.5_site_obs",
         "tsite_site_obs",
+    ]
+    site_obs_scalar_feature_keys = site_obs_site_feature_keys + [
         "r_rup_site_obs",
-        "mag",
     ]
 
-    site_int_n_node_features = len(site_int_scalar_feature_keys)
+    site_int_n_node_features = len(site_int_feature_keys)
     site_obs_n_node_features = len(site_obs_scalar_feature_keys) + len(run_config.ims)
 
     print(f"Getting graph data")
-    train_graph_data = sr.ml.gnn_gm.get_graph_data(
+    train_graph_data, site_obs_scalar_feature_ind = sr.ml.gnn_gm.get_graph_data(
         db,
         train_event_sites,
         train_site_combs,
         scalar_features,
-        site_int_scalar_feature_keys,
+        site_int_feature_keys,
         site_obs_scalar_feature_keys,
         edge_feature_keys,
         ims_mean,
         ims_std,
         run_config.ims,
+        # site_int_site_feature_keys,
+        # site_obs_site_feature_keys
     )
 
-    val_graph_data = sr.ml.gnn_gm.get_graph_data(
+    val_graph_data, _ = sr.ml.gnn_gm.get_graph_data(
         db,
         val_event_sites,
         val_site_combs,
         scalar_features,
-        site_int_scalar_feature_keys,
+        site_int_feature_keys,
         site_obs_scalar_feature_keys,
         edge_feature_keys,
         ims_mean,
         ims_std,
         run_config.ims,
+        # site_int_site_feature_keys,
+        # site_obs_site_feature_keys
     )
 
-    train_loader = gloader.DataLoader(train_graph_data, batch_size=run_config.batch_size, shuffle=True)
-    val_loader = gloader.DataLoader(val_graph_data, batch_size=run_config.batch_size, shuffle=True)
-
-    gnn_model = sr.ml.gnn_modules.CustomGNN(
-        site_obs_n_node_features, site_int_n_node_features, len(edge_feature_keys), 32,
-        len(run_config.ims)
-
+    train_loader = gloader.DataLoader(
+        train_graph_data, batch_size=run_config.batch_size, shuffle=True
     )
+    val_loader = gloader.DataLoader(
+        val_graph_data, batch_size=run_config.batch_size, shuffle=True
+    )
+
+    # gnn_model = sr.ml.gnn_modules.BasicGNN(
+    #     site_obs_n_node_features,
+    #     site_int_n_node_features,
+    #     len(edge_feature_keys),
+    #     32,
+    #     len(run_config.ims),
+    # )
+    gnn_model = sr.ml.gnn_modules.BasicAttentionGNN(
+        site_obs_n_node_features,
+        len(site_obs_scalar_feature_keys),
+        site_int_n_node_features,
+        len(edge_feature_keys),
+        64,
+        len(run_config.ims),
+        torch.from_numpy(site_obs_scalar_feature_ind),
+    )
+
+    ## Test
+    # cur_data = train_graph_data[0]
+    # gnn_model(cur_data)
+    # cur_batch = next(iter(train_loader))
+    # gnn_model(cur_batch)
+
     gnn_model.to(device)
+
 
     print(f"----------------- Training -----------------")
     print(f"Number of training graphs: {len(train_graph_data)}")
     print(f"Number of validation graphs: {len(val_graph_data)}")
 
-    metrics, best_model_state, best_model_epoch = sr.ml.gnn_gm.train(run_config, gnn_model, train_loader, val_loader)
+    metrics, best_model_state, best_model_epoch = sr.ml.gnn_gm.train(
+        run_config, gnn_model, train_loader, val_loader
+    )
     print(
         f"Best model epoch: {best_model_epoch + 1}, "
         f"Validation: \tLoss: {metrics['loss_hist_val'][best_model_epoch]:.4f}\n"
@@ -268,11 +304,15 @@ def run_gnn(
     torch.save(gnn_model, cur_out_dir / "model.pt")
 
     # Save the results
-    train_results_df = sr.ml.gnn_gm.get_predictions(run_config, gnn_model, train_graph_data)
+    train_results_df = sr.ml.gnn_gm.get_predictions(
+        run_config, gnn_model, train_graph_data
+    )
     train_results_df.to_parquet(cur_out_dir / "train_results.parquet")
 
     val_results_df = sr.ml.gnn_gm.get_predictions(run_config, gnn_model, val_graph_data)
     val_results_df.to_parquet(cur_out_dir / "val_results.parquet")
+
+    print(f"wtf")
 
 
 if __name__ == "__main__":
