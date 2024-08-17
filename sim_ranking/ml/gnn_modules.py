@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Sequence
 
 import einops
 import torch
@@ -22,7 +22,8 @@ class BasicAttentionGNN(torch.nn.Module):
         n_obs_scalar_node_features: int,
         n_int_node_features: int,
         n_edge_features: int,
-        n_int_node_channels: int,
+        n_int_node_channels: Sequence[int],
+        fc_n_units: int,
         n_ims: int,
         site_obs_scalar_feature_ind: torch.Tensor,
     ):
@@ -30,30 +31,31 @@ class BasicAttentionGNN(torch.nn.Module):
         assert n_obs_node_features == n_obs_scalar_node_features + n_ims
 
         self.convs = torch.nn.ModuleList()
-        self.convs.append(
-            gnn.HeteroConv(
-                {
-                    ("site_obs", "informs", "site_int"): BasicAttentionConv(
-                        in_channels=(n_obs_node_features, n_int_node_features),
-                        out_channels=n_int_node_channels,
-                        att_model=nn.Sequential(
-                            nn.Linear(
-                                n_obs_scalar_node_features
-                                + n_edge_features
-                                + n_int_node_features,
-                                1,
+        for cur_n_channels in n_int_node_channels:
+            self.convs.append(
+                gnn.HeteroConv(
+                    {
+                        ("site_obs", "informs", "site_int"): BasicAttentionConv(
+                            in_channels=(n_obs_node_features, n_int_node_features),
+                            out_channels=cur_n_channels,
+                            att_model=nn.Sequential(
+                                nn.Linear(
+                                    n_obs_scalar_node_features
+                                    + n_edge_features
+                                    + n_int_node_features,
+                                    1,
+                                ),
+                                nn.LeakyReLU(negative_slope=0.2),
                             ),
-                            nn.LeakyReLU(negative_slope=0.2),
-                        ),
-                        source_scalar_feature_ind=site_obs_scalar_feature_ind,
-                    )
-                },
-                aggr="sum",
+                            source_scalar_feature_ind=site_obs_scalar_feature_ind,
+                        )
+                    },
+                    aggr="sum",
+                )
             )
-        )
 
-        self.fc1 = nn.Linear(n_int_node_channels, 16)
-        self.out_fc = nn.Linear(16, n_ims)
+        self.fc1 = nn.Linear(n_int_node_channels[-1], fc_n_units)
+        self.out_fc = nn.Linear(fc_n_units, n_ims)
 
     def forward(self, data: gdata.HeteroData):
         for cur_conv in self.convs:

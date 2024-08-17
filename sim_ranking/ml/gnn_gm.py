@@ -209,7 +209,7 @@ def train(
     best_val_loss = np.inf
     best_model_state, best_model_epoch = None, None
 
-    optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.01)
+    optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.001)
     for cur_epoch_ix in range(run_config.n_epochs):
         print(f"Epoch: {cur_epoch_ix}")
 

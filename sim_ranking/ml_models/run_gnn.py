@@ -35,14 +35,16 @@ def run_gnn(
         "site from the site of interest",
     ),
     out_dir: Path = typer.Option(..., help="Output directory"),
+    n_epochs: int = typer.Option(100, help="Number of epochs for training"),
+    batch_size: int = typer.Option(64, help="Batch size"),
     seed: int = typer.Option(None),
     n_val_events: int = typer.Option(100, help="Number of validation events"),
     n_val_sites: int = typer.Option(100, help="Number of validation sites"),
 ):
     # Config
     run_config = sr.ml.gnn_gm.RunConfig(
-        n_epochs=50,
-        batch_size=64,
+        n_epochs=n_epochs,
+        batch_size=batch_size,
         n_val_events=n_val_events,
         n_val_sites=n_val_sites,
         device=device,
@@ -259,7 +261,8 @@ def run_gnn(
         len(site_obs_scalar_feature_keys),
         site_int_n_node_features,
         len(edge_feature_keys),
-        64,
+        [64],
+        32,
         len(run_config.ims),
         torch.from_numpy(site_obs_scalar_feature_ind),
     )
