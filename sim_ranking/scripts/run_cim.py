@@ -73,8 +73,8 @@ def emp_cmvn_all(
     events = np.intersect1d(sim_events, obs_events)
 
     obs_site_sel_params = {
-        "min_n_obs_stations": min_n_obs_stations,
-        "n_stations": n_stations,
+        "min_n_obs_sites": min_n_obs_stations,
+        "n_obs_sites": n_stations,
         # "max_obs_dist": max_obs_dist,
         # "min_n_obs": min_n_obs,
     }

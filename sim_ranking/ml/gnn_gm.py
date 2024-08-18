@@ -193,6 +193,9 @@ def get_graph_data(
 
     return graph_data, site_obs_scalar_feature_ind
 
+def compute_loss(pred: torch.Tensor, target: torch.Tensor):
+    """Computes the loss per sample and output"""
+    return F.mse_loss(pred, target, reduction="none")
 
 def train(
     run_config: RunConfig,
@@ -222,7 +225,7 @@ def train(
 
             optimizer.zero_grad()
             out = gnn_model(cur_batch)
-            loss = torch.nn.functional.mse_loss(out, cur_y)
+            loss = compute_loss(out, cur_y).sum(dim=1).mean(dim=0)
             loss.backward()
             optimizer.step()
 
@@ -239,7 +242,7 @@ def train(
             cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
             out = gnn_model(cur_batch)
-            loss = torch.nn.functional.mse_loss(out, cur_y)
+            loss = compute_loss(out, cur_y).sum(dim=1).mean(dim=0)
 
             metrics["loss_hist_val"][cur_epoch_ix] += loss.item()
             n_graphs += cur_batch.num_graphs
@@ -287,12 +290,12 @@ def get_predictions(
         cur_result.loc[:, run_config.ims] = cur_batch["y"].cpu().numpy(force=True)
         cur_result.loc[:, pred_im_keys] = cur_out.cpu().numpy(force=True)
 
-        cur_loss = (
-            F.mse_loss(cur_out, cur_batch.y, reduction="none").cpu().numpy(force=True)
-        )
+        # Loss
+        cur_loss = compute_loss(cur_out, cur_batch.y).cpu().numpy(force=True)
         cur_result.loc[:, loss_keys] = cur_loss
         cur_result.loc[:, "loss"] = cur_loss.mean(axis=1)
 
+        # Index
         cur_obs_site_hash_values = [
             base64.urlsafe_b64encode(
                 hashlib.sha256("_".join(list(cur_site_obs)).encode()).digest()
@@ -301,7 +304,6 @@ def get_predictions(
             .decode("utf-8")[:10]
             for cur_site_obs in cur_result["obs_sites"]
         ]
-
         cur_result = cur_result.set_index(
             mlt.array_utils.numpy_str_join(
                 "_",
@@ -311,7 +313,8 @@ def get_predictions(
             )
         )
 
-        # Add column for number of observation sites
+        # Number of observation sites
+        cur_result.loc[:, "n_obs_sites"] = cur_result["obs_sites"].apply(len)
 
         results.append(cur_result)
 

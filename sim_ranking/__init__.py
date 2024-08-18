@@ -5,5 +5,5 @@ from . import constants
 from . import plots
 from .db import DB
 from . import ml
-
+from .data_classes import ObservedData
 
