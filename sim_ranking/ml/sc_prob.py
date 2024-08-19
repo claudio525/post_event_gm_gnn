@@ -703,7 +703,7 @@ class SCProbDataset(utils.BaseDataset):
             self.scalar_features_values,
             self.scalar_features_columns,
         ) = ml_data.create_scalar_feature_tensor(
-            self.events, self.event_sites, self.scalar_features, self.event_site_combs
+         self.event_sites, self.scalar_features, self.event_site_combs
         )
 
         self.w_scalar_feature_cols = w_scalar_feature_cols

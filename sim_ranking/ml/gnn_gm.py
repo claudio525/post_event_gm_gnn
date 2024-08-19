@@ -15,6 +15,7 @@ import ml_tools as mlt
 
 from ..db import DB
 from . import data as ml_data
+from .. import constants
 
 
 class RunConfig(NamedTuple):
@@ -296,20 +297,20 @@ def get_predictions(
         cur_result.loc[:, "loss"] = cur_loss.mean(axis=1)
 
         # Index
-        cur_obs_site_hash_values = [
-            base64.urlsafe_b64encode(
-                hashlib.sha256("_".join(list(cur_site_obs)).encode()).digest()
-            )
-            .rstrip(b"=")
-            .decode("utf-8")[:10]
-            for cur_site_obs in cur_result["obs_sites"]
-        ]
+        # cur_obs_site_hash_values = [
+        #     base64.urlsafe_b64encode(
+        #         hashlib.sha256("_".join(list(cur_site_obs)).encode()).digest()
+        #     )
+        #     .rstrip(b"=")
+        #     .decode("utf-8")[:10]
+        #     for cur_site_obs in cur_result["obs_sites"]
+        # ]
         cur_result = cur_result.set_index(
             mlt.array_utils.numpy_str_join(
                 "_",
                 cur_result["event_id"].values.astype(str),
                 cur_result["site_int"].values.astype(str),
-                cur_obs_site_hash_values,
+                # cur_obs_site_hash_values,
             )
         )
 
@@ -320,3 +321,15 @@ def get_predictions(
 
     results = pd.concat(results, axis=0)
     return results
+
+
+def get_residuals(gnn_results: pd.DataFrame, ims: Sequence[str] = constants.PSA_KEYS):
+    """Computes the residual between the observed and predicted IMs for each scenario"""
+    pred_im_keys = mlt.array_utils.numpy_str_join("_", ims, "pred")
+    res_df = pd.DataFrame(data = gnn_results.loc[:, ims].values - gnn_results.loc[:, pred_im_keys].values, columns=ims)
+
+    res_df.index = gnn_results.index
+    res_df["event_id"] = gnn_results["event_id"]
+    res_df["site_int"] = gnn_results["site_int"]
+    res_df["n_obs_sites"] = gnn_results["n_obs_sites"]
+    return res_df

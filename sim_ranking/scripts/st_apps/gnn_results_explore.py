@@ -377,7 +377,7 @@ def scenario_viewer(gnn_results: pd.DataFrame, shared_data: SharedData, tab_type
             cur_site_values,
             label=f"Observed - {cur_site}",
             linestyle="dotted",
-            linewidth=1.5,
+            linewidth=1.25,
         )
 
     ax.set_xscale("log")
