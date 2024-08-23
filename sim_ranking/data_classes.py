@@ -84,6 +84,7 @@ class ObservedData:
             "sta": "site_id",
             "Vs30": "vs30",
             "Tsite": "tsite",
+            "T0": "tsite",
             "Z1.0": "z1p0",
             "Z2.5": "z2p5",
             "sta_lat": "site_lat",

@@ -24,11 +24,10 @@ class BasicAttentionGNN(torch.nn.Module):
         n_edge_features: int,
         n_int_node_channels: Sequence[int],
         fc_n_units: int,
-        n_ims: int,
+        n_outputs: int,
         site_obs_scalar_feature_ind: torch.Tensor,
     ):
         super().__init__()
-        assert n_obs_node_features == n_obs_scalar_node_features + n_ims
 
         self.convs = torch.nn.ModuleList()
         for cur_n_channels in n_int_node_channels:
@@ -55,7 +54,7 @@ class BasicAttentionGNN(torch.nn.Module):
             )
 
         self.fc1 = nn.Linear(n_int_node_channels[-1], fc_n_units)
-        self.out_fc = nn.Linear(fc_n_units, n_ims)
+        self.out_fc = nn.Linear(fc_n_units, n_outputs)
 
     def forward(self, data: gdata.HeteroData):
         for cur_conv in self.convs:

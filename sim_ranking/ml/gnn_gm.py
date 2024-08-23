@@ -1,3 +1,4 @@
+import warnings
 import hashlib
 import base64
 from typing import NamedTuple, Sequence
@@ -32,12 +33,18 @@ class RunConfig(NamedTuple):
     device: str
     # IMs to predict
     ims: Sequence[str]
-
+    # Whether to predict the standard deviation
+    pred_std: bool
+    # Base output directory
     results_dir: Path
 
     @property
     def n_ims(self):
         return len(self.ims)
+
+    @property
+    def n_outputs(self):
+        return self.n_ims * 2 if self.pred_std else self.n_ims
 
     def to_dict(self):
         return {
@@ -47,6 +54,7 @@ class RunConfig(NamedTuple):
             "n_val_sites": int(self.n_val_sites),
             "device": self.device,
             "ims": list(self.ims),
+            "pred_std": bool(self.pred_std),
             "results_dir": str(
                 self.results_dir,
             ),
@@ -58,6 +66,7 @@ class RunConfig(NamedTuple):
     @classmethod
     def from_dict(cls, d: dict):
         d["results_dir"] = Path(d["results_dir"])
+
         return cls(**d)
 
     @classmethod
@@ -194,9 +203,28 @@ def get_graph_data(
 
     return graph_data, site_obs_scalar_feature_ind
 
-def compute_loss(pred: torch.Tensor, target: torch.Tensor):
+
+def compute_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    pred_std: bool,
+    scale_constant: float = 10.0,
+):
     """Computes the loss per sample and output"""
-    return F.mse_loss(pred, target, reduction="none")
+    if pred_std:
+        pred_mean, pred_ln_std = pred.chunk(2, dim=1)
+        loss = F.gaussian_nll_loss(
+            pred_mean, target, torch.exp(pred_ln_std) ** 2, reduction="none"
+        )
+        return loss * scale_constant
+    else:
+        return F.mse_loss(pred, target, reduction="none") * scale_constant
+
+
+def reduce_loss(loss: torch.Tensor, dim: int = None):
+    """Computes the batch loss"""
+    return loss.mean(dim=dim)
+
 
 def train(
     run_config: RunConfig,
@@ -206,8 +234,8 @@ def train(
 ):
     # Setup metrics to log
     metrics = {
-        "loss_hist_train": torch.zeros(run_config.n_epochs),
-        "loss_hist_val": torch.zeros(run_config.n_epochs),
+        "loss_hist_train": np.zeros(run_config.n_epochs),
+        "loss_hist_val": np.zeros(run_config.n_epochs),
     }
 
     best_val_loss = np.inf
@@ -226,7 +254,7 @@ def train(
 
             optimizer.zero_grad()
             out = gnn_model(cur_batch)
-            loss = compute_loss(out, cur_y).sum(dim=1).mean(dim=0)
+            loss = reduce_loss(compute_loss(out, cur_y, run_config.pred_std))
             loss.backward()
             optimizer.step()
 
@@ -243,7 +271,7 @@ def train(
             cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
             out = gnn_model(cur_batch)
-            loss = compute_loss(out, cur_y).sum(dim=1).mean(dim=0)
+            loss = reduce_loss(compute_loss(out, cur_y, run_config.pred_std))
 
             metrics["loss_hist_val"][cur_epoch_ix] += loss.item()
             n_graphs += cur_batch.num_graphs
@@ -270,9 +298,11 @@ def get_predictions(
     gnn_model: torch.nn.Module,
     graph_data: Sequence[gdata.HeteroData],
 ):
+    gnn_model.eval()
     loader = gloader.DataLoader(graph_data, batch_size=128, shuffle=False)
 
     pred_im_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred")
+    pred_im_std_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_std")
     loss_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "loss")
 
     results = []
@@ -289,12 +319,25 @@ def get_predictions(
             index=["event_id", "site_int", "obs_sites"],
         ).T
         cur_result.loc[:, run_config.ims] = cur_batch["y"].cpu().numpy(force=True)
-        cur_result.loc[:, pred_im_keys] = cur_out.cpu().numpy(force=True)
+        if run_config.pred_std:
+            pred_im, pred_im_ln_std = cur_out.chunk(2, dim=1)
+            cur_result.loc[:, pred_im_keys] = pred_im.cpu().numpy(force=True)
+            cur_result.loc[:, pred_im_std_keys] = (
+                torch.exp(pred_im_ln_std).cpu().numpy(force=True)
+            )
+        else:
+            cur_result.loc[:, pred_im_keys] = cur_out.cpu().numpy(force=True)
 
         # Loss
-        cur_loss = compute_loss(cur_out, cur_batch.y).cpu().numpy(force=True)
-        cur_result.loc[:, loss_keys] = cur_loss
-        cur_result.loc[:, "loss"] = cur_loss.mean(axis=1)
+        cur_loss = compute_loss(cur_out, cur_batch.y, run_config.pred_std)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
+            cur_result.loc[:, loss_keys] = cur_loss.cpu().numpy(force=True)
+            cur_result.loc[:, "loss"] = (
+                reduce_loss(cur_loss, dim=1)
+                .cpu()
+                .numpy(force=True)
+            )
 
         # Index
         # cur_obs_site_hash_values = [
@@ -326,7 +369,10 @@ def get_predictions(
 def get_residuals(gnn_results: pd.DataFrame, ims: Sequence[str] = constants.PSA_KEYS):
     """Computes the residual between the observed and predicted IMs for each scenario"""
     pred_im_keys = mlt.array_utils.numpy_str_join("_", ims, "pred")
-    res_df = pd.DataFrame(data = gnn_results.loc[:, ims].values - gnn_results.loc[:, pred_im_keys].values, columns=ims)
+    res_df = pd.DataFrame(
+        data=gnn_results.loc[:, ims].values - gnn_results.loc[:, pred_im_keys].values,
+        columns=ims,
+    )
 
     res_df.index = gnn_results.index
     res_df["event_id"] = gnn_results["event_id"]

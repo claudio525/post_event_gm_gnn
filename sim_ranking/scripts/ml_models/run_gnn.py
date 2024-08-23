@@ -49,6 +49,7 @@ def run_gnn(
         n_val_sites=n_val_sites,
         device=device,
         ims=sr.constants.PSA_KEYS,
+        pred_std=True,
         results_dir=out_dir,
     )
 
@@ -238,8 +239,6 @@ def run_gnn(
         ims_mean,
         ims_std,
         run_config.ims,
-        # site_int_site_feature_keys,
-        # site_obs_site_feature_keys
     )
 
     train_loader = gloader.DataLoader(
@@ -249,13 +248,6 @@ def run_gnn(
         val_graph_data, batch_size=run_config.batch_size, shuffle=True
     )
 
-    # gnn_model = sr.ml.gnn_modules.BasicGNN(
-    #     site_obs_n_node_features,
-    #     site_int_n_node_features,
-    #     len(edge_feature_keys),
-    #     32,
-    #     len(run_config.ims),
-    # )
     gnn_model = sr.ml.gnn_modules.BasicAttentionGNN(
         site_obs_n_node_features,
         len(site_obs_scalar_feature_keys),
@@ -263,16 +255,9 @@ def run_gnn(
         len(edge_feature_keys),
         [64],
         32,
-        len(run_config.ims),
+        run_config.n_ims if not run_config.pred_std else run_config.n_ims * 2,
         torch.from_numpy(site_obs_scalar_feature_ind),
     )
-
-    ## Test
-    # cur_data = train_graph_data[0]
-    # gnn_model(cur_data)
-    # cur_batch = next(iter(train_loader))
-    # gnn_model(cur_batch)
-
     gnn_model.to(device)
 
 
@@ -320,7 +305,13 @@ def run_gnn(
     val_results_df = sr.ml.gnn_gm.get_predictions(run_config, gnn_model, val_graph_data)
     val_results_df.to_parquet(cur_out_dir / "val_results.parquet")
 
-    print(f"wtf")
+    # Write the metadata
+    metadata = {
+        "best_model_epoch": int(best_model_epoch),
+        "best_model_loss": float(metrics["loss_hist_val"][best_model_epoch]),
+    }
+    mlt.utils.write_to_yaml(metadata, cur_out_dir / "metadata.yaml")
+
 
 
 if __name__ == "__main__":
