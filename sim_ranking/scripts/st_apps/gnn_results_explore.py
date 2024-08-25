@@ -29,7 +29,6 @@ class SharedData(NamedTuple):
     gnn_metadata: dict
 
     emp_cim_data: dict[str, sr.conditional.ConditionalMVNDistribution] = None
-    sim_cim_data: dict[str, sr.conditional.ConditionalMVNDistribution] = None
 
 
 @st.cache_data
@@ -263,7 +262,11 @@ def scenario_viewer(gnn_results: pd.DataFrame, shared_data: SharedData, tab_type
         cur_obs_df = cur_obs_df[cur_obs_df.event_id == cur_event].set_index("site_id")
 
         # Get empirical cIM results
-        cur_emp_cim = shared_data.emp_cim_data.get(cur_event, None)
+        cur_emp_cim = (
+            shared_data.emp_cim_data.get(cur_event, None)
+            if shared_data.emp_cim_data is not None
+            else None
+        )
         if cur_emp_cim is not None:
             cur_emp_cim_mean = cur_emp_cim.cond_lnIM_mean_df
             cur_emp_cim_std = cur_emp_cim.cond_lnIM_std_df
@@ -546,10 +549,6 @@ def run(
             )
             for cur_event in emp_cim_events
         }
-
-    # if sim_cim_results_dir is not None:
-    #     sim_cim_events = [cur_ffp.stem for cur_ffp in sim_cim_results_dir.iterdir() if cur_ffp.is_dir()]
-    #     sim_cim_data = {st_utils.cim_load_cmvn_result(sim_cim_results_dir /cur_event) for cur_event in sim_cim_events}
 
     ## Add check here to ensure that validation sites are matching!!
 

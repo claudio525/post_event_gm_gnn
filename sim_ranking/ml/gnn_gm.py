@@ -1,5 +1,6 @@
 import os
 import itertools
+import pickle
 import warnings
 import multiprocessing as mp
 from typing import NamedTuple, Sequence
@@ -207,7 +208,7 @@ def _get_event_graph_data(
 
         graph_data.append(cur_sc_data)
 
-    return graph_data
+    return pickle.dumps(graph_data)
 
 
 def get_graph_data(
@@ -269,6 +270,7 @@ def get_graph_data(
                     for cur_event, cur_site_combs in event_site_combs.items()
                 ],
             )
+            graph_data = [pickle.loads(data) for data in graph_data]
 
     graph_data = list(itertools.chain(*graph_data))
     return graph_data, site_obs_scalar_feature_ind
@@ -336,7 +338,7 @@ def train(
         ### Validation
         gnn_model.eval()
         n_graphs = 0
-        with torch.no_grad:
+        with torch.no_grad():
             for cur_batch in val_loader:
                 cur_batch = cur_batch.to(run_config.device)
                 cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
