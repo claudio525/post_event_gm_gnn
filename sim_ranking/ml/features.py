@@ -1,5 +1,6 @@
 from typing import Sequence, Dict
 
+import einops
 import numpy as np
 import pandas as pd
 from pyproj import Transformer
@@ -32,32 +33,43 @@ def compute_angular_distance(
         event_df.lon, event_df.lat
     )
     for cur_event in events:
-        cur_epi = event_df.loc[cur_event, ["nztm_x", "nztm_y"]].values
+        cur_epi = event_df.loc[cur_event, ["nztm_x", "nztm_y"]].values.astype(float)
         cur_sites = event_sites[cur_event]
-        cur_site_to_site_angle = np.full((cur_sites.size, cur_sites.size), np.nan)
         cur_site_coords = station_df.loc[cur_sites, ["nztm_x", "nztm_y"]].values
-        for i in range(cur_sites.size):
-            for j in range(cur_sites.size):
-                if i == j:
-                    cur_site_to_site_angle[i, j] = 0.0
-                else:
-                    v1 = cur_site_coords[i] - cur_epi
-                    v2 = cur_site_coords[j] - cur_epi
-                    cur_site_to_site_angle[i, j] = np.arccos(
-                        np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-                    )
+
+        source_to_site_vecs = cur_site_coords - cur_epi
+        cur_site_to_site_angle = np.arccos(
+            np.clip(einops.einsum(source_to_site_vecs, source_to_site_vecs, "i k, j k -> i j")
+            / (
+                (
+                    np.linalg.norm(source_to_site_vecs, axis=1)[:, None]
+                    * np.linalg.norm(source_to_site_vecs, axis=1)[None, :]
+                )
+            ), -1.0, 1.0)
+        )
+
+
+        # t = np.full((cur_sites.size, cur_sites.size), np.nan)
+        # for i in range(cur_sites.size):
+        #     for j in range(cur_sites.size):
+        #         if i == j:
+        #             t[i, j] = 0.0
+        #         else:
+        #             v1 = cur_site_coords[i] - cur_epi
+        #             v2 = cur_site_coords[j] - cur_epi
+        #             t[i, j] = np.arccos(
+        #                 np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        #             )
+        #
+        # assert np.allclose(cur_site_to_site_angle, t)
 
         # Scale such that -1 => 0 and 1 => pi
         if pre_process:
-            cur_site_to_site_angle = (
-                cur_site_to_site_angle / np.pi
-            ) * 2 - 1
+            cur_site_to_site_angle = (cur_site_to_site_angle / np.pi) * 2 - 1
 
         event_angular_distances[cur_event] = pd.DataFrame(
             data=cur_site_to_site_angle, index=cur_sites, columns=cur_sites
         )
-
-
 
     return event_angular_distances
 
@@ -70,8 +82,8 @@ def pre_process_event_site_features(site_df: pd.DataFrame):
     R_X: Scaled such that -1 => -200km, 0 => 0km and 1 => 200km
     """
     event_site_feature_stats = {
-        "r_rup": (0, 200),
-        "r_x": (-200, 200),
+        "rrup": (0, 200),
+        "rx": (-200, 200),
     }
     supported_cols = list(event_site_feature_stats.keys())
 
@@ -127,13 +139,13 @@ def compute_scalar_features(
     site_to_site_features["dist"] = ((dist_matrix.copy() / max_dist) * 2) - 1
 
     ### Event-site features
-    event_site_features = {}
-    for cur_event in events:
-        event_site_features[cur_event] = pre_process_event_site_features(
-            record_df.loc[record_df.event_id == cur_event]
-            .set_index("site_id")
-            .drop(columns=["event_id"])
+    event_groups = record_df.groupby("event_id")
+    event_site_features = {
+        cur_event: pre_process_event_site_features(
+            cur_record_df.set_index("site_id")[["rrup", "rx"]]
         )
+        for cur_event, cur_record_df in event_groups
+    }
 
     ### Event-site-to-site features
     event_site_to_site_features = {}
@@ -144,5 +156,3 @@ def compute_scalar_features(
     )
 
     return site_to_site_features, event_site_features, event_site_to_site_features
-
-

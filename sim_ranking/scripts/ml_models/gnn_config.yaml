@@ -1,0 +1,22 @@
+### All paths specified are relative to the environment variable $wdata
+
+# General settings
+seed: 42
+
+# Input data settings
+rel_obs_data_ffp: gm_datasets/nz_gmdb/v3.0/Tables/ground_motion_im_table_rotd50_flat.csv
+max_dist: 50
+n_val_events: 100
+n_val_sites: null
+rel_val_sites_ffp: sim_ranking/configs/0824_1531_val_int_sites.npy
+
+
+# Model settings
+pred_std: True
+
+# Hyperparameters
+n_epochs: 100
+batch_size: 1024
+
+# Output settings
+rel_results_dir: sim_ranking/results/gnn

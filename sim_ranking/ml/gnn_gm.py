@@ -1,8 +1,10 @@
+import os
+import itertools
 import warnings
-import hashlib
-import base64
+import multiprocessing as mp
 from typing import NamedTuple, Sequence
 from pathlib import Path
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -14,29 +16,52 @@ import tqdm
 
 import ml_tools as mlt
 
-from ..db import DB
 from . import data as ml_data
 from .. import constants
+from ..data_classes import ObservedData
 
 
-class RunConfig(NamedTuple):
+@dataclass
+class RunConfig:
 
-    # Number of training epochs
-    n_epochs: int
-    # Batch size
-    batch_size: int
+    ### General settings
+    seed: int
+
+    ### Input settings
+    rel_obs_data_ffp: Path
+    # Maximum distance between site-interest and observation sites
+    max_dist: float
     # Number of validation events
     n_val_events: int
     # Number of validation sites
     n_val_sites: int
+    # Validation events ffp
+    rel_val_sites_ffp: str
+
     # Device to use
     device: str
+
+    ### Model settings
     # IMs to predict
     ims: Sequence[str]
     # Whether to predict the standard deviation
     pred_std: bool
+
+    ### Hyperparameters
+    # Number of training epochs
+    n_epochs: int
+    # Batch size
+    batch_size: int
+
     # Base output directory
-    results_dir: Path
+    rel_results_dir: str
+
+    def __post_init__(self):
+        assert self.n_val_events > 0
+        assert self.rel_val_sites_ffp is not None or self.n_val_sites > 0
+
+        assert self.obs_data_ffp.exists()
+        assert self.val_sites_ffp is None or self.val_sites_ffp.exists()
 
     @property
     def n_ims(self):
@@ -46,27 +71,56 @@ class RunConfig(NamedTuple):
     def n_outputs(self):
         return self.n_ims * 2 if self.pred_std else self.n_ims
 
+    @property
+    def results_dir(self):
+        return Path(os.path.expandvars("$wdata")) / self.rel_results_dir
+
+    @property
+    def val_sites_ffp(self):
+        if self.rel_val_sites_ffp is not None:
+            return Path(os.path.expandvars("$wdata")) / self.rel_val_sites_ffp
+        return None
+
+    @property
+    def obs_data_ffp(self):
+        return Path(os.path.expandvars("$wdata")) / self.rel_obs_data_ffp
+
     def to_dict(self):
         return {
-            "n_epochs": int(self.n_epochs),
-            "batch_size": int(self.batch_size),
-            "n_val_events": int(self.n_val_events),
-            "n_val_sites": int(self.n_val_sites),
+            "seed": self.seed,
+            "rel_obs_data_ffp": self.rel_obs_data_ffp,
+            "max_dist": self.max_dist,
+            "n_val_events": self.n_val_events,
+            "n_val_sites": self.n_val_sites,
+            "rel_val_sites_ffp": self.rel_val_sites_ffp,
             "device": self.device,
             "ims": list(self.ims),
-            "pred_std": bool(self.pred_std),
-            "results_dir": str(
-                self.results_dir,
-            ),
+            "pred_std": self.pred_std,
+            "n_epochs": self.n_epochs,
+            "batch_size": self.batch_size,
+            "rel_results_dir": self.rel_results_dir,
         }
 
     def to_yaml(self, ffp: Path):
         mlt.utils.write_to_yaml(self.to_dict(), ffp)
 
     @classmethod
-    def from_dict(cls, d: dict):
-        d["results_dir"] = Path(d["results_dir"])
+    def from_config_kwargs(cls, config_ffp: Path, **kwargs):
+        """
+        Creates an instance from the given config.
+        If kwargs are set then they overwrite the values
+        specified in the config.
+        """
+        config_dict = mlt.utils.load_yaml(config_ffp)
 
+        for cur_key, cur_val in kwargs.items():
+            if cur_val is not None:
+                config_dict[cur_key] = cur_val
+
+        return cls(**config_dict)
+
+    @classmethod
+    def from_dict(cls, d: dict):
         return cls(**d)
 
     @classmethod
@@ -74,133 +128,149 @@ class RunConfig(NamedTuple):
         return cls.from_dict(mlt.utils.load_yaml(ffp))
 
 
+def _get_event_graph_data(
+    event: str,
+    sites: np.ndarray,
+    site_combs: np.ndarray,
+    obs_data: ObservedData,
+    scalar_feature_values,
+    site_int_feature_keys: list[str],
+    site_obs_scalar_feature_keys: list[str],
+    edge_feature_keys: list[str],
+    ims: Sequence[str],
+):
+    graph_data = []
+
+    # cur_sites = event_sites[cur_event]
+    cur_site_int_inds = np.unique(site_combs[:, 0])
+
+    # cur_scalar_feature_values = scalar_event_feature_values[cur_event]
+
+    # Get and normalise the IM data
+    cur_im_data = obs_data.get_event_data(event, sites)
+    cur_im_data = np.log(cur_im_data.loc[:, ims])
+    # cur_norm_im_data = (cur_im_data - ims_mean) / ims_std
+
+    for cur_site_int_ix in cur_site_int_inds:
+        cur_site_combs_mask = site_combs[:, 0] == cur_site_int_ix
+        cur_site_int = sites[site_combs[cur_site_combs_mask, 0][0]]
+        cur_obs_sites = sites[site_combs[cur_site_combs_mask, 1]]
+
+        # Create the site_int node features
+        cur_site_int_features = scalar_feature_values.loc[
+            cur_site_combs_mask, site_int_feature_keys
+        ].values[0]
+
+        # Create the site_obs node features
+        cur_obs_sites_features = scalar_feature_values.loc[
+            cur_site_combs_mask, site_obs_scalar_feature_keys
+        ].values
+        # Add the IM values
+        cur_obs_sites_features = np.concatenate(
+            (
+                cur_obs_sites_features,
+                cur_im_data.loc[cur_obs_sites, ims].values,
+            ),
+            axis=1,
+        )
+
+        # Create the edge features
+        cur_edge_features = scalar_feature_values.loc[
+            cur_site_combs_mask, edge_feature_keys
+        ].values
+
+        cur_sc_data = gdata.HeteroData()
+        cur_sc_data["site_int"].x = torch.tensor(
+            cur_site_int_features, dtype=torch.float32
+        )[None, :]
+        cur_sc_data["site_obs"].x = torch.tensor(
+            cur_obs_sites_features, dtype=torch.float32
+        )
+
+        cur_sc_data["site_obs", "informs", "site_int"].edge_index = torch.tensor(
+            [[ix, 0] for ix, cur_obs_site in enumerate(cur_obs_sites)],
+            dtype=torch.long,
+        ).T
+        cur_sc_data["site_obs", "informs", "site_int"].edge_attr = torch.tensor(
+            cur_edge_features, dtype=torch.float32
+        )
+
+        cur_sc_data["metadata"] = {
+            "event": event,
+            "site_int": cur_site_int,
+            "obs_sites": cur_obs_sites,
+        }
+
+        cur_sc_data["y"] = torch.tensor(
+            cur_im_data.loc[cur_site_int, ims].values, dtype=torch.float32
+        )[None, :]
+
+        graph_data.append(cur_sc_data)
+
+    return graph_data
+
+
 def get_graph_data(
-    db: DB,
+    obs_data: ObservedData,
     event_sites: dict[str, np.ndarray],
     event_site_combs: dict[str, np.ndarray],
     scalar_features: ml_data.ScalarFeatures,
     site_int_feature_keys: list[str],
     site_obs_scalar_feature_keys: list[str],
     edge_feature_keys: list[str],
-    ims_mean: pd.DataFrame,
-    ims_std: pd.DataFrame,
+    # ims_mean: pd.DataFrame,
+    # ims_std: pd.DataFrame,
     ims: Sequence[str],
-    # site_int_site_feature_keys: list[str] = None,
-    # site_obs_site_feature_keys: list[str] = None,
+    n_procs: int = 1,
 ):
-    # Either both or neither of site_int_site_features
-    # and site_obs_site_features should be specified
-    # assert (site_int_site_feature_keys is None and site_obs_site_feature_keys is None) or (
-    #         site_int_site_feature_keys and site_obs_site_feature_keys
-    # )
-
+    # Create the scalar features tensors
     scalar_event_feature_values, scalar_feature_columns = (
         ml_data.create_scalar_feature_tensor(
             event_sites, scalar_features, event_site_combs
         )
     )
 
-    # site_int_site_feature_ind = None
-    # site_obs_site_feature_ind = None
-    # if site_int_site_feature_keys is not None:
-    #     site_int_site_feature_ind = [site_int_feature_keys.index(cur_site_feature) for cur_site_feature in site_int_site_feature_keys]
-    #     site_obs_site_feature_ind = [site_obs_scalar_feature_keys.index(cur_site_feature) for cur_site_feature in site_obs_site_feature_keys]
     n_site_obs_scalar_features = len(site_obs_scalar_feature_keys)
     site_obs_scalar_feature_ind = np.arange(n_site_obs_scalar_features)
 
     # Create the graph data objects
     graph_data = []
-    for cur_event, cur_site_combs in tqdm.tqdm(event_site_combs.items()):
-        cur_sites = event_sites[cur_event]
-        cur_site_int_inds = np.unique(cur_site_combs[:, 0])
-
-        cur_scalar_feature_values = scalar_event_feature_values[cur_event]
-
-        # Get and normalise the IM data
-        cur_im_data = db.get_obs_data(cur_event, cur_sites)
-        cur_im_data = np.log(cur_im_data.loc[:, ims])
-        # cur_norm_im_data = (cur_im_data - ims_mean) / ims_std
-
-        for cur_site_int_ix in cur_site_int_inds:
-            cur_site_combs_mask = cur_site_combs[:, 0] == cur_site_int_ix
-            cur_site_int = cur_sites[cur_site_combs[cur_site_combs_mask, 0][0]]
-            cur_obs_sites = cur_sites[cur_site_combs[cur_site_combs_mask, 1]]
-
-            # Create the site_int node features
-            cur_site_int_features = cur_scalar_feature_values.loc[
-                cur_site_combs_mask, site_int_feature_keys
-            ].values[0]
-
-            # Create the site_obs node features
-            cur_obs_sites_features = cur_scalar_feature_values.loc[
-                cur_site_combs_mask, site_obs_scalar_feature_keys
-            ].values
-            # Add the IM values
-            cur_obs_sites_features = np.concatenate(
-                (
-                    cur_obs_sites_features,
-                    cur_im_data.loc[cur_obs_sites, ims].values,
-                ),
-                axis=1,
+    if n_procs == 1:
+        for cur_event, cur_site_combs in tqdm.tqdm(event_site_combs.items()):
+            graph_data.append(
+                _get_event_graph_data(
+                    cur_event,
+                    event_sites[cur_event],
+                    cur_site_combs,
+                    obs_data,
+                    scalar_event_feature_values[cur_event],
+                    site_int_feature_keys,
+                    site_obs_scalar_feature_keys,
+                    edge_feature_keys,
+                    ims,
+                )
+            )
+    else:
+        with mp.Pool(n_procs) as pool:
+            graph_data = pool.starmap(
+                _get_event_graph_data,
+                [
+                    (
+                        cur_event,
+                        event_sites[cur_event],
+                        cur_site_combs,
+                        obs_data,
+                        scalar_event_feature_values[cur_event],
+                        site_int_feature_keys,
+                        site_obs_scalar_feature_keys,
+                        edge_feature_keys,
+                        ims,
+                    )
+                    for cur_event, cur_site_combs in event_site_combs.items()
+                ],
             )
 
-            # Create the edge features
-            cur_edge_features = cur_scalar_feature_values.loc[
-                cur_site_combs_mask, edge_feature_keys
-            ].values
-
-            cur_sc_data = gdata.HeteroData()
-            cur_sc_data["site_int"].x = torch.tensor(
-                cur_site_int_features, dtype=torch.float32
-            )[None, :]
-            cur_sc_data["site_obs"].x = torch.tensor(
-                cur_obs_sites_features, dtype=torch.float32
-            )
-
-            cur_sc_data["site_obs", "informs", "site_int"].edge_index = torch.tensor(
-                [[ix, 0] for ix, cur_obs_site in enumerate(cur_obs_sites)],
-                dtype=torch.long,
-            ).T
-            cur_sc_data["site_obs", "informs", "site_int"].edge_attr = torch.tensor(
-                cur_edge_features, dtype=torch.float32
-            )
-
-            # cur_sc_data["site_obs"].scalar_feature_ind = torch.tensor(
-            #     site_obs_scalar_feature_ind, dtype=torch.int
-            # )[None, :]
-            # cur_sc_data["site_int"].scalar_feature_ind = torch.tensor(
-            #     np.arange(len(site_int_feature_keys)), dtype=torch.int
-            # )[None, :]
-            #
-            # cur_sc_data["site_obs"].im_ind = torch.tensor(
-            #     np.arange(
-            #         n_site_obs_scalar_features + 1,
-            #         n_site_obs_scalar_features + len(ims),
-            #     ),
-            #     dtype=torch.int,
-            # )[None, :]
-
-            # Indices for the site-specific features
-            # if site_int_site_feature_ind is not None:
-            #     cur_sc_data["site_int"].site_feature_ind = torch.tensor(
-            #         site_int_site_feature_ind, dtype=torch.int16
-            #     )
-            #     cur_sc_data["site_obs"].site_feature_ind = torch.tensor(
-            #         site_obs_site_feature_ind, dtype=torch.int16
-            #     )
-
-            cur_sc_data["metadata"] = {
-                "event": cur_event,
-                "site_int": cur_site_int,
-                "obs_sites": cur_obs_sites,
-            }
-
-            cur_sc_data["y"] = torch.tensor(
-                cur_im_data.loc[cur_site_int, ims].values, dtype=torch.float32
-            )[None, :]
-
-            graph_data.append(cur_sc_data)
-
+    graph_data = list(itertools.chain(*graph_data))
     return graph_data, site_obs_scalar_feature_ind
 
 
@@ -266,15 +336,16 @@ def train(
         ### Validation
         gnn_model.eval()
         n_graphs = 0
-        for cur_batch in val_loader:
-            cur_batch = cur_batch.to(run_config.device)
-            cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
+        with torch.no_grad:
+            for cur_batch in val_loader:
+                cur_batch = cur_batch.to(run_config.device)
+                cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
-            out = gnn_model(cur_batch)
-            loss = reduce_loss(compute_loss(out, cur_y, run_config.pred_std))
+                out = gnn_model(cur_batch)
+                loss = reduce_loss(compute_loss(out, cur_y, run_config.pred_std))
 
-            metrics["loss_hist_val"][cur_epoch_ix] += loss.item()
-            n_graphs += cur_batch.num_graphs
+                metrics["loss_hist_val"][cur_epoch_ix] += loss.item()
+                n_graphs += cur_batch.num_graphs
 
         metrics["loss_hist_val"][cur_epoch_ix] /= n_graphs
 
@@ -334,9 +405,7 @@ def get_predictions(
             warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
             cur_result.loc[:, loss_keys] = cur_loss.cpu().numpy(force=True)
             cur_result.loc[:, "loss"] = (
-                reduce_loss(cur_loss, dim=1)
-                .cpu()
-                .numpy(force=True)
+                reduce_loss(cur_loss, dim=1).cpu().numpy(force=True)
             )
 
         # Index

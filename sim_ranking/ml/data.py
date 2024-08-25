@@ -248,7 +248,6 @@ def _station_df_sanity_check(station_df: pd.DataFrame, site_features: Sequence[s
 def get_valid_site_ints(
     event_sites: Dict[str, np.ndarray],
     record_df: pd.DataFrame,
-    station_df: pd.DataFrame,
 ):
     """
     Gets the list of site of interests per event that experience
@@ -263,8 +262,6 @@ def get_valid_site_ints(
         Available sites per event
     record_df: Dataframe
         Record data
-    station_df: Dataframe
-        Station data
 
     Returns
     -------
@@ -276,23 +273,14 @@ def get_valid_site_ints(
     from empirical.util.classdef import TectType, GMM
     from empirical.util.openquake_wrapper_vectorized import oq_run
 
-    # Check that all event-sites are available in the record dataframe
-    assert all([
-        np.all(np.isin(event_sites[cur_event], cur_df.site_id.values.astype(str)))
-        for cur_event, cur_df in record_df.groupby("event_id")
-    ])
+    # Check for nans
+    assert np.all(~record_df.isna())
 
     # Create the rupture dataframe
     rupture_df = record_df.copy(True)
-    rupture_df = rupture_df.merge(
-        station_df[["vs30", "z1.0"]], left_on="site_id", right_index=True, how="inner"
-    )
-    if (n_records_diff := record_df.shape[0] - rupture_df.shape[0]) > 0:
-        print(f"Dropped {n_records_diff} records due to missing site data")
 
     # Constant inputs
     rupture_df["mag"] = 6.0
-    rupture_df["r_jb"] = rupture_df["r_rup"]
     rupture_df["rake"] = 45.0
     rupture_df["dip"] = 45.0
     rupture_df["z_tor"] = 0.0
@@ -300,17 +288,11 @@ def get_valid_site_ints(
     # Rename the columns to be in line what openquake expects
     rupture_df = rupture_df.rename(
         columns={
-            "z_tor": "ztor",
-            "r_rup": "rrup",
-            "r_jb": "rjb",
             "r_x": "rx",
-            "z1.0": "z1pt0",
+            "z1p0": "z1pt0",
         }
     )
     rupture_df["vs30measured"] = True
-
-    # Check for nans
-    assert rupture_df.isna().sum().sum() == 0
 
     # Get PGA results
     with warnings.catch_warnings():
@@ -335,4 +317,5 @@ def get_valid_site_ints(
     }
     valid_int_sites = np.unique(pga_result.site_id.values.astype(str))
 
+    print(f"Valid sites of interests: {pga_result.shape[0]}/{record_df.shape[0]}")
     return valid_int_sites, valid_event_int_sites

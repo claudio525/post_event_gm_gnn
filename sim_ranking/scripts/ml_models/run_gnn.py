@@ -15,7 +15,6 @@ import ml_tools as mlt
 import sim_ranking as sr
 import spatial_hazard as sh
 
-
 device = "cpu"
 if torch.cuda.is_available():
     device = "cuda"
@@ -23,63 +22,39 @@ if torch.cuda.is_available():
 print(f"Using device: {device.upper()}")
 
 
-def run_gnn(
-    rel_db_ffp: Path = typer.Argument(
-        ...,
-        help="Relative path to the database file with "
-        "respect to $wdata env variable",
-    ),
-    max_dist: float = typer.Option(
-        50,
-        help="Maximum allowed distance of an observation "
-        "site from the site of interest",
-    ),
-    out_dir: Path = typer.Option(..., help="Output directory"),
-    n_epochs: int = typer.Option(100, help="Number of epochs for training"),
-    batch_size: int = typer.Option(64, help="Batch size"),
-    seed: int = typer.Option(None),
-    n_val_events: int = typer.Option(100, help="Number of validation events"),
-    n_val_sites: int = typer.Option(100, help="Number of validation sites"),
-):
-    # Config
-    run_config = sr.ml.gnn_gm.RunConfig(
-        n_epochs=n_epochs,
-        batch_size=batch_size,
-        n_val_events=n_val_events,
-        n_val_sites=n_val_sites,
-        device=device,
-        ims=sr.constants.PSA_KEYS,
-        pred_std=True,
-        results_dir=out_dir,
+def run_gnn(config_ffp: Path, n_epochs: int = None):
+    ### Create the run config
+    run_config = sr.ml.gnn_gm.RunConfig.from_config_kwargs(
+        config_ffp, n_epochs=n_epochs, ims=sr.constants.PSA_KEYS, device=device
     )
 
     ### Data loading
-    db_ffp = Path(os.path.expandvars("$wdata")) / rel_db_ffp
-    db = sr.db.DB(db_ffp)
-
-    events = db.get_avail_events(data_source=None)
+    obs_data = sr.ObservedData.from_nzgmdb_flat(run_config.obs_data_ffp)
+    obs_data.drop_nan()
+    events, all_sites = obs_data.events, obs_data.sites
     print(f"Number of events: {len(events)}")
 
-    # Get all relevant sites across all events
-    all_sites = db.get_avail_sites()
-
-    ### Data setup
-    # Get the sites per event
     start_time = time.time()
-    event_sites = db.get_event_sites()
+    event_sites = obs_data.event_sites
     print(f"Took {time.time() - start_time} to get event sites")
 
+    ### Data setup
     # Get the set of valid site-interests per event
     print(f"Getting valid sites of interest")
     valid_int_sites, valid_event_int_sites = sr.ml.data.get_valid_site_ints(
-        event_sites, db.get_record_df(), db.get_site_df()
+        event_sites, obs_data.record_df.drop(columns=obs_data.IM_COLUMNS)
     )
+    events = np.intersect1d(events, np.asarray(list(valid_event_int_sites.keys())))
+    print(f"Number of valid events: {len(events)}/{len(obs_data.events)}")
+    # valid_sc_ids = np.concatenate([mlt.array_utils.numpy_str_join("_", cur_event, cur_sites)  for cur_event, cur_sites in valid_event_int_sites.items()])
+
+    # Set the random seed
+    if run_config.seed is not None:
+        print(f"Using numpy random seed: {run_config.seed}")
+        np.random.seed(run_config.seed)
 
     # Split into training and validation
-    if seed is not None:
-        print(f"Using numpy random seed: {seed}")
-        np.random.seed(seed)
-    val_events = np.random.choice(events, n_val_events, replace=False)
+    val_events = np.random.choice(events, run_config.n_val_events, replace=False)
     train_events = np.setdiff1d(events, val_events)
 
     print(f"----------------- Events Summary -----------------")
@@ -87,7 +62,12 @@ def run_gnn(
     print(f"Number of training events: {train_events.size}")
     print(f"Number of validation events: {val_events.size}")
 
-    val_int_sites = np.random.choice(valid_int_sites, n_val_sites, replace=False)
+    if run_config.val_sites_ffp is not None:
+        val_int_sites = np.load(run_config.val_sites_ffp)
+    else:
+        val_int_sites = np.random.choice(
+            valid_int_sites, run_config.n_val_sites, replace=False
+        )
     train_int_sites = np.setdiff1d(valid_int_sites, val_int_sites)
     obs_sites = np.setdiff1d(all_sites, val_int_sites)
 
@@ -106,12 +86,11 @@ def run_gnn(
     event_feature_keys = scalar_feature_keys["event"]
     site_feature_keys = scalar_feature_keys["site"]
 
-    event_df = db.get_event_df()
-    record_df = db.get_record_df()
+    event_df = obs_data.event_df.copy().loc[events]
+    record_df = obs_data.record_df.copy()
+    station_df = obs_data.site_df.copy()
 
     print(f"Computing distance matrix")
-    station_df = db.get_site_df()
-    all_sites = db.get_avail_sites()
     dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, station_df)
 
     ### Scalar Features
@@ -147,7 +126,7 @@ def run_gnn(
         station_df,
         record_df,
         dist_matrix,
-        max_dist,
+        run_config.max_dist,
     )
     scalar_features = sr.ml.data.ScalarFeatures(
         event_features_df,
@@ -164,9 +143,8 @@ def run_gnn(
 
     # Compute mean and standard deviation for each period
     # for normalisation (only training events)
-    obs_data = db.get_obs_df()
-    ims_mean = np.mean(np.log(obs_data.loc[:, run_config.ims]), axis=0)
-    ims_std = np.std(np.log(obs_data.loc[:, run_config.ims]), axis=0)
+    # ims_mean = np.mean(np.log(record_df.loc[:, run_config.ims]), axis=0)
+    # ims_std = np.std(np.log(record_df.loc[:, run_config.ims]), axis=0)
 
     print(f"Creating site combinations")
     train_site_combs, train_event_sites = sr.ml.data.compute_site_combinations(
@@ -176,7 +154,7 @@ def run_gnn(
         dist_matrix,
         obs_sites,
         train_int_sites,
-        max_dist=max_dist,
+        max_dist=run_config.max_dist,
     )
     val_site_combs, val_event_sites = sr.ml.data.compute_site_combinations(
         event_sites,
@@ -185,28 +163,28 @@ def run_gnn(
         dist_matrix,
         obs_sites,
         val_int_sites,
-        max_dist=max_dist,
+        max_dist=run_config.max_dist,
     )
 
     edge_feature_keys = ["dist", "angular_dist"]
     site_int_site_feature_keys = [
         "vs30_site_int",
-        "z1.0_site_int",
-        "z2.5_site_int",
+        "z1p0_site_int",
+        "z2p5_site_int",
         "tsite_site_int",
     ]
     site_int_feature_keys = site_int_site_feature_keys + [
-        "r_rup_site_int",
+        "rrup_site_int",
         "mag",
     ]
     site_obs_site_feature_keys = [
         "vs30_site_obs",
-        "z1.0_site_obs",
-        "z2.5_site_obs",
+        "z1p0_site_obs",
+        "z2p5_site_obs",
         "tsite_site_obs",
     ]
     site_obs_scalar_feature_keys = site_obs_site_feature_keys + [
-        "r_rup_site_obs",
+        "rrup_site_obs",
     ]
 
     site_int_n_node_features = len(site_int_feature_keys)
@@ -214,31 +192,33 @@ def run_gnn(
 
     print(f"Getting graph data")
     train_graph_data, site_obs_scalar_feature_ind = sr.ml.gnn_gm.get_graph_data(
-        db,
+        obs_data,
         train_event_sites,
         train_site_combs,
         scalar_features,
         site_int_feature_keys,
         site_obs_scalar_feature_keys,
         edge_feature_keys,
-        ims_mean,
-        ims_std,
+        # ims_mean,
+        # ims_std,
         run_config.ims,
         # site_int_site_feature_keys,
         # site_obs_site_feature_keys
+        n_procs=8
     )
 
     val_graph_data, _ = sr.ml.gnn_gm.get_graph_data(
-        db,
+        obs_data,
         val_event_sites,
         val_site_combs,
         scalar_features,
         site_int_feature_keys,
         site_obs_scalar_feature_keys,
         edge_feature_keys,
-        ims_mean,
-        ims_std,
+        # ims_mean,
+        # ims_std,
         run_config.ims,
+        n_procs=8
     )
 
     train_loader = gloader.DataLoader(
@@ -259,7 +239,6 @@ def run_gnn(
         torch.from_numpy(site_obs_scalar_feature_ind),
     )
     gnn_model.to(device)
-
 
     print(f"----------------- Training -----------------")
     print(f"Number of training graphs: {len(train_graph_data)}")
@@ -311,7 +290,6 @@ def run_gnn(
         "best_model_loss": float(metrics["loss_hist_val"][best_model_epoch]),
     }
     mlt.utils.write_to_yaml(metadata, cur_out_dir / "metadata.yaml")
-
 
 
 if __name__ == "__main__":

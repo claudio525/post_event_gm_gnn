@@ -39,17 +39,17 @@ class ScalarFeatureSetKey(str, Enum):
 
 ALL_SCALAR_FEATURE_KEYS = {
     "event": ["mag"],
-    "site": ["vs30", "z1.0", "z2.5", "tsite"],
+    "site": ["vs30", "z1p0", "z2p5", "tsite"],
     "site_to_site": ["dist"],
-    "event_site": ["r_rup"],
+    "event_site": ["rrup"],
     "event_site_to_site": ["angular_dist"],
 }
 
 EMP_GEN_SCALAR_FEATURE_KEYS = {
     "event": ["mag"],
-    "site": ["vs30", "z1.0", "z2.5"],
+    "site": ["vs30", "z1p0", "z2p5"],
     "site_to_site": ["dist"],
-    "event_site": ["r_rup"],
+    "event_site": ["rrup"],
     "event_site_to_site": [],
 }
 

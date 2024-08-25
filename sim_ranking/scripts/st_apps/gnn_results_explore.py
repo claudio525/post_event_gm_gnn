@@ -39,7 +39,7 @@ def get_observed_data(nzgmdb_ffp: Path) -> sr.ObservedData:
 
 @st.cache_data(hash_funcs={sr.ObservedData: lambda x: hash(x.data_source)})
 def get_dist_matrix(obs_data: sr.ObservedData) -> pd.DataFrame:
-    return sh.im_dist.calculate_distance_matrix(obs_data.all_sites, obs_data.site_df)
+    return sh.im_dist.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
 
 
 @st.cache_data
@@ -555,7 +555,7 @@ def run(
 
     shared_data = SharedData(
         obs_data=obs_data,
-        obs_sites=obs_data.all_sites,
+        obs_sites=obs_data.sites,
         dist_matrix=dist_matrix,
         gnn_result_id=gnn_result_id,
         gnn_metrics=gnn_metrics,

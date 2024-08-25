@@ -25,7 +25,7 @@ class ObservedData:
         "event_lat",
         "event_lon",
     ]
-    EVENT_SITE_COLS = ["rrup", "rjb"]
+    EVENT_SITE_COLS = ["rrup", "rjb", "rx"]
     IM_COLUMNS = constants.PSA_KEYS
     COLUMNS = SITE_COLS + EVENT_COLS + EVENT_SITE_COLS + IM_COLUMNS
 
@@ -34,9 +34,11 @@ class ObservedData:
         self.data_source = data_source
 
         # Cache variables
-        self._all_sites = None
+        self._sites = None
+        self._events = None
         self._site_df = None
         self._event_df = None
+        self._event_sites = None
 
     def __hash__(self):
         return hash(self.data_source)
@@ -44,18 +46,27 @@ class ObservedData:
     def get_event_data(
         self, event_id: str, sites: Optional[Sequence[str]] = None
     ) -> pd.DataFrame:
+        """Gets data for the specified event and sites."""
         result_df = self.record_df[self.record_df["event_id"] == event_id]
 
         if sites is not None:
             result_df = result_df[result_df["site_id"].isin(sites)]
 
-        return result_df
+        return result_df.set_index("site_id")
 
     @property
-    def all_sites(self):
-        if self._all_sites is None:
-            self._all_sites = self.record_df.site_id.unique().astype(str)
-        return self._all_sites
+    def sites(self):
+        """All sites in the observed data."""
+        if self._sites is None:
+            self._sites = self.record_df.site_id.unique().astype(str)
+        return self._sites
+
+    @property
+    def events(self):
+        """All events in the observed data."""
+        if self._events is None:
+            self._events = self.record_df.event_id.unique().astype(str)
+        return self._events
 
     @property
     def site_df(self):
@@ -78,8 +89,16 @@ class ObservedData:
             ).rename(columns={"event_lat": "lat", "event_lon": "lon"})
         return self._event_df
 
+    @property
+    def event_sites(self):
+        if self._event_sites is None:
+            self._event_sites = {}
+            for cur_event, cur_group in self.record_df.groupby("event_id"):
+                self._event_sites[cur_event] = cur_group.site_id.unique().astype(str)
+        return self._event_sites
+
     @classmethod
-    def from_nzgmdb_flat(cls, nzgmdb_flat_ffp: Path):
+    def from_nzgmdb_flat(cls, nzgmdb_flat_ffp: Path, event_site_id_index: bool = True):
         site_cols_map = {
             "sta": "site_id",
             "Vs30": "vs30",
@@ -101,6 +120,7 @@ class ObservedData:
         event_site_map = {
             "r_jb": "rjb",
             "r_rup": "rrup",
+            "r_x": "rx",
         }
         mapping_dict = site_cols_map | event_map | event_site_map
 
@@ -116,7 +136,21 @@ class ObservedData:
         # Drop any columns not of interest
         record_df = record_df[cls.COLUMNS]
 
+        if event_site_id_index:
+            index = mlt.array_utils.numpy_str_join(
+                "_",
+                record_df["event_id"].values.astype(str),
+                record_df["site_id"].values.astype(str),
+            )
+            record_df.index = index
+
         return cls(record_df, nzgmdb_flat_ffp)
+
+    def drop_nan(self):
+        """Drops any rows with NaN values."""
+        nan_mask = self.record_df.isna().any(axis=1)
+        self.record_df = self.record_df[~nan_mask]
+        print(f"Dropped {nan_mask.sum()}/{nan_mask.shape[0]} rows with NaN values.")
 
 
 class CIMResults:
@@ -125,7 +159,9 @@ class CIMResults:
         self, emp_cim_results: dict[str, conditional.ConditionalMVNDistribution]
     ):
         self.emp_cim_results = emp_cim_results
-        self.ims = np.asarray([str(cur_im) for cur_im in list(emp_cim_results.values())[0].IMs])
+        self.ims = np.asarray(
+            [str(cur_im) for cur_im in list(emp_cim_results.values())[0].IMs]
+        )
 
         mean_dfs, std_dfs = [], []
         for cur_event in self.emp_cim_results.keys():
@@ -134,12 +170,16 @@ class CIMResults:
             cur_mean_df = cur_result.cond_lnIM_mean_df.copy()
             cur_mean_df["site_int"] = cur_mean_df.index
             cur_mean_df["event_id"] = cur_event
-            cur_mean_df.index = mlt.array_utils.numpy_str_join("_", cur_event, cur_mean_df.site_int)
+            cur_mean_df.index = mlt.array_utils.numpy_str_join(
+                "_", cur_event, cur_mean_df.site_int
+            )
 
             cur_std_df = cur_result.cond_lnIM_std_df.copy()
             cur_std_df["site_int"] = cur_std_df.index
             cur_std_df["event_id"] = cur_event
-            cur_std_df.index = mlt.array_utils.numpy_str_join("_", cur_event, cur_std_df.site_int)
+            cur_std_df.index = mlt.array_utils.numpy_str_join(
+                "_", cur_event, cur_std_df.site_int
+            )
 
             mean_dfs.append(cur_mean_df)
             std_dfs.append(cur_std_df)
@@ -162,7 +202,7 @@ class CIMResults:
             cur_obs_df = obs_df.loc[obs_df.event_id == cur_event].set_index("site_id")
             cur_residual = pd.DataFrame(
                 data=np.log(cur_obs_df.loc[cur_emp_mean_df.index, self.ims].values)
-                     - cur_emp_mean_df.loc[cur_emp_mean_df.index, self.ims].values,
+                - cur_emp_mean_df.loc[cur_emp_mean_df.index, self.ims].values,
                 columns=self.ims,
                 index=cur_emp_mean_df.index,
             )
@@ -184,9 +224,7 @@ class CIMResults:
         emp_cim_results = {}
         no_data = []
         for event in events:
-            cur_result = conditional.load_emp_cim_data(
-                data_dir, event, method
-            )
+            cur_result = conditional.load_emp_cim_data(data_dir, event, method)
             if cur_result is None:
                 no_data.append(event)
                 continue
