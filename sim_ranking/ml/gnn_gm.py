@@ -57,6 +57,10 @@ class RunConfig:
     # Base output directory
     rel_results_dir: str
 
+    ### Optional settings
+    # Events to be ignored
+    test_events: Sequence[str] = None
+
     def __post_init__(self):
         assert self.n_val_events > 0
         assert self.rel_val_sites_ffp is not None or self.n_val_sites > 0
@@ -94,6 +98,7 @@ class RunConfig:
             "n_val_events": self.n_val_events,
             "n_val_sites": self.n_val_sites,
             "rel_val_sites_ffp": self.rel_val_sites_ffp,
+            "test_events": list(self.test_events),
             "device": self.device,
             "ims": list(self.ims),
             "pred_std": self.pred_std,

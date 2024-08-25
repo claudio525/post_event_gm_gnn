@@ -303,6 +303,9 @@ def scenario_viewer(gnn_results: pd.DataFrame, shared_data: SharedData, tab_type
     st.divider()
 
     pred_im_keys = mlt.array_utils.numpy_str_join("_", sr.constants.PSA_KEYS, "pred")
+    pred_std_im_keys = mlt.array_utils.numpy_str_join(
+        "_", sr.constants.PSA_KEYS, "pred_std"
+    )
 
     col1, col2 = st.columns(2)
 
@@ -329,8 +332,27 @@ def scenario_viewer(gnn_results: pd.DataFrame, shared_data: SharedData, tab_type
             sr.constants.PERIODS,
             np.exp(cur_gnn_results.loc[pred_im_keys].values.astype(float)),
             c="blue",
-            label="ML - Mean",
+            label="ML",
             marker=".",
+        )
+        ax.plot(
+            sr.constants.PERIODS,
+            np.stack(
+                (
+                    np.exp(
+                        cur_gnn_results.loc[pred_im_keys].values.astype(float)
+                        + cur_gnn_results.loc[pred_std_im_keys].values.astype(float)
+                    ),
+                    np.exp(
+                        cur_gnn_results.loc[pred_im_keys].values.astype(float)
+                        - cur_gnn_results.loc[pred_std_im_keys].values.astype(float)
+                    ),
+                ),
+                axis=1,
+            ),
+            c="blue",
+            linestyle="--",
+            linewidth=1.0,
         )
 
     # Observed
@@ -428,7 +450,7 @@ def run_general(shared_data: SharedData):
         sel_metric_keys,
         ax=ax,
         best_epoch=shared_data.gnn_metadata["best_model_epoch"],
-        y_lim=(0.0, 0.2),
+        y_lim=(0.0, 0.02),
     )
     # mlt.plotting.plot_metrics(load_training_metrics(results_dir), ax=ax)
     st.pyplot(fig, use_container_width=False)

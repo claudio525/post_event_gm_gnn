@@ -48,6 +48,10 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
     print(f"Number of valid events: {len(events)}/{len(obs_data.events)}")
     # valid_sc_ids = np.concatenate([mlt.array_utils.numpy_str_join("_", cur_event, cur_sites)  for cur_event, cur_sites in valid_event_int_sites.items()])
 
+    if run_config.test_events is not None:
+        events = np.setdiff1d(events, run_config.test_events)
+        print(f"Number of events after removing test events: {len(events)}")
+
     # Set the random seed
     if run_config.seed is not None:
         print(f"Using numpy random seed: {run_config.seed}")
@@ -288,6 +292,8 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
     metadata = {
         "best_model_epoch": int(best_model_epoch),
         "best_model_loss": float(metrics["loss_hist_val"][best_model_epoch]),
+        "n_train_scenarios": len(train_graph_data),
+        "n_val_scenarios": len(val_graph_data),
     }
     mlt.utils.write_to_yaml(metadata, cur_out_dir / "metadata.yaml")
 
