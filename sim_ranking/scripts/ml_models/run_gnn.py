@@ -59,6 +59,8 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
 
     # Split into training and validation
     val_events = np.random.choice(events, run_config.n_val_events, replace=False)
+    if run_config.val_events is not None:
+        val_events = np.intersect1d(val_events, run_config.val_events)
     train_events = np.setdiff1d(events, val_events)
 
     print(f"----------------- Events Summary -----------------")

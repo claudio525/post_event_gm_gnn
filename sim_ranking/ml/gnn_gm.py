@@ -58,6 +58,8 @@ class RunConfig:
     rel_results_dir: str
 
     ### Optional settings
+    # Events to be used for validation
+    val_events: Sequence[str] = None
     # Events to be ignored
     test_events: Sequence[str] = None
 
@@ -98,6 +100,9 @@ class RunConfig:
             "n_val_events": self.n_val_events,
             "n_val_sites": self.n_val_sites,
             "rel_val_sites_ffp": self.rel_val_sites_ffp,
+            "val_events": (
+                list(self.val_events) if self.val_events is not None else None
+            ),
             "test_events": (
                 list(self.test_events) if self.test_events is not None else None
             ),
