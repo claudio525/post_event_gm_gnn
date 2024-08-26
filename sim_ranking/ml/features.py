@@ -6,10 +6,6 @@ import pandas as pd
 from pyproj import Transformer
 
 
-def pre_process_dist(dist_array: np.ndarray, max_dist: float):
-    return ((dist_array / max_dist) * 2) - 1
-
-
 def compute_angular_distance(
     station_df: pd.DataFrame,
     event_df: pd.DataFrame,
@@ -39,15 +35,20 @@ def compute_angular_distance(
 
         source_to_site_vecs = cur_site_coords - cur_epi
         cur_site_to_site_angle = np.arccos(
-            np.clip(einops.einsum(source_to_site_vecs, source_to_site_vecs, "i k, j k -> i j")
-            / (
-                (
-                    np.linalg.norm(source_to_site_vecs, axis=1)[:, None]
-                    * np.linalg.norm(source_to_site_vecs, axis=1)[None, :]
+            np.clip(
+                einops.einsum(
+                    source_to_site_vecs, source_to_site_vecs, "i k, j k -> i j"
                 )
-            ), -1.0, 1.0)
+                / (
+                    (
+                        np.linalg.norm(source_to_site_vecs, axis=1)[:, None]
+                        * np.linalg.norm(source_to_site_vecs, axis=1)[None, :]
+                    )
+                ),
+                -1.0,
+                1.0,
+            )
         )
-
 
         # t = np.full((cur_sites.size, cur_sites.size), np.nan)
         # for i in range(cur_sites.size):

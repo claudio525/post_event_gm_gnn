@@ -15,63 +15,6 @@ class RankingMethod(Enum):
     ml_prob = 4
     ml_prob_per_im = 5
 
-
-METHOD_RESULT_DIR_NAME_MAPPING = {
-    RankingMethod.emp_cMVN: "empirical_cMVN",
-    RankingMethod.sim_cMVN: "sim_cMVN",
-    RankingMethod.sim_cMVN_emp_corr: "sim_cMVN_emp_corr",
-}
-
-RESULTS_DIR_NAME_METHOD_MAPPING = {
-    v: k for k, v in METHOD_RESULT_DIR_NAME_MAPPING.items()
-}
-
-
-class ScalarFeatureSetKey(str, Enum):
-    # All available scalar features
-    all = "all"
-
-    # Only the scalar features used by the
-    # empirical models for the generation
-    # of the synthetic data
-    emp_gen = "emp_gen"
-
-
-ALL_SCALAR_FEATURE_KEYS = {
-    "event": ["mag"],
-    "site": ["vs30", "z1p0", "z2p5", "tsite"],
-    "site_to_site": ["dist"],
-    "event_site": ["rrup"],
-    "event_site_to_site": ["angular_dist"],
-}
-
-EMP_GEN_SCALAR_FEATURE_KEYS = {
-    "event": ["mag"],
-    "site": ["vs30", "z1p0", "z2p5"],
-    "site_to_site": ["dist"],
-    "event_site": ["rrup"],
-    "event_site_to_site": [],
-}
-
-SCALAR_FEATURE_SET_LOOKUP = {
-    ScalarFeatureSetKey.all: ALL_SCALAR_FEATURE_KEYS,
-    ScalarFeatureSetKey.emp_gen: EMP_GEN_SCALAR_FEATURE_KEYS,
-}
-
-
-WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP = {
-    ScalarFeatureSetKey.emp_gen: ["vs30_site_int", "vs30_site_obs", "dist"],
-    # ScalarFeatureSet.emp_gen: ["dist"],
-    ScalarFeatureSetKey.all: [
-        "vs30_site_int", "vs30_site_obs",
-        "dist",
-        "z1.0_site_int", "z1.0_site_obs",
-        "z2.5_site_int", "z2.5_site_obs",
-        "tsite_site_int", "tsite_site_obs"
-    ],
-}
-
-
 PERIODS = [
     0.01,
     0.02,

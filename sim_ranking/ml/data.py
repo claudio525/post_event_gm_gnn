@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+
 @dataclass
 class ScalarFeatures:
     event_features_data: pd.DataFrame
@@ -25,19 +26,6 @@ class ScalarFeatures:
             + len(self.site_to_site_feature_keys)
             + len(self.event_site_feature_keys) * 2
             + len(self.event_site_to_site_feature_keys)
-        )
-
-
-@dataclass
-class WeightScalarFeatures:
-    site_to_site_features_data: Dict[str, pd.DataFrame]
-    site_to_site_feature_keys: Sequence[str]
-    event_site_to_site_features_data: Dict[str, Dict[str, pd.DataFrame]]
-    event_site_to_site_feature_keys: Sequence[str]
-
-    def __post_init__(self):
-        self.n_scalar_features = len(self.site_to_site_feature_keys) + len(
-            self.event_site_to_site_feature_keys
         )
 
 
@@ -79,7 +67,6 @@ def compute_site_combinations(
 
         # All sites for the current event
         cur_sites = np.union1d(cur_int_sites, cur_obs_sites)
-
 
         # cur_sites = event_sites[cur_event]
         # cur_sites = cur_sites[
@@ -228,21 +215,13 @@ def create_scalar_feature_tensor(
                 cur_feature_df.columns.get_indexer_for(cur_site_obs),
             ]
 
-        scalar_features_values[cur_event] = pd.DataFrame(data=cur_tensor, columns=scalar_feature_columns)
+        scalar_features_values[cur_event] = pd.DataFrame(
+            data=cur_tensor, columns=scalar_feature_columns
+        )
         # scalar_features_values.append(cur_tensor)
 
     # scalar_features_values = np.concatenate(scalar_features_values, axis=0)
     return scalar_features_values, scalar_feature_columns
-
-
-def _station_df_sanity_check(station_df: pd.DataFrame, site_features: Sequence[str]):
-    """Checks that the station_df has been normalised"""
-    assert all(
-        [np.isclose(station_df[cur_feature].mean(), 0) for cur_feature in site_features]
-    )
-    assert all(
-        [np.isclose(station_df[cur_feature].std(), 1) for cur_feature in site_features]
-    )
 
 
 def get_valid_site_ints(
@@ -312,7 +291,9 @@ def get_valid_site_ints(
     # Get the valid site of interests
     pga_result = pga_result.loc[pga_result["PGA_mean"] >= np.log(0.01)]
     valid_event_int_sites = {
-        cur_event: np.intersect1d(cur_df.site_id.values.astype(str), event_sites[cur_event])
+        cur_event: np.intersect1d(
+            cur_df.site_id.values.astype(str), event_sites[cur_event]
+        )
         for cur_event, cur_df in pga_result.groupby("event_id")
     }
     valid_int_sites = np.unique(pga_result.site_id.values.astype(str))
