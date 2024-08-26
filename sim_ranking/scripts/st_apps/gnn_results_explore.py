@@ -1,3 +1,4 @@
+import time
 from typing import NamedTuple, Sequence
 from pathlib import Path
 
@@ -29,6 +30,19 @@ class SharedData(NamedTuple):
     gnn_metadata: dict
 
     emp_cim_data: dict[str, sr.conditional.ConditionalMVNDistribution] = None
+
+
+@st.cache_resource
+def load_emp_cim_data(emp_cim_results_dir: Path):
+    print(emp_cim_results_dir)
+    emp_cim_events = [
+        cur_ffp.stem for cur_ffp in emp_cim_results_dir.iterdir() if cur_ffp.is_dir()
+    ]
+    emp_cim_data = {
+        cur_event: st_utils.cim_load_cmvn_result(emp_cim_results_dir / cur_event)
+        for cur_event in emp_cim_events
+    }
+    return emp_cim_data
 
 
 @st.cache_data
@@ -558,19 +572,13 @@ def run(
 
     gnn_metadata = mlt.utils.load_yaml(gnn_result_ffp / "metadata.yaml")
 
-    emp_cim_data = None
-    if emp_cim_results_dir is not None:
-        emp_cim_events = [
-            cur_ffp.stem
-            for cur_ffp in emp_cim_results_dir.iterdir()
-            if cur_ffp.is_dir()
-        ]
-        emp_cim_data = {
-            cur_event: st_utils.cim_load_cmvn_result(
-                emp_cim_results_dir / cur_event / "empirical_cMVN"
-            )
-            for cur_event in emp_cim_events
-        }
+    start_time = time.time()
+    emp_cim_data = (
+        load_emp_cim_data(emp_cim_results_dir)
+        if emp_cim_results_dir is not None
+        else None
+    )
+    print(f"Took {time.time() - start_time} to load cIM data")
 
     ## Add check here to ensure that validation sites are matching!!
 

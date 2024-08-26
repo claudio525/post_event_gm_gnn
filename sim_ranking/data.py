@@ -320,12 +320,11 @@ def run_emp_gmms(
         site_df = site_df.rename(columns={"Vs30": "vs30", "Z1.0": "z1pt0"})
         site_df["z1pt0"] = site_df["z1pt0"] / 1000
 
-    ### Distance calculation
+
+    ### Data prep
     site_locs = np.concatenate(
         (site_df[["lon", "lat"]].values, np.zeros((site_df.shape[0], 1))), axis=1
     )
-
-    ### Data prep
     print(f"Creation of rupture dataframe")
     data_dfs = []
     for cur_event in tqdm.tqdm(events):

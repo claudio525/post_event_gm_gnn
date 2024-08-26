@@ -98,7 +98,9 @@ class RunConfig:
             "n_val_events": self.n_val_events,
             "n_val_sites": self.n_val_sites,
             "rel_val_sites_ffp": self.rel_val_sites_ffp,
-            "test_events": list(self.test_events),
+            "test_events": (
+                list(self.test_events) if self.test_events is not None else None
+            ),
             "device": self.device,
             "ims": list(self.ims),
             "pred_std": self.pred_std,
