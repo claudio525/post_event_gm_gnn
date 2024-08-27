@@ -245,7 +245,7 @@ def compute_cond_IM_distributions(
 
 def load_emp_cim_data(data_dir: Path, event: str):
     """Loads the empirical conditional IM data for the given event"""
-    result_ffp = data_dir / event / f"empirical_cMVN" / "cMVN_distributions.pickle"
+    result_ffp = data_dir / event / "cMVN_distributions.pickle"
     if result_ffp.exists():
         try:
             return ConditionalMVNDistribution.load(result_ffp)

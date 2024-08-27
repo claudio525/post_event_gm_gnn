@@ -60,7 +60,7 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
     # Split into training and validation
     val_events = np.random.choice(events, run_config.n_val_events, replace=False)
     if run_config.val_events is not None:
-        val_events = np.intersect1d(val_events, run_config.val_events)
+        val_events = np.union1d(val_events, run_config.val_events)
     train_events = np.setdiff1d(events, val_events)
 
     print(f"----------------- Events Summary -----------------")
@@ -86,9 +86,7 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
     print(f"------------------------------------------------")
 
     # Get the scalar feature keys
-    scalar_feature_keys = sr.constants.SCALAR_FEATURE_SET_LOOKUP[
-        sr.constants.ScalarFeatureSetKey.all
-    ]
+    scalar_feature_keys = sr.constants.SCALAR_FEATURE_KEYS
     event_feature_keys = scalar_feature_keys["event"]
     site_feature_keys = scalar_feature_keys["site"]
 
@@ -239,9 +237,7 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
         len(site_obs_scalar_feature_keys),
         site_int_n_node_features,
         len(edge_feature_keys),
-        [64],
-        32,
-        run_config.n_ims if not run_config.pred_std else run_config.n_ims * 2,
+        run_config,
         torch.from_numpy(site_obs_scalar_feature_ind),
     )
     gnn_model.to(device)

@@ -65,6 +65,14 @@ IM_WEIGTHS_SETS = {
 
 COMPONENTS = ["090", "000", "ver"]
 
+SCALAR_FEATURE_KEYS = {
+    "event": ["mag"],
+    "site": ["vs30", "z1p0", "z2p5", "tsite"],
+    "site_to_site": ["dist"],
+    "event_site": ["rrup"],
+    "event_site_to_site": ["angular_dist"],
+}
+
 
 CANTERBURY_REGION = [171.54, 173.12, -43.95, -43.22]
 WELLINGTON_REGION = [172.639, 176.35, -42.427, -40.475]

@@ -219,12 +219,12 @@ class CIMResults:
 
     @classmethod
     def from_dir(
-        cls, data_dir: Path, events: Sequence[str], method: constants.RankingMethod
+        cls, data_dir: Path, events: Sequence[str]
     ):
         emp_cim_results = {}
         no_data = []
         for event in events:
-            cur_result = conditional.load_emp_cim_data(data_dir, event, method)
+            cur_result = conditional.load_emp_cim_data(data_dir, event)
             if cur_result is None:
                 no_data.append(event)
                 continue

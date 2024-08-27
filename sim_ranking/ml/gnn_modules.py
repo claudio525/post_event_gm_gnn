@@ -13,6 +13,8 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.typing import Adj, Size
 import numpy as np
 
+from . import gnn_gm
+
 
 class BasicAttentionGNN(torch.nn.Module):
 
@@ -22,15 +24,14 @@ class BasicAttentionGNN(torch.nn.Module):
         n_obs_scalar_node_features: int,
         n_int_node_features: int,
         n_edge_features: int,
-        n_int_node_channels: Sequence[int],
-        fc_n_units: int,
-        n_outputs: int,
+        run_config: gnn_gm.RunConfig,
         site_obs_scalar_feature_ind: torch.Tensor,
     ):
         super().__init__()
+        self.run_config = run_config
 
         self.convs = torch.nn.ModuleList()
-        for cur_n_channels in n_int_node_channels:
+        for cur_n_channels in run_config.n_int_node_channels:
             self.convs.append(
                 gnn.HeteroConv(
                     {
@@ -42,19 +43,20 @@ class BasicAttentionGNN(torch.nn.Module):
                                     n_obs_scalar_node_features
                                     + n_edge_features
                                     + n_int_node_features,
-                                    1,
+                                    run_config.n_ims,
                                 ),
                                 nn.LeakyReLU(negative_slope=0.2),
                             ),
                             source_scalar_feature_ind=site_obs_scalar_feature_ind,
+                            pred_std=run_config.pred_std,
                         )
                     },
                     aggr="sum",
                 )
             )
 
-        self.fc1 = nn.Linear(n_int_node_channels[-1], fc_n_units)
-        self.out_fc = nn.Linear(fc_n_units, n_outputs)
+        self.fc1 = nn.Linear(run_config.n_int_node_channels[-1], run_config.fc_n_units)
+        self.out_fc = nn.Linear(run_config.fc_n_units, run_config.n_outputs)
 
     def forward(self, data: gdata.HeteroData):
         for cur_conv in self.convs:
@@ -70,6 +72,9 @@ class BasicAttentionGNN(torch.nn.Module):
         x = F.relu(self.fc1(x_site_int))
         out = self.out_fc(x)
 
+        if self.run_config.pred_std:
+            ln_im_mean, ln_im_std = out.chunk(2, dim=1)
+            return ln_im_mean, ln_im_std
         return out
 
 
@@ -81,6 +86,7 @@ class BasicAttentionConv(MessagePassing):
         out_channels: int,
         att_model: nn.Module,
         source_scalar_feature_ind: torch.Tensor,
+        pred_std: bool = True,
         **kwargs,
     ):
         """
@@ -96,6 +102,7 @@ class BasicAttentionConv(MessagePassing):
         kwargs
         """
         super().__init__(**kwargs)
+        self.pred_std = pred_std
 
         self.in_channels_target = in_channels[1]
         self.in_channels_source = in_channels[0]
@@ -156,7 +163,12 @@ class BasicAttentionConv(MessagePassing):
         # Normalise
         alpha = gutils.softmax(a, dest_ind)
 
-        return alpha * self.obs_transform(x_j)
+        if self.pred_std:
+            m = alpha.tile((1, 2)) * self.obs_transform(x_j)
+        else:
+            m = alpha * self.obs_transform(x_j)
+
+        return m
 
 
 class BasicGNN(torch.nn.Module):

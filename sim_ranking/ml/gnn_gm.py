@@ -53,6 +53,10 @@ class RunConfig:
     n_epochs: int
     # Batch size
     batch_size: int
+    # Number of site of interest node channels
+    n_int_node_channels: Sequence[int]
+    # Number of fully connected units for the output MLP
+    fc_n_units: int
 
     # Base output directory
     rel_results_dir: str
@@ -111,6 +115,8 @@ class RunConfig:
             "pred_std": self.pred_std,
             "n_epochs": self.n_epochs,
             "batch_size": self.batch_size,
+            "n_int_node_channels": list(self.n_int_node_channels),
+            "fc_n_units": self.fc_n_units,
             "rel_results_dir": self.rel_results_dir,
         }
 
@@ -289,20 +295,19 @@ def get_graph_data(
 
 
 def compute_loss(
-    pred: torch.Tensor,
+    pred_ln_im_mean: torch.Tensor,
     target: torch.Tensor,
-    pred_std: bool,
+    pred_ln_im_std: torch.Tensor = None,
     scale_constant: float = 10.0,
 ):
     """Computes the loss per sample and output"""
-    if pred_std:
-        pred_mean, pred_ln_std = pred.chunk(2, dim=1)
+    if pred_ln_im_std is not None:
         loss = F.gaussian_nll_loss(
-            pred_mean, target, torch.exp(pred_ln_std) ** 2, reduction="none"
+            pred_ln_im_mean, target, torch.exp(pred_ln_im_std) ** 2, reduction="none"
         )
         return loss * scale_constant
     else:
-        return F.mse_loss(pred, target, reduction="none") * scale_constant
+        return F.mse_loss(pred_ln_im_mean, target, reduction="none") * scale_constant
 
 
 def reduce_loss(loss: torch.Tensor, dim: int = None):
@@ -337,8 +342,8 @@ def train(
             cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
             optimizer.zero_grad()
-            out = gnn_model(cur_batch)
-            loss = reduce_loss(compute_loss(out, cur_y, run_config.pred_std))
+            pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch)
+            loss = reduce_loss(compute_loss(pred_ln_im_mean, cur_y, pred_ln_im_std=pred_ln_im_std))
             loss.backward()
             optimizer.step()
 
@@ -355,8 +360,8 @@ def train(
                 cur_batch = cur_batch.to(run_config.device)
                 cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
-                out = gnn_model(cur_batch)
-                loss = reduce_loss(compute_loss(out, cur_y, run_config.pred_std))
+                pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch)
+                loss = reduce_loss(compute_loss(pred_ln_im_mean, cur_y, pred_ln_im_std=pred_ln_im_std))
 
                 metrics["loss_hist_val"][cur_epoch_ix] += loss.item()
                 n_graphs += cur_batch.num_graphs
@@ -405,8 +410,8 @@ def get_predictions(
         ).T
         cur_result.loc[:, run_config.ims] = cur_batch["y"].cpu().numpy(force=True)
         if run_config.pred_std:
-            pred_im, pred_im_ln_std = cur_out.chunk(2, dim=1)
-            cur_result.loc[:, pred_im_keys] = pred_im.cpu().numpy(force=True)
+            pred_ln_im_mean, pred_im_ln_std = cur_out
+            cur_result.loc[:, pred_im_keys] = pred_ln_im_mean.cpu().numpy(force=True)
             cur_result.loc[:, pred_im_std_keys] = (
                 torch.exp(pred_im_ln_std).cpu().numpy(force=True)
             )
@@ -414,7 +419,7 @@ def get_predictions(
             cur_result.loc[:, pred_im_keys] = cur_out.cpu().numpy(force=True)
 
         # Loss
-        cur_loss = compute_loss(cur_out, cur_batch.y, run_config.pred_std)
+        cur_loss = compute_loss(pred_ln_im_mean, cur_batch.y, pred_ln_im_std=pred_im_ln_std)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
             cur_result.loc[:, loss_keys] = cur_loss.cpu().numpy(force=True)
