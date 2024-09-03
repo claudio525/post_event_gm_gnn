@@ -5,6 +5,8 @@ import pandas as pd
 import numpy as np
 
 import ml_tools as mlt
+import sha_calc as sha
+from labelled_data_array import LabelledDataArray
 
 from . import conditional
 from . import constants
@@ -218,9 +220,7 @@ class CIMResults:
         return residual_df
 
     @classmethod
-    def from_dir(
-        cls, data_dir: Path, events: Sequence[str]
-    ):
+    def from_dir(cls, data_dir: Path, events: Sequence[str]):
         emp_cim_results = {}
         no_data = []
         for event in events:
@@ -234,3 +234,28 @@ class CIMResults:
         if len(no_data) > 0:
             print(f"No data for events: {no_data}")
         return cls(emp_cim_results)
+
+
+class LBSiteCorrelationData:
+
+    def __init__(self, corr_data: LabelledDataArray):
+        self.corr_data = corr_data
+
+    @classmethod
+    def from_dist_matrix(cls, dist_matrix: pd.DataFrame, ims: Sequence[str]):
+        sites = dist_matrix.index
+        corr_values = []
+        for cur_im in ims:
+            r = sha.loth_baker_corr_model.get_correlations(
+                cur_im, cur_im, dist_matrix.values.ravel()
+            )
+            cur_corr_matrix = r.reshape(dist_matrix.shape)
+            np.fill_diagonal(cur_corr_matrix, 1.0)
+            corr_values.append(cur_corr_matrix)
+
+        corr_values = np.stack(corr_values, axis=-1)
+        lda = LabelledDataArray(
+            corr_values, (sites, sites, ims), ("site1", "site2", "im")
+        )
+
+        return cls(lda)
