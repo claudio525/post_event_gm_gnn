@@ -1,5 +1,6 @@
 from typing import Sequence, Optional
 from pathlib import Path
+from enum import StrEnum
 
 import pandas as pd
 import numpy as np
@@ -14,22 +15,46 @@ from . import constants
 
 class ObservedData:
 
-    SITE_COLS = ["site_id", "site_lat", "site_lon", "vs30", "tsite", "z1p0", "z2p5"]
-    EVENT_COLS = [
-        "event_id",
-        "mag",
-        "depth",
-        "rake",
-        "strike",
-        "dip",
-        "ztor",
-        "tect_type",
-        "event_lat",
-        "event_lon",
-    ]
-    EVENT_SITE_COLS = ["rrup", "rjb", "rx"]
+    class EventColEnums(StrEnum):
+        event_id = "event_id"
+        mag = "mag"
+        depth = "depth"
+        rake = "rake"
+        strike = "strike"
+        dip = "dip"
+        ztor = "ztor"
+        tect_type = "tect_type"
+        event_lat = "event_lat"
+        event_lon = "event_lon"
+
+    class SiteColEnums(StrEnum):
+        site_id = "site_id"
+        vs30 = "vs30"
+        tsite = "tsite"
+        z1p0 = "z1p0"
+        z2p5 = "z2p5"
+        site_lat = "site_lat"
+        site_lon = "site_lon"
+
+    class EventSiteColEnums(StrEnum):
+        rjb = "rjb"
+        rrup = "rrup"
+        rx = "rx"
+
+    class OtherColEnums(StrEnum):
+        fmin_h1 = "fmin_h1"
+        fmin_h2 = "fmin_h2"
+        fmin_v = "fmin_v"
+        score_h1 = "score_h1"
+        score_h2 = "score_h2"
+        score_v = "score_v"
+        mean_h_fmin = "mean_h_fmin"
+
+    SITE_COLS = list(SiteColEnums)
+    EVENT_COLS = list(EventColEnums)
+    EVENT_SITE_COLS = list(EventSiteColEnums)
     IM_COLUMNS = constants.PSA_KEYS + ["PGA", "PGV"]
-    OTHER_COLUMNS = ["fmin_h1", "fmin_h2", "fmin_v", "score_h1", "score_h2", "score_v"]
+    OTHER_COLUMNS = list(OtherColEnums)
     COLUMNS = SITE_COLS + EVENT_COLS + EVENT_SITE_COLS + IM_COLUMNS + OTHER_COLUMNS
 
     def __init__(self, record_df: pd.DataFrame, data_source: Path):
@@ -165,35 +190,39 @@ class ObservedData:
     @classmethod
     def from_nzgmdb_flat(cls, nzgmdb_flat_ffp: Path, event_site_id_index: bool = True):
         site_cols_map = {
-            "sta": "site_id",
-            "Vs30": "vs30",
-            "Tsite": "tsite",
-            "T0": "tsite",
-            "Z1.0": "z1p0",
-            "Z2.5": "z2p5",
-            "sta_lat": "site_lat",
-            "sta_lon": "site_lon",
+            "sta": cls.SiteColEnums.site_id,
+            "Vs30": cls.SiteColEnums.vs30,
+            "Tsite": cls.SiteColEnums.tsite,
+            "T0": cls.SiteColEnums.tsite,
+            "Z1.0": cls.SiteColEnums.z1p0,
+            "Z2.5": cls.SiteColEnums.z2p5,
+            "sta_lat": cls.SiteColEnums.site_lat,
+            "sta_lon": cls.SiteColEnums.site_lon,
         }
         event_map = {
-            "evid": "event_id",
-            "tect_class": "tect_type",
-            "ev_depth": "depth",
-            "z_tor": "ztor",
-            "ev_lat": "event_lat",
-            "ev_lon": "event_lon",
+            "evid": cls.EventColEnums.event_id,
+            "mag": cls.EventColEnums.mag,
+            "rake": cls.EventColEnums.rake,
+            "strike": cls.EventColEnums.strike,
+            "dip": cls.EventColEnums.dip,
+            "tect_class": cls.EventColEnums.tect_type,
+            "ev_depth": cls.EventColEnums.depth,
+            "z_tor": cls.EventColEnums.ztor,
+            "ev_lat": cls.EventColEnums.event_lat,
+            "ev_lon": cls.EventColEnums.event_lon,
         }
         event_site_map = {
-            "r_jb": "rjb",
-            "r_rup": "rrup",
-            "r_x": "rx",
+            "r_jb": cls.EventSiteColEnums.rjb,
+            "r_rup": cls.EventSiteColEnums.rrup,
+            "r_x": cls.EventSiteColEnums.rx,
         }
         other_map = {
-            "fmin_mean_X": "fmin_h1",
-            "fmin_mean_Y": "fmin_h2",
-            "fmin_mean_Z": "fmin_v",
-            "score_mean_X": "score_h1",
-            "score_mean_Y": "score_h2",
-            "score_mean_Z": "score_v",
+            "fmin_mean_X": cls.OtherColEnums.fmin_h1,
+            "fmin_mean_Y": cls.OtherColEnums.fmin_h2,
+            "fmin_mean_Z": cls.OtherColEnums.fmin_v,
+            "score_mean_X": cls.OtherColEnums.score_h1,
+            "score_mean_Y": cls.OtherColEnums.score_h2,
+            "score_mean_Z": cls.OtherColEnums.score_v,
         }
         mapping_dict = site_cols_map | event_map | event_site_map | other_map
 
@@ -218,6 +247,14 @@ class ObservedData:
             )
             record_df.index = index
 
+        if (
+            cls.OtherColEnums.fmin_h1 in record_df.columns
+            and cls.OtherColEnums.fmin_h2 in record_df.columns
+        ):
+            record_df[cls.OtherColEnums.mean_h_fmin] = record_df[
+                [cls.OtherColEnums.fmin_h1, cls.OtherColEnums.fmin_h2]
+            ].mean(axis=1)
+
         return cls(record_df, nzgmdb_flat_ffp)
 
     @classmethod
@@ -227,15 +264,12 @@ class ObservedData:
         site_cols_map = {
             "Station Name": "site_id",
             "Vs30 (m/s) selected for analysis": "vs30",
-            "T": "tsite",
-            "Z1.0": "z1p0",
-            "Z2.5": "z2p5",
-            "sta_lat": "site_lat",
-            "sta_lon": "site_lon",
+            "Station Latitude": "site_lat",
+            "Station Longitude": "site_lon",
         }
         event_map = {
-            "evid": "event_id",
-            "tect_class": "tect_type",
+            "EQID": "event_id",
+            "Earthquake Magnitude": "mag",
             "ev_depth": "depth",
             "z_tor": "ztor",
             "ev_lat": "event_lat",
