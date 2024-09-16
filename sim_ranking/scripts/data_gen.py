@@ -89,7 +89,6 @@ def gen_emp_synthetic_observed(
     mod_gm_params_df.to_csv(syn_gm_params_ffp)
 
 
-
 if __name__ == "__main__":
     app()
 

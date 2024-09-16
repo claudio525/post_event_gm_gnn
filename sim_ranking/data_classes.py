@@ -28,8 +28,9 @@ class ObservedData:
         "event_lon",
     ]
     EVENT_SITE_COLS = ["rrup", "rjb", "rx"]
-    IM_COLUMNS = constants.PSA_KEYS
-    COLUMNS = SITE_COLS + EVENT_COLS + EVENT_SITE_COLS + IM_COLUMNS
+    IM_COLUMNS = constants.PSA_KEYS + ["PGA", "PGV"]
+    OTHER_COLUMNS = ["fmin_h1", "fmin_h2", "fmin_v", "score_h1", "score_h2", "score_v"]
+    COLUMNS = SITE_COLS + EVENT_COLS + EVENT_SITE_COLS + IM_COLUMNS + OTHER_COLUMNS
 
     def __init__(self, record_df: pd.DataFrame, data_source: Path):
         self.record_df = record_df
@@ -45,6 +46,13 @@ class ObservedData:
     def __hash__(self):
         return hash(self.data_source)
 
+    def __reset_cache(self):
+        self._sites = None
+        self._events = None
+        self._site_df = None
+        self._event_df = None
+        self._event_sites = None
+
     def get_event_data(
         self, event_id: str, sites: Optional[Sequence[str]] = None
     ) -> pd.DataFrame:
@@ -55,6 +63,14 @@ class ObservedData:
             result_df = result_df[result_df["site_id"].isin(sites)]
 
         return result_df.set_index("site_id")
+
+    def __setitem__(self, column: str, value: np.ndarray | pd.Series):
+        """Support adding of columns"""
+        self.record_df[column] = value
+
+    @property
+    def n_records(self):
+        return self.record_df.shape[0]
 
     @property
     def sites(self):
@@ -99,6 +115,53 @@ class ObservedData:
                 self._event_sites[cur_event] = cur_group.site_id.unique().astype(str)
         return self._event_sites
 
+    def drop_nan(self):
+        """Drops any rows with NaN values."""
+        nan_mask = self.record_df.isna().any(axis=1)
+        self.record_df = self.record_df[~nan_mask]
+        print(f"Dropped {nan_mask.sum()}/{nan_mask.shape[0]} rows with NaN values.")
+
+    def metadata_filter(
+        self,
+        filter_dict: dict[str, tuple[float, float]] = None,
+        record_ids: Sequence[str] = None,
+    ):
+        """
+        Performs filtering on the record metadata.
+        Does not return anything, but modifies the observed data instance in place.
+
+        Parameters
+        ----------
+        filter_dict: dict
+            Dictionary of key (column name) and value (range) to filter on.
+            E.g. {"mag": (5.0, 6.0), "rrup": (0.0, 10.0)}
+        record_ids: array of strings
+            Record IDs to keep.
+        """
+        if filter_dict is not None:
+            for cur_key, cur_key_range in filter_dict.items():
+                self.record_df = self.record_df[
+                    (self.record_df[cur_key] >= cur_key_range[0])
+                    & (self.record_df[cur_key] <= cur_key_range[1])
+                ]
+        if record_ids is not None:
+            self.record_df = self.record_df[self.record_df.index.isin(record_ids)]
+
+        self.__reset_cache()
+
+    def apply_fmin_filter(self, fmin_col: str):
+        """Applies fmin filtering to pSA"""
+        max_usable_period = 1 / self.record_df[fmin_col]
+        pSA_cols = [
+            cur_col for cur_col in self.record_df.columns if cur_col.startswith("pSA")
+        ]
+
+        for cur_pSA_col in pSA_cols:
+            cur_period = float(cur_pSA_col.split("_")[1])
+            self.record_df[cur_pSA_col] = np.where(
+                cur_period > max_usable_period, np.nan, self.record_df[cur_pSA_col]
+            )
+
     @classmethod
     def from_nzgmdb_flat(cls, nzgmdb_flat_ffp: Path, event_site_id_index: bool = True):
         site_cols_map = {
@@ -124,7 +187,15 @@ class ObservedData:
             "r_rup": "rrup",
             "r_x": "rx",
         }
-        mapping_dict = site_cols_map | event_map | event_site_map
+        other_map = {
+            "fmin_mean_X": "fmin_h1",
+            "fmin_mean_Y": "fmin_h2",
+            "fmin_mean_Z": "fmin_v",
+            "score_mean_X": "score_h1",
+            "score_mean_Y": "score_h2",
+            "score_mean_Z": "score_v",
+        }
+        mapping_dict = site_cols_map | event_map | event_site_map | other_map
 
         # Load
         record_df = pd.read_csv(
@@ -136,7 +207,8 @@ class ObservedData:
         record_df.index.name = "record_id"
 
         # Drop any columns not of interest
-        record_df = record_df[cls.COLUMNS]
+        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
+        record_df = record_df[cols]
 
         if event_site_id_index:
             index = mlt.array_utils.numpy_str_join(
@@ -148,11 +220,36 @@ class ObservedData:
 
         return cls(record_df, nzgmdb_flat_ffp)
 
-    def drop_nan(self):
-        """Drops any rows with NaN values."""
-        nan_mask = self.record_df.isna().any(axis=1)
-        self.record_df = self.record_df[~nan_mask]
-        print(f"Dropped {nan_mask.sum()}/{nan_mask.shape[0]} rows with NaN values.")
+    @classmethod
+    def from_nga_west2_flat(
+        cls, nga_west2_flat_ffp: Path, event_site_id_index: bool = True
+    ):
+        site_cols_map = {
+            "Station Name": "site_id",
+            "Vs30 (m/s) selected for analysis": "vs30",
+            "T": "tsite",
+            "Z1.0": "z1p0",
+            "Z2.5": "z2p5",
+            "sta_lat": "site_lat",
+            "sta_lon": "site_lon",
+        }
+        event_map = {
+            "evid": "event_id",
+            "tect_class": "tect_type",
+            "ev_depth": "depth",
+            "z_tor": "ztor",
+            "ev_lat": "event_lat",
+            "ev_lon": "event_lon",
+        }
+        event_site_map = {
+            "r_jb": "rjb",
+            "r_rup": "rrup",
+            "r_x": "rx",
+        }
+
+        record_df = pd.read_excel(nga_west2_flat_ffp, index_col=0)
+
+        print(f"wtf")
 
 
 class CIMResults:

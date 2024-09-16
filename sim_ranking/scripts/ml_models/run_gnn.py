@@ -41,7 +41,7 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
     ### Data setup
     # Get the set of valid site-interests per event
     print(f"Getting valid sites of interest")
-    valid_int_sites, valid_event_int_sites = sr.ml.data.get_valid_site_ints(
+    valid_int_sites, valid_event_int_sites, _ = sr.ml.data.get_valid_site_ints(
         event_sites, obs_data.record_df.drop(columns=obs_data.IM_COLUMNS)
     )
     events = np.intersect1d(events, np.asarray(list(valid_event_int_sites.keys())))

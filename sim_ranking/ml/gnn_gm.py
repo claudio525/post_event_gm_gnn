@@ -152,7 +152,7 @@ def _get_event_graph_data(
     sites: np.ndarray,
     site_combs: np.ndarray,
     obs_data: ObservedData,
-    scalar_feature_values,
+    scalar_feature_values: pd.DataFrame,
     site_int_feature_keys: list[str],
     site_obs_scalar_feature_keys: list[str],
     edge_feature_keys: list[str],

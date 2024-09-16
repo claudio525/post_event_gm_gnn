@@ -100,6 +100,9 @@ def compute_site_combinations(
             cur_sites[cur_site_combs[:, 0]], cur_int_sites
         )
 
+        if np.count_nonzero(cur_mask) == 0:
+            continue
+
         site_combs[cur_event] = cur_site_combs[cur_mask]
         used_sites[cur_event] = cur_sites
 
@@ -298,5 +301,7 @@ def get_valid_site_ints(
     }
     valid_int_sites = np.unique(pga_result.site_id.values.astype(str))
 
-    print(f"Valid sites of interests: {pga_result.shape[0]}/{record_df.shape[0]}")
-    return valid_int_sites, valid_event_int_sites
+    valid_record_ids = pga_result.index.values.astype(str)
+
+    print(f"Valid SOI records: {pga_result.shape[0]}/{record_df.shape[0]}")
+    return valid_int_sites, valid_event_int_sites, valid_record_ids
