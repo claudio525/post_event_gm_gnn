@@ -123,7 +123,7 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
         site_to_site_features,
         event_site_features,
         event_site_to_site_features,
-    ) = sr.ml.features.compute_scalar_features(
+    ) = sr.ml.features.compute_site_to_site_features(
         events,
         event_sites,
         event_df,

@@ -121,7 +121,7 @@ def preprocess_site_features(
     return station_df
 
 
-def compute_scalar_features(
+def compute_site_to_site_features(
     events: np.ndarray,
     event_sites: Dict[str, np.ndarray],
     event_df: pd.DataFrame,
@@ -130,6 +130,10 @@ def compute_scalar_features(
     dist_matrix: pd.DataFrame,
     max_dist: float,
 ):
+    """
+    Computes site-to-site, event site, and event site-to-site features
+    """
+
     ### Site-to-site features
     site_to_site_features = {}
 
