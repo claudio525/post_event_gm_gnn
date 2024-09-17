@@ -85,64 +85,15 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
     print(f"Number of observation sites: {obs_sites.size}")
     print(f"------------------------------------------------")
 
-    # Get the scalar feature keys
-    scalar_feature_keys = sr.constants.SCALAR_FEATURE_KEYS
-    event_feature_keys = scalar_feature_keys["event"]
-    site_feature_keys = scalar_feature_keys["site"]
-
-    event_df = obs_data.event_df.copy().loc[events]
-    record_df = obs_data.record_df.copy()
-    station_df = obs_data.site_df.copy()
-
     print(f"Computing distance matrix")
-    dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, station_df)
+    dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, obs_data.site_df)
 
-    ### Scalar Features
-    # Run pre-processing for the site features
-    # TODO: This should be updated such that the normalisation
-    # only happens on training sites, not all sites
-    print(f"Pre-processing site & event features")
-    site_features_df, site_feature_stats = sr.ml.features.preprocess_site_features(
-        station_df, site_feature_keys
-    )
-
-    event_features_stats = pd.DataFrame(
-        index=["mean", "std"], columns=event_feature_keys
-    )
-    event_features_stats.loc["mean"] = event_df.loc[events, event_feature_keys].mean()
-    event_features_stats.loc["std"] = event_df.loc[events, event_feature_keys].std()
-    event_features_df = event_df.loc[events, event_feature_keys]
-    event_features_df[event_feature_keys] = (
-        event_df.loc[events, event_feature_keys]
-        - event_features_stats.loc["mean", event_feature_keys]
-    ) / event_features_stats.loc["std", event_feature_keys]
-
-    # Compute the site-to-site features
-    print(f"Computing scalar features")
-    (
-        site_to_site_features,
-        event_site_features,
-        event_site_to_site_features,
-    ) = sr.ml.features.compute_site_to_site_features(
-        events,
+    scalar_features = sr.ml.features.get_scalar_features(
         event_sites,
-        event_df,
-        station_df,
-        record_df,
-        dist_matrix,
-        run_config.max_dist,
-    )
-    scalar_features = sr.ml.data.ScalarFeatures(
-        event_features_df,
-        event_feature_keys,
-        site_features_df,
-        site_feature_keys,
-        site_to_site_features,
-        scalar_feature_keys["site_to_site"],
-        event_site_features,
-        scalar_feature_keys["event_site"],
-        event_site_to_site_features,
-        scalar_feature_keys["event_site_to_site"],
+        obs_data,
+        run_config,
+        sr.constants.SCALAR_FEATURE_KEYS,
+        dist_matrix
     )
 
     # Compute mean and standard deviation for each period
@@ -200,15 +151,9 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
         train_event_sites,
         train_site_combs,
         scalar_features,
-        site_int_feature_keys,
-        site_obs_scalar_feature_keys,
-        edge_feature_keys,
-        # ims_mean,
-        # ims_std,
+        sr.constants.GRAPH_FEATURE_KEYS,
         run_config.ims,
-        # site_int_site_feature_keys,
-        # site_obs_site_feature_keys
-        n_procs=8
+        n_procs=8,
     )
 
     val_graph_data, _ = sr.ml.gnn_gm.get_graph_data(
@@ -216,13 +161,9 @@ def run_gnn(config_ffp: Path, n_epochs: int = None):
         val_event_sites,
         val_site_combs,
         scalar_features,
-        site_int_feature_keys,
-        site_obs_scalar_feature_keys,
-        edge_feature_keys,
-        # ims_mean,
-        # ims_std,
+        sr.constants.GRAPH_FEATURE_KEYS,
         run_config.ims,
-        n_procs=8
+        n_procs=8,
     )
 
     train_loader = gloader.DataLoader(

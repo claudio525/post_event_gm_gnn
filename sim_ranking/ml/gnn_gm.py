@@ -153,9 +153,7 @@ def _get_event_graph_data(
     site_combs: np.ndarray,
     obs_data: ObservedData,
     scalar_feature_values: pd.DataFrame,
-    site_int_feature_keys: list[str],
-    site_obs_scalar_feature_keys: list[str],
-    edge_feature_keys: list[str],
+    graph_feature_keys: dict[str, Sequence[str]],
     ims: Sequence[str],
 ):
     graph_data = []
@@ -177,12 +175,12 @@ def _get_event_graph_data(
 
         # Create the site_int node features
         cur_site_int_features = scalar_feature_values.loc[
-            cur_site_combs_mask, site_int_feature_keys
+            cur_site_combs_mask, graph_feature_keys["site_int"]
         ].values[0]
 
         # Create the site_obs node features
         cur_obs_sites_features = scalar_feature_values.loc[
-            cur_site_combs_mask, site_obs_scalar_feature_keys
+            cur_site_combs_mask, graph_feature_keys["site_obs"],
         ].values
         # Add the IM values
         cur_obs_sites_features = np.concatenate(
@@ -195,7 +193,7 @@ def _get_event_graph_data(
 
         # Create the edge features
         cur_edge_features = scalar_feature_values.loc[
-            cur_site_combs_mask, edge_feature_keys
+            cur_site_combs_mask, graph_feature_keys["edge"]
         ].values
 
         cur_sc_data = gdata.HeteroData()
@@ -234,9 +232,7 @@ def get_graph_data(
     event_sites: dict[str, np.ndarray],
     event_site_combs: dict[str, np.ndarray],
     scalar_features: ml_data.ScalarFeatures,
-    site_int_feature_keys: list[str],
-    site_obs_scalar_feature_keys: list[str],
-    edge_feature_keys: list[str],
+    graph_feature_keys: dict[str, Sequence[str]],
     # ims_mean: pd.DataFrame,
     # ims_std: pd.DataFrame,
     ims: Sequence[str],
@@ -249,8 +245,7 @@ def get_graph_data(
         )
     )
 
-    n_site_obs_scalar_features = len(site_obs_scalar_feature_keys)
-    site_obs_scalar_feature_ind = np.arange(n_site_obs_scalar_features)
+    site_obs_scalar_feature_ind = np.arange(len(graph_feature_keys["site_obs"]))
 
     # Create the graph data objects
     graph_data = []
@@ -263,9 +258,7 @@ def get_graph_data(
                     cur_site_combs,
                     obs_data,
                     scalar_event_feature_values[cur_event],
-                    site_int_feature_keys,
-                    site_obs_scalar_feature_keys,
-                    edge_feature_keys,
+                    graph_feature_keys,
                     ims,
                 )
             )
@@ -280,9 +273,7 @@ def get_graph_data(
                         cur_site_combs,
                         obs_data,
                         scalar_event_feature_values[cur_event],
-                        site_int_feature_keys,
-                        site_obs_scalar_feature_keys,
-                        edge_feature_keys,
+                        graph_feature_keys,
                         ims,
                     )
                     for cur_event, cur_site_combs in event_site_combs.items()
@@ -343,7 +334,9 @@ def train(
 
             optimizer.zero_grad()
             pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch)
-            loss = reduce_loss(compute_loss(pred_ln_im_mean, cur_y, pred_ln_im_std=pred_ln_im_std))
+            loss = reduce_loss(
+                compute_loss(pred_ln_im_mean, cur_y, pred_ln_im_std=pred_ln_im_std)
+            )
             loss.backward()
             optimizer.step()
 
@@ -361,7 +354,9 @@ def train(
                 cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
                 pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch)
-                loss = reduce_loss(compute_loss(pred_ln_im_mean, cur_y, pred_ln_im_std=pred_ln_im_std))
+                loss = reduce_loss(
+                    compute_loss(pred_ln_im_mean, cur_y, pred_ln_im_std=pred_ln_im_std)
+                )
 
                 metrics["loss_hist_val"][cur_epoch_ix] += loss.item()
                 n_graphs += cur_batch.num_graphs
@@ -419,7 +414,9 @@ def get_predictions(
             cur_result.loc[:, pred_im_keys] = cur_out.cpu().numpy(force=True)
 
         # Loss
-        cur_loss = compute_loss(pred_ln_im_mean, cur_batch.y, pred_ln_im_std=pred_im_ln_std)
+        cur_loss = compute_loss(
+            pred_ln_im_mean, cur_batch.y, pred_ln_im_std=pred_im_ln_std
+        )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
             cur_result.loc[:, loss_keys] = cur_loss.cpu().numpy(force=True)
@@ -428,20 +425,11 @@ def get_predictions(
             )
 
         # Index
-        # cur_obs_site_hash_values = [
-        #     base64.urlsafe_b64encode(
-        #         hashlib.sha256("_".join(list(cur_site_obs)).encode()).digest()
-        #     )
-        #     .rstrip(b"=")
-        #     .decode("utf-8")[:10]
-        #     for cur_site_obs in cur_result["obs_sites"]
-        # ]
         cur_result = cur_result.set_index(
             mlt.array_utils.numpy_str_join(
                 "_",
                 cur_result["event_id"].values.astype(str),
                 cur_result["site_int"].values.astype(str),
-                # cur_obs_site_hash_values,
             )
         )
 
@@ -467,3 +455,5 @@ def get_residuals(gnn_results: pd.DataFrame, ims: Sequence[str] = constants.PSA_
     res_df["site_int"] = gnn_results["site_int"]
     res_df["n_obs_sites"] = gnn_results["n_obs_sites"]
     return res_df
+
+

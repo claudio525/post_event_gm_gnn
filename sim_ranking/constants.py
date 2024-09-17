@@ -17,6 +17,7 @@ class RankingMethod(Enum):
     ml_prob = 4
     ml_prob_per_im = 5
 
+
 PERIODS = [
     0.01,
     0.02,
@@ -73,6 +74,36 @@ SCALAR_FEATURE_KEYS = {
     "site_to_site": ["dist"],
     "event_site": ["rrup"],
     "event_site_to_site": ["angular_dist"],
+}
+
+GRAPH_FEATURE_KEYS = {
+    "edge": ["dist", "angular_dist"],
+    "site_int": [
+        "vs30_site_int",
+        "z1p0_site_int",
+        "z2p5_site_int",
+        "tsite_site_int",
+        "rrup_site_int",
+        "mag",
+    ],
+    "site_obs": [
+        "vs30_site_obs",
+        "z1p0_site_obs",
+        "z2p5_site_obs",
+        "tsite_site_obs",
+        "rrup_site_obs",
+    ]
+}
+
+
+PRE_PROCESS_CONFIG = {
+    "mag": (2, 9),
+    "vs30": (100, 1500),
+    "z1p0": (0, 1500),
+    "z2p5": (0, 11000),
+    "tsite": (0, 10),
+    "rrup": (0, 200),
+    "rx": (-200, 200),
 }
 
 
