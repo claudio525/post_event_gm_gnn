@@ -18,12 +18,14 @@ import tqdm
 import ml_tools as mlt
 
 from . import data as ml_data
+from . import gnn_modules
 from .. import constants
 from ..data_classes import ObservedData
 
 
 @dataclass
 class RunConfig:
+    """Config for specyfing run settings"""
 
     ### General settings
     seed: int
@@ -32,12 +34,6 @@ class RunConfig:
     rel_obs_data_ffp: Path
     # Maximum distance between site-interest and observation sites
     max_dist: float
-    # Number of validation events
-    n_val_events: int
-    # Number of validation sites
-    n_val_sites: int
-    # Validation events ffp
-    rel_val_sites_ffp: str
 
     # Device to use
     device: str
@@ -61,18 +57,8 @@ class RunConfig:
     # Base output directory
     rel_results_dir: str
 
-    ### Optional settings
-    # Events to be used for validation
-    val_events: Sequence[str] = None
-    # Events to be ignored
-    test_events: Sequence[str] = None
-
     def __post_init__(self):
-        assert self.n_val_events > 0
-        assert self.rel_val_sites_ffp is not None or self.n_val_sites > 0
-
         assert self.obs_data_ffp.exists()
-        assert self.val_sites_ffp is None or self.val_sites_ffp.exists()
 
     @property
     def n_ims(self):
@@ -87,12 +73,6 @@ class RunConfig:
         return Path(os.path.expandvars("$wdata")) / self.rel_results_dir
 
     @property
-    def val_sites_ffp(self):
-        if self.rel_val_sites_ffp is not None:
-            return Path(os.path.expandvars("$wdata")) / self.rel_val_sites_ffp
-        return None
-
-    @property
     def obs_data_ffp(self):
         return Path(os.path.expandvars("$wdata")) / self.rel_obs_data_ffp
 
@@ -101,15 +81,6 @@ class RunConfig:
             "seed": self.seed,
             "rel_obs_data_ffp": self.rel_obs_data_ffp,
             "max_dist": self.max_dist,
-            "n_val_events": self.n_val_events,
-            "n_val_sites": self.n_val_sites,
-            "rel_val_sites_ffp": self.rel_val_sites_ffp,
-            "val_events": (
-                list(self.val_events) if self.val_events is not None else None
-            ),
-            "test_events": (
-                list(self.test_events) if self.test_events is not None else None
-            ),
             "device": self.device,
             "ims": list(self.ims),
             "pred_std": self.pred_std,
@@ -147,6 +118,202 @@ class RunConfig:
         return cls.from_dict(mlt.utils.load_yaml(ffp))
 
 
+@dataclass
+class HoldoutConfig:
+    """Config for using holdout data"""
+
+    n_val_events: int
+    """Number of validation events"""
+
+    n_val_sites: int
+    """Number of validation sites"""
+
+    rel_val_sites_ffp: str
+    """Validation events ffp"""
+
+    val_events: Sequence[str] = None
+    """Events to be used for validation"""
+
+    test_events: Sequence[str] = None
+    """Events to be ignored"""
+
+    def __post_init__(self):
+        assert self.n_val_events > 0
+        assert self.rel_val_sites_ffp is not None or self.n_val_sites > 0
+        assert self.val_sites_ffp is None or self.val_sites_ffp.exists()
+
+    @property
+    def val_sites_ffp(self):
+        if self.rel_val_sites_ffp is not None:
+            return Path(os.path.expandvars("$wdata")) / self.rel_val_sites_ffp
+        return None
+
+    def to_dict(self):
+        return {
+            "n_val_events": self.n_val_events,
+            "n_val_sites": self.n_val_sites,
+            "rel_val_sites_ffp": self.rel_val_sites_ffp,
+            "val_events": list(self.val_events) if self.val_events is not None else None,
+            "test_events": list(self.test_events) if self.test_events is not None else None,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        return cls(**d)
+
+    @classmethod
+    def from_yaml(cls, ffp: Path):
+        return cls.from_dict(mlt.utils.load_yaml(ffp))
+
+
+def run(
+    out_dir: Path,
+    event_sites: dict[str, np.ndarray[str]],
+    valid_event_int_sites: dict[str, np.ndarray[str]],
+    train_events: np.ndarray[str],
+    val_events: np.ndarray[str],
+    train_int_sites: np.ndarray[str],
+    val_int_sites: np.ndarray[str],
+    obs_sites: np.ndarray[str],
+    dist_matrix: pd.DataFrame,
+    obs_data: ObservedData,
+    scalar_features: ml_data.ScalarFeatures,
+    run_config: RunConfig,
+):
+    """
+    Performs an individual run of the GNN model
+
+    Parameters
+    ----------
+    out_dir: Path
+    event_sites: dict[str, np.ndarray[str]]
+        Available sites per event
+    valid_event_int_sites: dict[str, np.ndarray[str]]
+        Valid site of interests per event
+    train_events: np.ndarray[str]
+        Events for model training
+    val_events: np.ndarray[str]
+        Events for model evaluation
+    train_int_sites: np.ndarray[str]
+        Site of interests for model training
+    val_int_sites
+        Site of interests for model evaluation
+    obs_sites: np.ndarray[str]
+        Sites that can be used as observation sites
+    dist_matrix: pd.DataFrame
+    obs_data: ObservedData
+    scalar_features: ml_data.ScalarFeatures
+    run_config: RunConfig
+    """
+    print(f"Creating site combinations")
+    train_site_combs, train_event_sites = ml_data.compute_site_combinations(
+        event_sites,
+        valid_event_int_sites,
+        train_events,
+        dist_matrix,
+        obs_sites,
+        train_int_sites,
+        max_dist=run_config.max_dist,
+    )
+    val_site_combs, val_event_sites = ml_data.compute_site_combinations(
+        event_sites,
+        valid_event_int_sites,
+        val_events,
+        dist_matrix,
+        obs_sites,
+        val_int_sites,
+        max_dist=run_config.max_dist,
+    )
+
+    graph_feature_keys = constants.GRAPH_FEATURE_KEYS
+
+    print(f"Getting graph data")
+    train_graph_data, site_obs_scalar_feature_ind = get_graph_data(
+        obs_data,
+        train_event_sites,
+        train_site_combs,
+        scalar_features,
+        constants.GRAPH_FEATURE_KEYS,
+        run_config.ims,
+        n_procs=8,
+    )
+
+    val_graph_data, _ = get_graph_data(
+        obs_data,
+        val_event_sites,
+        val_site_combs,
+        scalar_features,
+        constants.GRAPH_FEATURE_KEYS,
+        run_config.ims,
+        n_procs=8,
+    )
+
+    train_loader = gloader.DataLoader(
+        train_graph_data, batch_size=run_config.batch_size, shuffle=True
+    )
+    val_loader = gloader.DataLoader(
+        val_graph_data, batch_size=run_config.batch_size, shuffle=True
+    )
+
+    gnn_model = gnn_modules.BasicAttentionGNN(
+        len(graph_feature_keys["site_obs"]) + len(run_config.ims),
+        len(graph_feature_keys["site_obs"]),
+        len(graph_feature_keys["site_int"]),
+        len(graph_feature_keys["edge"]),
+        run_config,
+        torch.from_numpy(site_obs_scalar_feature_ind),
+    )
+    gnn_model.to(run_config.device)
+
+    print(f"----------------- Training -----------------")
+    print(f"Number of training graphs: {len(train_graph_data)}")
+    print(f"Number of validation graphs: {len(val_graph_data)}")
+
+    metrics, best_model_state, best_model_epoch = train(
+        run_config, gnn_model, train_loader, val_loader
+    )
+    print(
+        f"Best model epoch: {best_model_epoch + 1}, "
+        f"Validation: \tLoss: {metrics['loss_hist_val'][best_model_epoch]:.4f}\n"
+    )
+
+    # Load the best model
+    gnn_model.load_state_dict(best_model_state)
+
+    # Create output directory
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save the training sites and validation sites
+    np.save(out_dir / "val_int_sites.npy", val_int_sites)
+    np.save(out_dir / "train_int_sites.npy", train_int_sites)
+    np.save(out_dir / "obs_sites.npy", obs_sites)
+
+    # Save the run config
+    run_config.to_yaml(out_dir / "run_config.yaml")
+
+    # Save loss history
+    pd.to_pickle(metrics, out_dir / "metrics.pickle")
+
+    # Save the model
+    torch.save(gnn_model, out_dir / "model.pt")
+
+    # Save the results
+    train_results_df = get_predictions(run_config, gnn_model, train_graph_data)
+    train_results_df.to_parquet(out_dir / "train_results.parquet")
+
+    val_results_df = get_predictions(run_config, gnn_model, val_graph_data)
+    val_results_df.to_parquet(out_dir / "val_results.parquet")
+
+    # Write the metadata
+    metadata = {
+        "best_model_epoch": int(best_model_epoch),
+        "best_model_loss": float(metrics["loss_hist_val"][best_model_epoch]),
+        "n_train_scenarios": len(train_graph_data),
+        "n_val_scenarios": len(val_graph_data),
+    }
+    mlt.utils.write_to_yaml(metadata, out_dir / "metadata.yaml")
+
+
 def _get_event_graph_data(
     event: str,
     sites: np.ndarray,
@@ -156,6 +323,7 @@ def _get_event_graph_data(
     graph_feature_keys: dict[str, Sequence[str]],
     ims: Sequence[str],
 ):
+    """Helper function, see get_graph_data"""
     graph_data = []
 
     # cur_sites = event_sites[cur_event]
@@ -180,7 +348,8 @@ def _get_event_graph_data(
 
         # Create the site_obs node features
         cur_obs_sites_features = scalar_feature_values.loc[
-            cur_site_combs_mask, graph_feature_keys["site_obs"],
+            cur_site_combs_mask,
+            graph_feature_keys["site_obs"],
         ].values
         # Add the IM values
         cur_obs_sites_features = np.concatenate(
@@ -233,11 +402,32 @@ def get_graph_data(
     event_site_combs: dict[str, np.ndarray],
     scalar_features: ml_data.ScalarFeatures,
     graph_feature_keys: dict[str, Sequence[str]],
-    # ims_mean: pd.DataFrame,
-    # ims_std: pd.DataFrame,
     ims: Sequence[str],
     n_procs: int = 1,
 ):
+    """
+    Get the graph data for the given scenarios
+
+    Parameters
+    ----------
+    obs_data: ObservedData
+    event_sites: dict[str, np.ndarray]
+    event_site_combs: dict[str, np.ndarray]
+        Scenario definitions
+    scalar_features: ml_data.ScalarFeatures
+    graph_feature_keys: dict[str, Sequence[str]]
+        Graph feature keys for the
+        different node & edge types
+    ims: Sequence[str]
+    n_procs: int, optional
+        Number of processes to use, by default 1
+
+    Returns
+    -------
+    graph_data: list[gdata.HeteroData]
+    site_obs_scalar_feature_ind: np.ndarray
+        Indices of the scalar features for the site_obs node features
+    """
     # Create the scalar features tensors
     scalar_event_feature_values, scalar_feature_columns = (
         ml_data.create_scalar_feature_tensor(
@@ -312,6 +502,27 @@ def train(
     train_loader: gdata.DataLoader,
     val_loader: gdata.DataLoader,
 ):
+    """
+    Runs the training of a model
+
+    Parameters
+    ----------
+    run_config: RunConfig
+    gnn_model: torch.nn.Module
+    train_loader: gloader.DataLoader
+        Training graph data loader
+    val_loader: gloader.DataLoader
+        Validation graph data loader
+
+    Returns
+    -------
+    metrics: dict
+        Training and validation metric (e.g. loss) history
+    best_model_state: dict
+        Best model state
+    best_model_epoch: int
+        Best model epoch
+    """
     # Setup metrics to log
     metrics = {
         "loss_hist_train": np.zeros(run_config.n_epochs),
@@ -383,6 +594,20 @@ def get_predictions(
     gnn_model: torch.nn.Module,
     graph_data: Sequence[gdata.HeteroData],
 ):
+    """
+    Gets model prediction for the given graph data
+
+    Parameters
+    ----------
+    run_config: RunConfig
+    gnn_model: torch.nn.Module
+    graph_data: Sequence[gdata.HeteroData]
+
+    Returns
+    -------
+    results: pd.DataFrame
+        GM estimation for each scenario
+    """
     gnn_model.eval()
     loader = gloader.DataLoader(graph_data, batch_size=128, shuffle=False)
 
@@ -455,5 +680,3 @@ def get_residuals(gnn_results: pd.DataFrame, ims: Sequence[str] = constants.PSA_
     res_df["site_int"] = gnn_results["site_int"]
     res_df["n_obs_sites"] = gnn_results["n_obs_sites"]
     return res_df
-
-

@@ -1,4 +1,4 @@
-from typing import Any, Sequence
+from typing import Any, Sequence, TYPE_CHECKING
 
 import einops
 import torch
@@ -13,7 +13,8 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.typing import Adj, Size
 import numpy as np
 
-from . import gnn_gm
+if TYPE_CHECKING:
+    from . import gnn_gm
 
 
 class BasicAttentionGNN(torch.nn.Module):
@@ -24,7 +25,7 @@ class BasicAttentionGNN(torch.nn.Module):
         n_obs_scalar_node_features: int,
         n_int_node_features: int,
         n_edge_features: int,
-        run_config: gnn_gm.RunConfig,
+        run_config: "gnn_gm.RunConfig",
         site_obs_scalar_feature_ind: torch.Tensor,
     ):
         super().__init__()
