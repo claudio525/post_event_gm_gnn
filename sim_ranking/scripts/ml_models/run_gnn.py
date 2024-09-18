@@ -117,7 +117,6 @@ def run_cv(run_config_ffp: Path, n_event_folds: int, n_site_folds: int, n_epochs
         run_config_ffp, n_epochs=n_epochs, ims=sr.constants.PSA_KEYS, device=device
     )
 
-
     print(f"wtf")
     pass
 

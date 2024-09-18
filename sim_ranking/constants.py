@@ -1,10 +1,13 @@
 import os
-from enum import Enum
+from enum import Enum, auto
 
 import numpy as np
 
 import ml_tools as mlt
 
+
+class NZGMDBVersion(Enum):
+    v3p4 = auto()
 
 class RankingMethod(Enum):
     emp_cMVN = 1

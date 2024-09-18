@@ -1,6 +1,6 @@
 from typing import Sequence, Optional
 from pathlib import Path
-from enum import StrEnum
+from enum import StrEnum, Enum, auto
 
 import pandas as pd
 import numpy as np
@@ -42,13 +42,14 @@ class ObservedData:
         rx = "rx"
 
     class OtherColEnums(StrEnum):
-        fmin_h1 = "fmin_h1"
-        fmin_h2 = "fmin_h2"
-        fmin_v = "fmin_v"
-        score_h1 = "score_h1"
-        score_h2 = "score_h2"
-        score_v = "score_v"
-        mean_h_fmin = "mean_h_fmin"
+        fhp = "fhp"
+        fmin = "fmin"
+        gmc_fmin_h1 = "gmc_fmin_h1"
+        gmc_fmin_h2 = "gmc_fmin_h2"
+        gmc_fmin_v = "gmc_fmin_v"
+        gmc_score_h1 = "gmc_score_h1"
+        gmc_score_h2 = "gmc_score_h2"
+        gmc_score_v = "gmc_score_v"
 
     SITE_COLS = list(SiteColEnums)
     EVENT_COLS = list(EventColEnums)
@@ -188,7 +189,12 @@ class ObservedData:
             )
 
     @classmethod
-    def from_nzgmdb_flat(cls, nzgmdb_flat_ffp: Path, event_site_id_index: bool = True):
+    def from_nzgmdb_flat(
+        cls,
+        nzgmdb_flat_ffp: Path,
+        version: constants.NZGMDBVersion,
+        event_site_id_index: bool = True,
+    ):
         site_cols_map = {
             "sta": cls.SiteColEnums.site_id,
             "Vs30": cls.SiteColEnums.vs30,
@@ -217,28 +223,25 @@ class ObservedData:
             "r_x": cls.EventSiteColEnums.rx,
         }
         other_map = {
-            "fmin_mean_X": cls.OtherColEnums.fmin_h1,
-            "fmin_mean_Y": cls.OtherColEnums.fmin_h2,
-            "fmin_mean_Z": cls.OtherColEnums.fmin_v,
-            "score_mean_X": cls.OtherColEnums.score_h1,
-            "score_mean_Y": cls.OtherColEnums.score_h2,
-            "score_mean_Z": cls.OtherColEnums.score_v,
+            "fmin_mean_X": cls.OtherColEnums.gmc_fmin_h1,
+            "fmin_mean_Y": cls.OtherColEnums.gmc_fmin_h2,
+            "fmin_mean_Z": cls.OtherColEnums.gmc_fmin_v,
+            "score_mean_X": cls.OtherColEnums.gmc_score_h1,
+            "score_mean_Y": cls.OtherColEnums.gmc_score_h2,
+            "score_mean_Z": cls.OtherColEnums.gmc_score_v,
         }
         mapping_dict = site_cols_map | event_map | event_site_map | other_map
 
         # Load
         record_df = pd.read_csv(
             nzgmdb_flat_ffp, dtype={"evid": str}, index_col="gmid", engine="c"
-        )
+        ).sort_index()
 
         # Renaming
         record_df = record_df.rename(columns=mapping_dict)
         record_df.index.name = "record_id"
 
-        # Drop any columns not of interest
-        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
-        record_df = record_df[cols]
-
+        # Convert index
         if event_site_id_index:
             index = mlt.array_utils.numpy_str_join(
                 "_",
@@ -246,14 +249,62 @@ class ObservedData:
                 record_df["site_id"].values.astype(str),
             )
             record_df.index = index
+            record_df = record_df.sort_index()
 
+        # Drop any columns not of interest
+        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
+        record_df = record_df[cols]
+
+        # Handle fmin, fHP
         if (
-            cls.OtherColEnums.fmin_h1 in record_df.columns
-            and cls.OtherColEnums.fmin_h2 in record_df.columns
+            cls.OtherColEnums.gmc_fmin_h1 in record_df.columns
+            and cls.OtherColEnums.gmc_fmin_h2 in record_df.columns
         ):
-            record_df[cls.OtherColEnums.mean_h_fmin] = record_df[
-                [cls.OtherColEnums.fmin_h1, cls.OtherColEnums.fmin_h2]
-            ].mean(axis=1)
+            # The GMC fmin in version 3.4 is used to select fHP, hence
+            # the actual fmin is not the GMC fmin values
+            if version is constants.NZGMDBVersion.v3p4:
+                # Rotd50 does not contain vertical GMC fmin, hack this in...
+                fmin_v = pd.read_csv(
+                    nzgmdb_flat_ffp.parent
+                    / nzgmdb_flat_ffp.name.replace("rotd50", "ver"),
+                    dtype={"evid": str},
+                    index_col="gmid",
+                    engine="c",
+                ).sort_index()
+
+                # Convert index, as gmid is incorrect in 3.4
+                index = mlt.array_utils.numpy_str_join(
+                    "_",
+                    fmin_v["evid"].values.astype(str),
+                    fmin_v["sta"].values.astype(str),
+                )
+                fmin_v.index = index
+                fmin_v = fmin_v.sort_index()
+                assert fmin_v.index.equals(record_df.index)
+
+                record_df[cls.OtherColEnums.fhp] = np.max(
+                    np.stack(
+                        (
+                            record_df[cls.OtherColEnums.gmc_fmin_h1].values,
+                            record_df[cls.OtherColEnums.gmc_fmin_h2].values,
+                            fmin_v["fmin_mean_Z"].values,
+                        ),
+                        axis=1,
+                    ),
+                    axis=1,
+                )
+
+                record_df[cls.OtherColEnums.fmin] = (
+                    record_df[cls.OtherColEnums.fhp] / 1.25
+                )
+                record_df = record_df.drop(
+                    columns=[
+                        cls.OtherColEnums.gmc_fmin_h1,
+                        cls.OtherColEnums.gmc_fmin_h2,
+                        cls.OtherColEnums.gmc_fmin_v,
+                    ],
+                    errors="ignore",
+                )
 
         return cls(record_df, nzgmdb_flat_ffp)
 
