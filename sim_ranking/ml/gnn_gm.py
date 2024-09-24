@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.data as gdata
 import torch_geometric.loader as gloader
@@ -153,8 +154,12 @@ class HoldoutConfig:
             "n_val_events": self.n_val_events,
             "n_val_sites": self.n_val_sites,
             "rel_val_sites_ffp": self.rel_val_sites_ffp,
-            "val_events": list(self.val_events) if self.val_events is not None else None,
-            "test_events": list(self.test_events) if self.test_events is not None else None,
+            "val_events": (
+                list(self.val_events) if self.val_events is not None else None
+            ),
+            "test_events": (
+                list(self.test_events) if self.test_events is not None else None
+            ),
         }
 
     @classmethod
@@ -334,7 +339,6 @@ def _get_event_graph_data(
     # Get and normalise the IM data
     cur_im_data = obs_data.get_event_data(event, sites)
     cur_im_data = np.log(cur_im_data.loc[:, ims])
-    # cur_norm_im_data = (cur_im_data - ims_mean) / ims_std
 
     for cur_site_int_ix in cur_site_int_inds:
         cur_site_combs_mask = site_combs[:, 0] == cur_site_int_ix
@@ -351,11 +355,15 @@ def _get_event_graph_data(
             cur_site_combs_mask,
             graph_feature_keys["site_obs"],
         ].values
+        # Get observation site IM values and deal with nan values
+        cur_obs_sites_im_values = (
+            cur_im_data.loc[cur_obs_sites, ims].replace(np.nan, 99).values
+        )
         # Add the IM values
         cur_obs_sites_features = np.concatenate(
             (
                 cur_obs_sites_features,
-                cur_im_data.loc[cur_obs_sites, ims].values,
+                cur_obs_sites_im_values,
             ),
             axis=1,
         )
@@ -480,20 +488,26 @@ def compute_loss(
     target: torch.Tensor,
     pred_ln_im_std: torch.Tensor = None,
     scale_constant: float = 10.0,
+    reduction: str = "mean",
 ):
-    """Computes the loss per sample and output"""
+    """
+    Computes either the MSE or the Gaussian NLL loss,
+    depending on whether the standard deviation is predicted
+    """
     if pred_ln_im_std is not None:
-        loss = F.gaussian_nll_loss(
-            pred_ln_im_mean, target, torch.exp(pred_ln_im_std) ** 2, reduction="none"
+        loss = (
+            F.gaussian_nll_loss(
+                pred_ln_im_mean,
+                target,
+                torch.exp(pred_ln_im_std) ** 2,
+                reduction=reduction,
+            )
+            * scale_constant
         )
-        return loss * scale_constant
     else:
-        return F.mse_loss(pred_ln_im_mean, target, reduction="none") * scale_constant
+        loss = F.mse_loss(pred_ln_im_mean, target, reduction=reduction) * scale_constant
 
-
-def reduce_loss(loss: torch.Tensor, dim: int = None):
-    """Computes the batch loss"""
-    return loss.mean(dim=dim)
+    return loss
 
 
 def train(
@@ -532,6 +546,8 @@ def train(
     best_val_loss = np.inf
     best_model_state, best_model_epoch = None, None
 
+    criterion = nn.MSELoss()
+
     optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.001)
     for cur_epoch_ix in range(run_config.n_epochs):
         print(f"Epoch: {cur_epoch_ix}")
@@ -544,9 +560,23 @@ def train(
             cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
             optimizer.zero_grad()
-            pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch)
-            loss = reduce_loss(
-                compute_loss(pred_ln_im_mean, cur_y, pred_ln_im_std=pred_ln_im_std)
+            if run_config.pred_std:
+                pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch)
+            else:
+                pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch), None
+
+            nan_mask = torch.isnan(cur_y)
+            # loss = criterion(pred_ln_im_mean[~mask], cur_y[~mask])
+            # loss = reduce_loss(
+            #     compute_loss(pred_ln_im_mean, cur_y, pred_ln_im_std=pred_ln_im_std, scale_constant=1), ~torch.isnan(cur_y)
+            # )
+            # loss = F.mse_loss(pred_ln_im_mean[~mask], cur_y[~mask], reduction="none").mean()
+            loss = compute_loss(
+                pred_ln_im_mean[~nan_mask],
+                cur_y[~nan_mask],
+                pred_ln_im_std=(
+                    pred_ln_im_std[~nan_mask] if pred_ln_im_std is not None else None
+                ),
             )
             loss.backward()
             optimizer.step()
@@ -564,11 +594,19 @@ def train(
                 cur_batch = cur_batch.to(run_config.device)
                 cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
-                pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch)
-                loss = reduce_loss(
-                    compute_loss(pred_ln_im_mean, cur_y, pred_ln_im_std=pred_ln_im_std)
-                )
+                if run_config.pred_std:
+                    pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch)
+                else:
+                    pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch), None
 
+                nan_mask = torch.isnan(cur_y)
+                loss = compute_loss(
+                    pred_ln_im_mean[~nan_mask],
+                    cur_y[~nan_mask],
+                    pred_ln_im_std=(
+                        pred_ln_im_std[~nan_mask] if pred_ln_im_std is not None else None
+                    ),
+                )
                 metrics["loss_hist_val"][cur_epoch_ix] += loss.item()
                 n_graphs += cur_batch.num_graphs
 
@@ -636,17 +674,18 @@ def get_predictions(
                 torch.exp(pred_im_ln_std).cpu().numpy(force=True)
             )
         else:
-            cur_result.loc[:, pred_im_keys] = cur_out.cpu().numpy(force=True)
+            pred_ln_im_mean, pred_im_ln_std = cur_out, None
+            cur_result.loc[:, pred_im_keys] = pred_ln_im_mean.cpu().numpy(force=True)
 
         # Loss
         cur_loss = compute_loss(
-            pred_ln_im_mean, cur_batch.y, pred_ln_im_std=pred_im_ln_std
+            pred_ln_im_mean, cur_batch.y, pred_ln_im_std=pred_im_ln_std, reduction="none"
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
             cur_result.loc[:, loss_keys] = cur_loss.cpu().numpy(force=True)
             cur_result.loc[:, "loss"] = (
-                reduce_loss(cur_loss, dim=1).cpu().numpy(force=True)
+                cur_loss.mean(dim=1).cpu().numpy(force=True)
             )
 
         # Index

@@ -50,7 +50,7 @@ def get_observed_data(nzgmdb_ffp: Path) -> sr.ObservedData:
     return sr.ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
 
 
-@st.cache_data(hash_funcs={sr.ObservedData: lambda x: hash(x.data_source)})
+@st.cache_data(hash_funcs={sr.ObservedData: lambda x: hash(x.data_ffp)})
 def get_dist_matrix(obs_data: sr.ObservedData) -> pd.DataFrame:
     return sh.im_dist.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
 
@@ -533,7 +533,9 @@ def run_general(shared_data: SharedData):
         st.title("Metadata")
         st.json(shared_data.gnn_metadata)
 
-    print(f"wtf")
+        st.markdown(
+            f"Observed Data Source: {shared_data.obs_data.data_source} - {shared_data.obs_data.nzgmdb_version}"
+        )
 
 
 def run(

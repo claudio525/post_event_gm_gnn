@@ -44,12 +44,12 @@ class ObservedData:
     class OtherColEnums(StrEnum):
         fhp = "fhp"
         fmin = "fmin"
-        gmc_fmin_h1 = "gmc_fmin_h1"
-        gmc_fmin_h2 = "gmc_fmin_h2"
-        gmc_fmin_v = "gmc_fmin_v"
-        gmc_score_h1 = "gmc_score_h1"
-        gmc_score_h2 = "gmc_score_h2"
-        gmc_score_v = "gmc_score_v"
+        fmin_h1 = "fmin_h1"
+        fmin_h2 = "fmin_h2"
+        fmin_v = "fmin_v"
+        quality_score_h1 = "score_h1"
+        quality_score_h2 = "score_h2"
+        quality_score_v = "score_v"
 
     SITE_COLS = list(SiteColEnums)
     EVENT_COLS = list(EventColEnums)
@@ -58,9 +58,40 @@ class ObservedData:
     OTHER_COLUMNS = list(OtherColEnums)
     COLUMNS = SITE_COLS + EVENT_COLS + EVENT_SITE_COLS + IM_COLUMNS + OTHER_COLUMNS
 
-    def __init__(self, record_df: pd.DataFrame, data_source: Path):
+    def __init__(
+        self,
+        record_df: pd.DataFrame,
+        data_ffp: Path,
+        data_source: constants.ObsDataSource,
+        nzgmdb_version: constants.NZGMDBVersion = None,
+    ):
+        """
+        Class for storing and handling observed data.
+
+        Note: Instantiation of this class should be done through the class methods!
+
+        Parameters
+        ----------
+        record_df: pd.DataFrame
+            DataFrame containing the observed data, event and site information.
+        data_ffp: Path
+            File path to the data file.
+        data_source: constants.ObsDataSource
+            Source of the observed data.
+        nzgmdb_version: constants.NZGMDBVersion
+            Version of the NZGMDB data.
+            Only applicable if the data source is NZGMDB, otherwise None.
+        """
         self.record_df = record_df
+        """DataFrame containing the observed data, event and site information"""
+        self.data_ffp = data_ffp
+        """Path to the data file"""
+
         self.data_source = data_source
+        """Source of the observed data"""
+        self.nzgmdb_version = nzgmdb_version
+        """Version of the NZGMDB data. 
+        Only applicable if the data source is NZGMDB, otherwise None."""
 
         # Cache variables
         self._sites = None
@@ -70,7 +101,7 @@ class ObservedData:
         self._event_sites = None
 
     def __hash__(self):
-        return hash(self.data_source)
+        return hash(self.data_ffp)
 
     def __reset_cache(self):
         self._sites = None
@@ -192,7 +223,7 @@ class ObservedData:
     def from_nzgmdb_flat(
         cls,
         nzgmdb_flat_ffp: Path,
-        version: constants.NZGMDBVersion,
+        version: constants.NZGMDBVersion = None,
         event_site_id_index: bool = True,
     ):
         site_cols_map = {
@@ -223,46 +254,51 @@ class ObservedData:
             "r_x": cls.EventSiteColEnums.rx,
         }
         other_map = {
-            "fmin_mean_X": cls.OtherColEnums.gmc_fmin_h1,
-            "fmin_mean_Y": cls.OtherColEnums.gmc_fmin_h2,
-            "fmin_mean_Z": cls.OtherColEnums.gmc_fmin_v,
-            "score_mean_X": cls.OtherColEnums.gmc_score_h1,
-            "score_mean_Y": cls.OtherColEnums.gmc_score_h2,
-            "score_mean_Z": cls.OtherColEnums.gmc_score_v,
+            "fmin_mean_X": cls.OtherColEnums.fmin_h1,
+            "fmin_mean_Y": cls.OtherColEnums.fmin_h2,
+            "fmin_mean_Z": cls.OtherColEnums.fmin_v,
+            "score_mean_X": cls.OtherColEnums.quality_score_h1,
+            "score_mean_Y": cls.OtherColEnums.quality_score_h2,
+            "score_mean_Z": cls.OtherColEnums.quality_score_v,
         }
         mapping_dict = site_cols_map | event_map | event_site_map | other_map
 
+        # Determine the version if not provided
+        if version is None:
+            try:
+                version = constants.NZGMDBVersion(nzgmdb_flat_ffp.parent.parent.name)
+            except ValueError as e:
+                raise ValueError(
+                    f"Could not determine version of NZGMDB "
+                    f"from {nzgmdb_flat_ffp.parent.parent.name}"
+                ) from e
+
         # Load
-        record_df = pd.read_csv(
-            nzgmdb_flat_ffp, dtype={"evid": str}, index_col="gmid", engine="c"
-        ).sort_index()
+        if version in [constants.NZGMDBVersion.v3p4, constants.NZGMDBVersion.v3p0]:
+            record_df = pd.read_csv(
+                nzgmdb_flat_ffp, dtype={"evid": str}, index_col="gmid", engine="c"
+            ).sort_index()
 
-        # Renaming
-        record_df = record_df.rename(columns=mapping_dict)
-        record_df.index.name = "record_id"
+            # Renaming
+            record_df = record_df.rename(columns=mapping_dict)
+            record_df.index.name = "record_id"
 
-        # Convert index
-        if event_site_id_index:
-            index = mlt.array_utils.numpy_str_join(
-                "_",
-                record_df["event_id"].values.astype(str),
-                record_df["site_id"].values.astype(str),
-            )
-            record_df.index = index
-            record_df = record_df.sort_index()
+            # Convert index
+            if event_site_id_index:
+                index = mlt.array_utils.numpy_str_join(
+                    "_",
+                    record_df["event_id"].values.astype(str),
+                    record_df["site_id"].values.astype(str),
+                )
+                record_df.index = index
+                record_df = record_df.sort_index()
 
-        # Drop any columns not of interest
-        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
-        record_df = record_df[cols]
-
-        # Handle fmin, fHP
-        if (
-            cls.OtherColEnums.gmc_fmin_h1 in record_df.columns
-            and cls.OtherColEnums.gmc_fmin_h2 in record_df.columns
-        ):
             # The GMC fmin in version 3.4 is used to select fHP, hence
             # the actual fmin is not the GMC fmin values
-            if version is constants.NZGMDBVersion.v3p4:
+            if (
+                cls.OtherColEnums.fmin_h1 in record_df.columns
+                and cls.OtherColEnums.fmin_h2 in record_df.columns
+            ):
                 # Rotd50 does not contain vertical GMC fmin, hack this in...
                 fmin_v = pd.read_csv(
                     nzgmdb_flat_ffp.parent
@@ -285,8 +321,8 @@ class ObservedData:
                 record_df[cls.OtherColEnums.fhp] = np.max(
                     np.stack(
                         (
-                            record_df[cls.OtherColEnums.gmc_fmin_h1].values,
-                            record_df[cls.OtherColEnums.gmc_fmin_h2].values,
+                            record_df[cls.OtherColEnums.fmin_h1].values,
+                            record_df[cls.OtherColEnums.fmin_h2].values,
                             fmin_v["fmin_mean_Z"].values,
                         ),
                         axis=1,
@@ -299,14 +335,28 @@ class ObservedData:
                 )
                 record_df = record_df.drop(
                     columns=[
-                        cls.OtherColEnums.gmc_fmin_h1,
-                        cls.OtherColEnums.gmc_fmin_h2,
-                        cls.OtherColEnums.gmc_fmin_v,
+                        cls.OtherColEnums.fmin_h1,
+                        cls.OtherColEnums.fmin_h2,
+                        cls.OtherColEnums.fmin_v,
                     ],
                     errors="ignore",
                 )
+        else:
+            record_df = pd.read_csv(
+                nzgmdb_flat_ffp,
+                dtype={"evid": str, "loc": str},
+                engine="c",
+                index_col="record_id",
+            ).sort_index()
 
-        return cls(record_df, nzgmdb_flat_ffp)
+            # Renaming
+            record_df = record_df.rename(columns=mapping_dict)
+
+        # Drop any columns not of interest
+        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
+        record_df = record_df[cols]
+
+        return cls(record_df, nzgmdb_flat_ffp, constants.ObsDataSource.NZGMDB, version)
 
     @classmethod
     def from_nga_west2_flat(

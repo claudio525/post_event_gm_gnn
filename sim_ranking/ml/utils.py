@@ -32,7 +32,6 @@ class CustomTabularDataLoader:
     Loosely based on
     https://discuss.pytorch.org/t/dataloader-much-slower-than-manual-batching/27014/6
     """
-
     def __init__(
         self, dataset: BaseDataset, batch_size: int, shuffle: bool, shuffle_rels: bool
     ):

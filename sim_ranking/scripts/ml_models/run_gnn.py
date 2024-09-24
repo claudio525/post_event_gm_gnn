@@ -23,8 +23,14 @@ print(f"Using device: {device.upper()}")
 
 app = typer.Typer()
 
+
 @app.command("run-holdout")
-def run_holdout(run_config_ffp: Path, holdout_config_ffp: Path, n_epochs: int = None):
+def run_holdout(
+    run_config_ffp: Path,
+    holdout_config_ffp: Path,
+    n_epochs: int = None,
+    id_suffix: str = "",
+):
     ### Create the configs
     run_config = sr.ml.gnn_gm.RunConfig.from_config_kwargs(
         run_config_ffp, n_epochs=n_epochs, ims=sr.constants.PSA_KEYS, device=device
@@ -32,12 +38,14 @@ def run_holdout(run_config_ffp: Path, holdout_config_ffp: Path, n_epochs: int = 
     holdout_config = sr.ml.gnn_gm.HoldoutConfig.from_yaml(holdout_config_ffp)
 
     ### Data loading
-    obs_data = sr.ObservedData.from_nzgmdb_flat(run_config.obs_data_ffp)
+    obs_data = sr.ObservedData.from_nzgmdb_flat(
+        run_config.obs_data_ffp
+    )
     obs_data.drop_nan()
+    obs_data.apply_fmin_filter(sr.ObservedData.OtherColEnums.fmin)
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites
     print(f"Number of events: {len(events)}")
-
 
     ### Data setup
     # Get the set of valid site-interests per event
@@ -93,8 +101,10 @@ def run_holdout(run_config_ffp: Path, holdout_config_ffp: Path, n_epochs: int = 
         event_sites, obs_data, run_config, sr.constants.SCALAR_FEATURE_KEYS, dist_matrix
     )
 
-    id_suffix = ""
-    cur_out_dir = run_config.results_dir / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+    id_suffix = f"_{id_suffix}" if len(id_suffix) > 0 else ""
+    cur_out_dir = (
+        run_config.results_dir / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+    )
 
     sr.ml.gnn_gm.run(
         cur_out_dir,
@@ -111,8 +121,11 @@ def run_holdout(run_config_ffp: Path, holdout_config_ffp: Path, n_epochs: int = 
         run_config,
     )
 
+
 @app.command("run-cv")
-def run_cv(run_config_ffp: Path, n_event_folds: int, n_site_folds: int, n_epochs: int = None):
+def run_cv(
+    run_config_ffp: Path, n_event_folds: int, n_site_folds: int, n_epochs: int = None
+):
     run_config = sr.ml.gnn_gm.RunConfig.from_config_kwargs(
         run_config_ffp, n_epochs=n_epochs, ims=sr.constants.PSA_KEYS, device=device
     )

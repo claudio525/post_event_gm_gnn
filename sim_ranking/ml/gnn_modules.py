@@ -75,6 +75,11 @@ class BasicAttentionGNN(torch.nn.Module):
 
         if self.run_config.pred_std:
             ln_im_mean, ln_im_std = out.chunk(2, dim=1)
+
+            # Clip predicted values prevent numerical issues
+            ln_im_std = torch.clamp(ln_im_std, min=-15, max=5)
+            ln_im_mean = torch.clamp(ln_im_mean, min=-15, max=5)
+
             return ln_im_mean, ln_im_std
         return out
 

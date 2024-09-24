@@ -1,13 +1,18 @@
 import os
-from enum import Enum, auto
+from enum import Enum, auto, StrEnum
 
 import numpy as np
 
 import ml_tools as mlt
 
 
-class NZGMDBVersion(Enum):
-    v3p4 = auto()
+class ObsDataSource(StrEnum):
+    NZGMDB = "NZGMDB"
+
+class NZGMDBVersion(StrEnum):
+    v3p0 = "v3.0"
+    v3p4 = "v3.4"
+    v4p0 = "v4.0"
 
 class RankingMethod(Enum):
     emp_cMVN = 1
