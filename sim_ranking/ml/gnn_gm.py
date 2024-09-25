@@ -171,7 +171,7 @@ class HoldoutConfig:
         return cls.from_dict(mlt.utils.load_yaml(ffp))
 
 
-def run(
+def run_model_training(
     out_dir: Path,
     event_sites: dict[str, np.ndarray[str]],
     valid_event_int_sites: dict[str, np.ndarray[str]],
@@ -184,6 +184,8 @@ def run(
     obs_data: ObservedData,
     scalar_features: ml_data.ScalarFeatures,
     run_config: RunConfig,
+    graph_data_n_procs: int = 8,
+    verbose: bool = True,
 ):
     """
     Performs an individual run of the GNN model
@@ -209,8 +211,13 @@ def run(
     obs_data: ObservedData
     scalar_features: ml_data.ScalarFeatures
     run_config: RunConfig
+    graph_data_n_procs: int, optional
+        Number of processes to use for
+        creating the graph data
+    verbose: bool, optional
+        Whether to print progress information, by default True
     """
-    print(f"Creating site combinations")
+    if verbose: print(f"Creating site combinations")
     train_site_combs, train_event_sites = ml_data.compute_site_combinations(
         event_sites,
         valid_event_int_sites,
@@ -232,7 +239,7 @@ def run(
 
     graph_feature_keys = constants.GRAPH_FEATURE_KEYS
 
-    print(f"Getting graph data")
+    if verbose: print(f"Getting graph data")
     train_graph_data, site_obs_scalar_feature_ind = get_graph_data(
         obs_data,
         train_event_sites,
@@ -240,7 +247,7 @@ def run(
         scalar_features,
         constants.GRAPH_FEATURE_KEYS,
         run_config.ims,
-        n_procs=8,
+        n_procs=graph_data_n_procs,
     )
 
     val_graph_data, _ = get_graph_data(
@@ -250,7 +257,7 @@ def run(
         scalar_features,
         constants.GRAPH_FEATURE_KEYS,
         run_config.ims,
-        n_procs=8,
+        n_procs=graph_data_n_procs,
     )
 
     train_loader = gloader.DataLoader(
@@ -270,17 +277,20 @@ def run(
     )
     gnn_model.to(run_config.device)
 
-    print(f"----------------- Training -----------------")
-    print(f"Number of training graphs: {len(train_graph_data)}")
-    print(f"Number of validation graphs: {len(val_graph_data)}")
+    if verbose:
+        print(f"----------------- Training -----------------")
+        print(f"Number of training graphs: {len(train_graph_data)}")
+        print(f"Number of validation graphs: {len(val_graph_data)}")
 
     metrics, best_model_state, best_model_epoch = train(
         run_config, gnn_model, train_loader, val_loader
     )
-    print(
-        f"Best model epoch: {best_model_epoch + 1}, "
-        f"Validation: \tLoss: {metrics['loss_hist_val'][best_model_epoch]:.4f}\n"
-    )
+
+    if verbose:
+        print(
+            f"Best model epoch: {best_model_epoch + 1}, "
+            f"Validation: \tLoss: {metrics['loss_hist_val'][best_model_epoch]:.4f}\n"
+        )
 
     # Load the best model
     gnn_model.load_state_dict(best_model_state)
@@ -477,8 +487,8 @@ def get_graph_data(
                     for cur_event, cur_site_combs in event_site_combs.items()
                 ],
             )
-            graph_data = [pickle.loads(data) for data in graph_data]
 
+    graph_data = [pickle.loads(data) for data in graph_data]
     graph_data = list(itertools.chain(*graph_data))
     return graph_data, site_obs_scalar_feature_ind
 
@@ -515,6 +525,7 @@ def train(
     gnn_model: torch.nn.Module,
     train_loader: gdata.DataLoader,
     val_loader: gdata.DataLoader,
+    verbose: bool = True,
 ):
     """
     Runs the training of a model
@@ -527,6 +538,8 @@ def train(
         Training graph data loader
     val_loader: gloader.DataLoader
         Validation graph data loader
+    verbose: bool, optional
+        Whether to print progress information, by default True
 
     Returns
     -------
@@ -546,8 +559,6 @@ def train(
     best_val_loss = np.inf
     best_model_state, best_model_epoch = None, None
 
-    criterion = nn.MSELoss()
-
     optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.001)
     for cur_epoch_ix in range(run_config.n_epochs):
         print(f"Epoch: {cur_epoch_ix}")
@@ -555,7 +566,7 @@ def train(
         ### Training
         n_graphs = 0
         gnn_model.train()
-        for cur_batch in tqdm.tqdm(train_loader):
+        for cur_batch in tqdm.tqdm(train_loader, disable=not verbose):
             cur_batch = cur_batch.to(run_config.device)
             cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
@@ -566,11 +577,6 @@ def train(
                 pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch), None
 
             nan_mask = torch.isnan(cur_y)
-            # loss = criterion(pred_ln_im_mean[~mask], cur_y[~mask])
-            # loss = reduce_loss(
-            #     compute_loss(pred_ln_im_mean, cur_y, pred_ln_im_std=pred_ln_im_std, scale_constant=1), ~torch.isnan(cur_y)
-            # )
-            # loss = F.mse_loss(pred_ln_im_mean[~mask], cur_y[~mask], reduction="none").mean()
             loss = compute_loss(
                 pred_ln_im_mean[~nan_mask],
                 cur_y[~nan_mask],
@@ -618,11 +624,12 @@ def train(
             best_model_state = gnn_model.state_dict()
             best_model_epoch = cur_epoch_ix
 
-        print(f"Epoch {cur_epoch_ix}/{run_config.n_epochs}")
-        print(f"\tTraining" f"\t\tLoss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}")
-        print(
-            f"\tValidation" f"\t\tLoss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}"
-        )
+        if verbose:
+            print(f"Epoch {cur_epoch_ix}/{run_config.n_epochs}")
+            print(f"\tTraining" f"\t\tLoss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}")
+            print(
+                f"\tValidation" f"\t\tLoss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}"
+            )
 
     return metrics, best_model_state, best_model_epoch
 

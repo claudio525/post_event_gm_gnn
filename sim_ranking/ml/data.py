@@ -248,7 +248,8 @@ def get_valid_site_ints(
     Returns
     -------
     valid_int_sites: np.ndarray
-        Valid sites of interests
+        All sites that are valid sites for
+        at least one event
     valid_event_int_sites: dict
         Valid sites of interests per event
     """

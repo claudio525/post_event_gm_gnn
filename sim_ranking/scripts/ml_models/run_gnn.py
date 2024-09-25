@@ -3,12 +3,9 @@ import os
 from pathlib import Path
 
 import torch
+import torch.multiprocessing as mp
 import pandas as pd
 import numpy as np
-import torch_geometric.data as gdata
-import torch_geometric.transforms as T
-import torch_geometric.loader as gloader
-import tqdm
 import typer
 
 import ml_tools as mlt
@@ -38,9 +35,7 @@ def run_holdout(
     holdout_config = sr.ml.gnn_gm.HoldoutConfig.from_yaml(holdout_config_ffp)
 
     ### Data loading
-    obs_data = sr.ObservedData.from_nzgmdb_flat(
-        run_config.obs_data_ffp
-    )
+    obs_data = sr.ObservedData.from_nzgmdb_flat(run_config.obs_data_ffp)
     obs_data.drop_nan()
     obs_data.apply_fmin_filter(sr.ObservedData.OtherColEnums.fmin)
     events, all_sites = obs_data.events, obs_data.sites
@@ -106,7 +101,7 @@ def run_holdout(
         run_config.results_dir / f"{mlt.utils.create_run_id(False)}{id_suffix}"
     )
 
-    sr.ml.gnn_gm.run(
+    sr.ml.gnn_gm.run_model_training(
         cur_out_dir,
         event_sites,
         valid_event_int_sites,
@@ -124,14 +119,154 @@ def run_holdout(
 
 @app.command("run-cv")
 def run_cv(
-    run_config_ffp: Path, n_event_folds: int, n_site_folds: int, n_epochs: int = None
+    run_config_ffp: Path,
+    n_event_folds: int,
+    n_site_folds: int,
+    n_epochs: int = None,
+    id_suffix: str = "",
+    n_procs: int = mp.cpu_count(),
 ):
+    # Create the configs
     run_config = sr.ml.gnn_gm.RunConfig.from_config_kwargs(
         run_config_ffp, n_epochs=n_epochs, ims=sr.constants.PSA_KEYS, device=device
     )
 
+    ### Data loading
+    obs_data = sr.ObservedData.from_nzgmdb_flat(run_config.obs_data_ffp)
+    obs_data.drop_nan()
+    obs_data.apply_fmin_filter(sr.ObservedData.OtherColEnums.fmin)
+    events, all_sites = obs_data.events, obs_data.sites
+    event_sites = obs_data.event_sites
+    print(f"Number of events: {len(events)}")
+
+    # Get the set of valid site-interests per event
+    print(f"Getting valid sites of interest")
+    int_sites, valid_event_int_sites, _ = sr.ml.data.get_valid_site_ints(
+        event_sites, obs_data.record_df.drop(columns=obs_data.IM_COLUMNS)
+    )
+    events = np.intersect1d(events, np.asarray(list(valid_event_int_sites.keys())))
+
+    print(f"Computing distance matrix")
+    dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, obs_data.site_df)
+
+    print(f"Getting scalar features")
+    scalar_features = sr.ml.features.get_scalar_features(
+        event_sites, obs_data, run_config, sr.constants.SCALAR_FEATURE_KEYS, dist_matrix
+    )
+
+    # Cross-validation setup
+    event_folds = np.array_split(events, n_event_folds)
+    site_folds = np.array_split(int_sites, n_site_folds)
+    n_cv_iters = n_event_folds * n_site_folds
+
+    fold_combs = [(i, j) for i in range(n_event_folds) for j in range(n_site_folds)]
+
+    id_suffix = f"_{id_suffix}" if len(id_suffix) > 0 else ""
+    out_dir = run_config.results_dir / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+
+    # Run CV
+    if n_procs == 1:
+        for cv_iter, (train_folds_ind, val_fold_ind) in enumerate(
+            get_cv_iterator(fold_combs)
+        ):
+            _run_mp_helper(
+                event_folds,
+                site_folds,
+                val_fold_ind,
+                train_folds_ind,
+                all_sites,
+                event_sites,
+                valid_event_int_sites,
+                dist_matrix,
+                obs_data,
+                scalar_features,
+                run_config,
+                out_dir,
+                cv_iter,
+                n_cv_iters,
+            )
+    else:
+        mp.set_start_method("spawn")
+        with mp.Pool(processes=mp.cpu_count()) as pool:
+            pool.starmap(
+                _run_mp_helper,
+                [
+                    (
+                        event_folds,
+                        site_folds,
+                        val_fold_ind,
+                        train_folds_ind,
+                        all_sites,
+                        event_sites,
+                        valid_event_int_sites,
+                        dist_matrix,
+                        obs_data,
+                        scalar_features,
+                        run_config,
+                        out_dir,
+                        cv_iter,
+                        n_cv_iters,
+                    )
+                    for cv_iter, (train_folds_ind, val_fold_ind) in enumerate(
+                        get_cv_iterator(fold_combs)
+                    )
+                ],
+            )
+
     print(f"wtf")
-    pass
+
+
+def _run_mp_helper(
+    event_folds: list[np.ndarray[str]],
+    site_folds: list[np.ndarray[str]],
+    val_fold_ind: tuple[int, int],
+    train_folds_ind : list[tuple[int, int]],
+    all_sites: np.ndarray[str],
+    event_sites: dict[str, np.ndarray[str]],
+    valid_event_int_sites: dict[str, np.ndarray[str]],
+    dist_matrix: pd.DataFrame,
+    obs_data: sr.ObservedData,
+    scalar_features: sr.ml.data.ScalarFeatures,
+    run_config: sr.ml.gnn_gm.RunConfig,
+    out_dir: Path,
+    cv_iter: int,
+    n_cv_iters: int,
+):
+    print(f"\n----------- CV iteration: {cv_iter + 1}/{n_cv_iters} -------------")
+    cur_val_events = event_folds[val_fold_ind[0]]
+    cur_val_int_sites = site_folds[val_fold_ind[1]]
+
+    cur_train_events = np.concatenate([event_folds[i] for i, _ in train_folds_ind])
+    cur_train_int_sites = np.concatenate([site_folds[i] for _, i in train_folds_ind])
+
+    obs_sites = np.setdiff1d(all_sites, cur_val_int_sites)
+
+    cur_out_dir = out_dir / f"cv_{cv_iter}"
+
+    sr.ml.gnn_gm.run_model_training(
+        cur_out_dir,
+        event_sites,
+        valid_event_int_sites,
+        cur_train_events,
+        cur_val_events,
+        cur_train_int_sites,
+        cur_val_int_sites,
+        obs_sites,
+        dist_matrix,
+        obs_data,
+        scalar_features,
+        run_config,
+        graph_data_n_procs=1,
+        verbose=True if cv_iter == 0 else False,
+    )
+
+
+def get_cv_iterator(fold_combs: list[tuple[int, int]]):
+    for val_fold_ind in fold_combs:
+        train_folds_ind = [
+            cur_fold for cur_fold in fold_combs if cur_fold != val_fold_ind
+        ]
+        yield train_folds_ind, val_fold_ind
 
 
 if __name__ == "__main__":
