@@ -217,7 +217,8 @@ def run_model_training(
     verbose: bool, optional
         Whether to print progress information, by default True
     """
-    if verbose: print(f"Creating site combinations")
+    if verbose:
+        print(f"Creating site combinations")
     train_site_combs, train_event_sites = ml_data.compute_site_combinations(
         event_sites,
         valid_event_int_sites,
@@ -239,7 +240,8 @@ def run_model_training(
 
     graph_feature_keys = constants.GRAPH_FEATURE_KEYS
 
-    if verbose: print(f"Getting graph data")
+    if verbose:
+        print(f"Getting graph data")
     train_graph_data, site_obs_scalar_feature_ind = get_graph_data(
         obs_data,
         train_event_sites,
@@ -248,6 +250,7 @@ def run_model_training(
         constants.GRAPH_FEATURE_KEYS,
         run_config.ims,
         n_procs=graph_data_n_procs,
+        verbose=verbose,
     )
 
     val_graph_data, _ = get_graph_data(
@@ -258,6 +261,7 @@ def run_model_training(
         constants.GRAPH_FEATURE_KEYS,
         run_config.ims,
         n_procs=graph_data_n_procs,
+        verbose=verbose,
     )
 
     train_loader = gloader.DataLoader(
@@ -283,7 +287,7 @@ def run_model_training(
         print(f"Number of validation graphs: {len(val_graph_data)}")
 
     metrics, best_model_state, best_model_epoch = train(
-        run_config, gnn_model, train_loader, val_loader
+        run_config, gnn_model, train_loader, val_loader, verbose=verbose
     )
 
     if verbose:
@@ -313,10 +317,14 @@ def run_model_training(
     torch.save(gnn_model, out_dir / "model.pt")
 
     # Save the results
-    train_results_df = get_predictions(run_config, gnn_model, train_graph_data)
+    train_results_df = get_predictions(
+        run_config, gnn_model, train_graph_data, verbose=verbose
+    )
     train_results_df.to_parquet(out_dir / "train_results.parquet")
 
-    val_results_df = get_predictions(run_config, gnn_model, val_graph_data)
+    val_results_df = get_predictions(
+        run_config, gnn_model, val_graph_data, verbose=verbose
+    )
     val_results_df.to_parquet(out_dir / "val_results.parquet")
 
     # Write the metadata
@@ -422,6 +430,7 @@ def get_graph_data(
     graph_feature_keys: dict[str, Sequence[str]],
     ims: Sequence[str],
     n_procs: int = 1,
+    verbose: bool = True,
 ):
     """
     Get the graph data for the given scenarios
@@ -439,6 +448,8 @@ def get_graph_data(
     ims: Sequence[str]
     n_procs: int, optional
         Number of processes to use, by default 1
+    verbose: bool, optional
+        Whether to print progress information, by default True
 
     Returns
     -------
@@ -458,7 +469,9 @@ def get_graph_data(
     # Create the graph data objects
     graph_data = []
     if n_procs == 1:
-        for cur_event, cur_site_combs in tqdm.tqdm(event_site_combs.items()):
+        for cur_event, cur_site_combs in tqdm.tqdm(
+            event_site_combs.items(), disable=not verbose
+        ):
             graph_data.append(
                 _get_event_graph_data(
                     cur_event,
@@ -561,7 +574,8 @@ def train(
 
     optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.001)
     for cur_epoch_ix in range(run_config.n_epochs):
-        print(f"Epoch: {cur_epoch_ix}")
+        if verbose:
+            print(f"Epoch: {cur_epoch_ix}")
 
         ### Training
         n_graphs = 0
@@ -610,7 +624,9 @@ def train(
                     pred_ln_im_mean[~nan_mask],
                     cur_y[~nan_mask],
                     pred_ln_im_std=(
-                        pred_ln_im_std[~nan_mask] if pred_ln_im_std is not None else None
+                        pred_ln_im_std[~nan_mask]
+                        if pred_ln_im_std is not None
+                        else None
                     ),
                 )
                 metrics["loss_hist_val"][cur_epoch_ix] += loss.item()
@@ -626,9 +642,13 @@ def train(
 
         if verbose:
             print(f"Epoch {cur_epoch_ix}/{run_config.n_epochs}")
-            print(f"\tTraining" f"\t\tLoss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}")
             print(
-                f"\tValidation" f"\t\tLoss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}"
+                f"\tTraining"
+                f"\t\tLoss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}"
+            )
+            print(
+                f"\tValidation"
+                f"\t\tLoss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}"
             )
 
     return metrics, best_model_state, best_model_epoch
@@ -638,6 +658,7 @@ def get_predictions(
     run_config: RunConfig,
     gnn_model: torch.nn.Module,
     graph_data: Sequence[gdata.HeteroData],
+    verbose: bool = True,
 ):
     """
     Gets model prediction for the given graph data
@@ -647,6 +668,8 @@ def get_predictions(
     run_config: RunConfig
     gnn_model: torch.nn.Module
     graph_data: Sequence[gdata.HeteroData]
+    verbose: bool, optional
+        Whether to print progress information, by default True
 
     Returns
     -------
@@ -661,7 +684,7 @@ def get_predictions(
     loss_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "loss")
 
     results = []
-    for cur_batch in tqdm.tqdm(loader):
+    for cur_batch in tqdm.tqdm(loader, disable=not verbose):
         cur_batch = cur_batch.to(run_config.device)
         cur_out = gnn_model(cur_batch)
 
@@ -686,14 +709,15 @@ def get_predictions(
 
         # Loss
         cur_loss = compute_loss(
-            pred_ln_im_mean, cur_batch.y, pred_ln_im_std=pred_im_ln_std, reduction="none"
+            pred_ln_im_mean,
+            cur_batch.y,
+            pred_ln_im_std=pred_im_ln_std,
+            reduction="none",
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
             cur_result.loc[:, loss_keys] = cur_loss.cpu().numpy(force=True)
-            cur_result.loc[:, "loss"] = (
-                cur_loss.mean(dim=1).cpu().numpy(force=True)
-            )
+            cur_result.loc[:, "loss"] = cur_loss.nanmean(dim=1).cpu().numpy(force=True)
 
         # Index
         cur_result = cur_result.set_index(

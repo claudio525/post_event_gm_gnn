@@ -166,29 +166,32 @@ def run_cv(
 
     # Run CV
     if n_procs == 1:
+        out_dirs = []
         for cv_iter, (train_folds_ind, val_fold_ind) in enumerate(
             get_cv_iterator(fold_combs)
         ):
-            _run_mp_helper(
-                event_folds,
-                site_folds,
-                val_fold_ind,
-                train_folds_ind,
-                all_sites,
-                event_sites,
-                valid_event_int_sites,
-                dist_matrix,
-                obs_data,
-                scalar_features,
-                run_config,
-                out_dir,
-                cv_iter,
-                n_cv_iters,
+            out_dirs.append(
+                _run_mp_helper(
+                    event_folds,
+                    site_folds,
+                    val_fold_ind,
+                    train_folds_ind,
+                    all_sites,
+                    event_sites,
+                    valid_event_int_sites,
+                    dist_matrix,
+                    obs_data,
+                    scalar_features,
+                    run_config,
+                    out_dir,
+                    cv_iter,
+                    n_cv_iters,
+                )
             )
     else:
         mp.set_start_method("spawn")
         with mp.Pool(processes=mp.cpu_count()) as pool:
-            pool.starmap(
+            out_dirs = pool.starmap(
                 _run_mp_helper,
                 [
                     (
@@ -213,14 +216,32 @@ def run_cv(
                 ],
             )
 
-    print(f"wtf")
+    # Post-processing
+    val_results, metrics = [], {}
+    for cur_out_dir in out_dirs:
+        val_results.append(pd.read_parquet(cur_out_dir / "val_results.parquet"))
+        metrics[cur_out_dir.stem] = pd.read_pickle(cur_out_dir / "metrics.pickle")
+
+    val_results = pd.concat(val_results, axis=0)
+    val_results.to_parquet(out_dir / "val_results.parquet")
+
+    pd.to_pickle(metrics, out_dir / "metrics.pickle")
+
+    # Generate report
+    cv_agg_notebook = Path(__file__).parent / "report_notebooks/cv_agg_results.ipynb"
+    mlt.quarto.render_quarto(
+        "mamba activate sim-ranking-pip",
+        cv_agg_notebook,
+        out_dir / "cv_agg_results.html",
+        results_dir=out_dir,
+    )
 
 
 def _run_mp_helper(
     event_folds: list[np.ndarray[str]],
     site_folds: list[np.ndarray[str]],
     val_fold_ind: tuple[int, int],
-    train_folds_ind : list[tuple[int, int]],
+    train_folds_ind: list[tuple[int, int]],
     all_sites: np.ndarray[str],
     event_sites: dict[str, np.ndarray[str]],
     valid_event_int_sites: dict[str, np.ndarray[str]],
@@ -232,7 +253,9 @@ def _run_mp_helper(
     cv_iter: int,
     n_cv_iters: int,
 ):
-    print(f"\n----------- CV iteration: {cv_iter + 1}/{n_cv_iters} -------------")
+    verbose = True if cv_iter == 0 else False
+    if verbose:
+        print(f"\n----------- CV iteration: {cv_iter + 1}/{n_cv_iters} -------------")
     cur_val_events = event_folds[val_fold_ind[0]]
     cur_val_int_sites = site_folds[val_fold_ind[1]]
 
@@ -257,8 +280,10 @@ def _run_mp_helper(
         scalar_features,
         run_config,
         graph_data_n_procs=1,
-        verbose=True if cv_iter == 0 else False,
+        verbose=verbose,
     )
+
+    return cur_out_dir
 
 
 def get_cv_iterator(fold_combs: list[tuple[int, int]]):
