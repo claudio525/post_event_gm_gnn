@@ -9,6 +9,7 @@ max_dist: 25
 
 # Model settings
 pred_std: True
+scale_IMs: True
 
 # Hyperparameters
 n_epochs: 100

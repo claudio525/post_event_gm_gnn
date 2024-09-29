@@ -114,6 +114,7 @@ def run_holdout(
         obs_data,
         scalar_features,
         run_config,
+        graph_data_n_procs=1,
     )
 
 

@@ -33,37 +33,59 @@ class RunConfig:
 
     ### Input settings
     rel_obs_data_ffp: Path
-    # Maximum distance between site-interest and observation sites
     max_dist: float
+    """Maximum distance between site-interest and observation sites"""
 
-    # Device to use
     device: str
+    """Device to use"""
 
     ### Model settings
-    # IMs to predict
     ims: Sequence[str]
-    # Whether to predict the standard deviation
+    """IMs to predict"""
     pred_std: bool
+    """Whether to predict the standard deviation"""
+
+    scale_IMs: bool
+    """Whether to scale the IMs"""
 
     ### Hyperparameters
-    # Number of training epochs
     n_epochs: int
-    # Batch size
+    """Number of training epochs"""
     batch_size: int
-    # Number of site of interest node channels
+    """Batch size"""
     n_int_node_channels: Sequence[int]
-    # Number of fully connected units for the output MLP
+    """Number of site of interest node channels"""
     fc_n_units: int
+    """Number of fully connected units for the output MLP"""
 
-    # Base output directory
     rel_results_dir: str
+    """Base output directory"""
 
     def __post_init__(self):
         assert self.obs_data_ffp.exists()
 
+        self._im_scale_params = None
+
     @property
     def n_ims(self):
         return len(self.ims)
+
+    @property
+    def im_scale_params(self):
+        if self.scale_IMs:
+            return self._im_scale_params
+
+        raise ValueError("IM standardization is not enabled")
+
+    @im_scale_params.setter
+    def im_scale_params(self, value):
+        if self.scale_IMs:
+            if self._im_scale_params is None:
+                self._im_scale_params = value
+            else:
+                raise ValueError("IM standardization is already set")
+        else:
+            raise ValueError("IM standardization is not enabled")
 
     @property
     def n_outputs(self):
@@ -240,6 +262,27 @@ def run_model_training(
 
     graph_feature_keys = constants.GRAPH_FEATURE_KEYS
 
+    if run_config.scale_IMs:
+        scale_record_ids = []
+        for cur_event in train_events:
+            cur_sites = event_sites[cur_event]
+            cur_sites = cur_sites[np.isin(cur_sites, train_int_sites)]
+
+            scale_record_ids.append(
+                mlt.array_utils.numpy_str_join("_", cur_event, cur_sites)
+            )
+
+        scale_record_ids = np.concatenate(scale_record_ids)
+
+        run_config.im_scale_params = {
+            "mean": np.log(
+                obs_data.record_df.loc[scale_record_ids, run_config.ims]
+            ).mean(skipna=True),
+            "std": np.log(obs_data.record_df.loc[scale_record_ids, run_config.ims]).std(
+                skipna=True
+            ),
+        }
+
     if verbose:
         print(f"Getting graph data")
     train_graph_data, site_obs_scalar_feature_ind = get_graph_data(
@@ -248,7 +291,7 @@ def run_model_training(
         train_site_combs,
         scalar_features,
         constants.GRAPH_FEATURE_KEYS,
-        run_config.ims,
+        run_config,
         n_procs=graph_data_n_procs,
         verbose=verbose,
     )
@@ -259,7 +302,7 @@ def run_model_training(
         val_site_combs,
         scalar_features,
         constants.GRAPH_FEATURE_KEYS,
-        run_config.ims,
+        run_config,
         n_procs=graph_data_n_procs,
         verbose=verbose,
     )
@@ -344,19 +387,20 @@ def _get_event_graph_data(
     obs_data: ObservedData,
     scalar_feature_values: pd.DataFrame,
     graph_feature_keys: dict[str, Sequence[str]],
-    ims: Sequence[str],
+    run_config: RunConfig,
 ):
     """Helper function, see get_graph_data"""
     graph_data = []
 
-    # cur_sites = event_sites[cur_event]
     cur_site_int_inds = np.unique(site_combs[:, 0])
 
-    # cur_scalar_feature_values = scalar_event_feature_values[cur_event]
-
     # Get and normalise the IM data
-    cur_im_data = obs_data.get_event_data(event, sites)
-    cur_im_data = np.log(cur_im_data.loc[:, ims])
+    cur_im_data = np.log(obs_data.get_event_data(event, sites).loc[:, run_config.ims])
+
+    if run_config.scale_IMs:
+        cur_im_data = (
+            cur_im_data - run_config.im_scale_params["mean"][run_config.ims]
+        ) / run_config.im_scale_params["std"][run_config.ims]
 
     for cur_site_int_ix in cur_site_int_inds:
         cur_site_combs_mask = site_combs[:, 0] == cur_site_int_ix
@@ -375,7 +419,7 @@ def _get_event_graph_data(
         ].values
         # Get observation site IM values and deal with nan values
         cur_obs_sites_im_values = (
-            cur_im_data.loc[cur_obs_sites, ims].replace(np.nan, 99).values
+            cur_im_data.loc[cur_obs_sites, run_config.ims].replace(np.nan, 99).values
         )
         # Add the IM values
         cur_obs_sites_features = np.concatenate(
@@ -414,7 +458,7 @@ def _get_event_graph_data(
         }
 
         cur_sc_data["y"] = torch.tensor(
-            cur_im_data.loc[cur_site_int, ims].values, dtype=torch.float32
+            cur_im_data.loc[cur_site_int, run_config.ims].values, dtype=torch.float32
         )[None, :]
 
         graph_data.append(cur_sc_data)
@@ -428,7 +472,7 @@ def get_graph_data(
     event_site_combs: dict[str, np.ndarray],
     scalar_features: ml_data.ScalarFeatures,
     graph_feature_keys: dict[str, Sequence[str]],
-    ims: Sequence[str],
+    run_config: RunConfig,
     n_procs: int = 1,
     verbose: bool = True,
 ):
@@ -480,7 +524,7 @@ def get_graph_data(
                     obs_data,
                     scalar_event_feature_values[cur_event],
                     graph_feature_keys,
-                    ims,
+                    run_config,
                 )
             )
     else:
@@ -495,7 +539,7 @@ def get_graph_data(
                         obs_data,
                         scalar_event_feature_values[cur_event],
                         graph_feature_keys,
-                        ims,
+                        run_config,
                     )
                     for cur_event, cur_site_combs in event_site_combs.items()
                 ],
@@ -698,20 +742,42 @@ def get_predictions(
         ).T
         cur_result.loc[:, run_config.ims] = cur_batch["y"].cpu().numpy(force=True)
         if run_config.pred_std:
-            pred_ln_im_mean, pred_im_ln_std = cur_out
-            cur_result.loc[:, pred_im_keys] = pred_ln_im_mean.cpu().numpy(force=True)
-            cur_result.loc[:, pred_im_std_keys] = (
-                torch.exp(pred_im_ln_std).cpu().numpy(force=True)
-            )
+            # Get the predicted mean and standard deviation
+            torch_pred_ln_im_mean, torch_pred_ln_im_ln_std = cur_out
+            pred_ln_im_std = torch.exp(torch_pred_ln_im_ln_std).cpu().numpy(force=True)
+            pred_ln_im_mean = torch_pred_ln_im_mean.cpu().numpy(force=True)
+
+            # Revert the scaling
+            if run_config.scale_IMs:
+                pred_ln_im_mean = (
+                    pred_ln_im_mean * run_config.im_scale_params["std"][run_config.ims].values[None, :]
+                ) + run_config.im_scale_params["mean"][run_config.ims].values[None, :]
+                pred_ln_im_std = (
+                    pred_ln_im_std * run_config.im_scale_params["std"][run_config.ims].values[None, :]
+                )
+
+            # Save
+            cur_result.loc[:, pred_im_keys] = pred_ln_im_mean
+            cur_result.loc[:, pred_im_std_keys] = pred_ln_im_std
         else:
-            pred_ln_im_mean, pred_im_ln_std = cur_out, None
+            # Get the mean prediction
+            torch_pred_ln_im_mean, torch_pred_ln_im_ln_std = cur_out, None
+            pred_ln_im_mean = torch_pred_ln_im_mean.cpu().numpy(force=True)
+
+            # Revert the scaling
+            if run_config.scale_IMs:
+                pred_ln_im_mean = (
+                    pred_ln_im_mean * run_config.im_scale_params["std"][run_config.ims].values[None, :]
+                ) + run_config.im_scale_params["mean"][run_config.ims].values[None, :]
+
+            # Save
             cur_result.loc[:, pred_im_keys] = pred_ln_im_mean.cpu().numpy(force=True)
 
         # Loss
         cur_loss = compute_loss(
-            pred_ln_im_mean,
+            torch_pred_ln_im_mean,
             cur_batch.y,
-            pred_ln_im_std=pred_im_ln_std,
+            pred_ln_im_std=torch_pred_ln_im_ln_std,
             reduction="none",
         )
         with warnings.catch_warnings():
