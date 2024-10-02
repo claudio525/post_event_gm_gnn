@@ -1,6 +1,8 @@
 import warnings
+from pathlib import Path
 from typing import Dict, Sequence
 from dataclasses import dataclass
+from labelled_data_array import LabelledDataArray
 
 import numpy as np
 import pandas as pd
@@ -306,3 +308,40 @@ def get_valid_site_ints(
 
     print(f"Valid SOI records: {pga_result.shape[0]}/{record_df.shape[0]}")
     return valid_int_sites, valid_event_int_sites, valid_record_ids
+
+
+def load_cv_metrics(results_dir: Path):
+    """
+    Load the cross-validation metrics
+
+    Parameters
+    ----------
+    results_dir: Path
+        Path to the CV results directory
+
+    Returns
+    -------
+    lda: LabelledDataArray
+        Labelled data array of the metrics
+    """
+    metrics = pd.read_pickle(results_dir / "metrics.pickle")
+
+    cv_keys = list(metrics.keys())
+    metric_keys = list(metrics[cv_keys[0]].keys())
+
+    results = []
+    for cur_cv in cv_keys:
+        cur_cv_results = []
+        for cur_metric in metric_keys:
+            cur_cv_results.append(metrics[cur_cv][cur_metric])
+
+        results.append(np.stack(cur_cv_results, axis=1))
+
+    data = np.stack(results, axis=2)
+    lda = LabelledDataArray(
+        data,
+        (np.arange(data.shape[0]), metric_keys, cv_keys),
+        ("epoch", "metric", "cv_iter"),
+    )
+
+    return lda

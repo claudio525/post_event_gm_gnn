@@ -156,6 +156,9 @@ def run_cv(
     )
 
     # Cross-validation setup
+    np.random.seed(run_config.seed)
+    np.random.shuffle(events)
+    np.random.shuffle(int_sites)
     event_folds = np.array_split(events, n_event_folds)
     site_folds = np.array_split(int_sites, n_site_folds)
     n_cv_iters = n_event_folds * n_site_folds
@@ -186,12 +189,12 @@ def run_cv(
                     run_config,
                     out_dir,
                     cv_iter,
-                    n_cv_iters,
+                    True,
                 )
             )
     else:
         mp.set_start_method("spawn")
-        with mp.Pool(processes=mp.cpu_count()) as pool:
+        with mp.Pool(processes=n_procs) as pool:
             out_dirs = pool.starmap(
                 _run_mp_helper,
                 [
@@ -209,7 +212,7 @@ def run_cv(
                         run_config,
                         out_dir,
                         cv_iter,
-                        n_cv_iters,
+                        (cv_iter % n_procs) == 0,
                     )
                     for cv_iter, (train_folds_ind, val_fold_ind) in enumerate(
                         get_cv_iterator(fold_combs)
@@ -220,7 +223,9 @@ def run_cv(
     # Post-processing
     val_results, metrics = [], {}
     for cur_out_dir in out_dirs:
-        val_results.append(pd.read_parquet(cur_out_dir / "val_results.parquet"))
+        cur_val_result = pd.read_parquet(cur_out_dir / "val_results.parquet")
+        cur_val_result["cv_iter"] = cur_out_dir.stem
+        val_results.append(cur_val_result)
         metrics[cur_out_dir.stem] = pd.read_pickle(cur_out_dir / "metrics.pickle")
 
     val_results = pd.concat(val_results, axis=0)
@@ -252,11 +257,8 @@ def _run_mp_helper(
     run_config: sr.ml.gnn_gm.RunConfig,
     out_dir: Path,
     cv_iter: int,
-    n_cv_iters: int,
+    verbose: bool,
 ):
-    verbose = True if cv_iter == 0 else False
-    if verbose:
-        print(f"\n----------- CV iteration: {cv_iter + 1}/{n_cv_iters} -------------")
     cur_val_events = event_folds[val_fold_ind[0]]
     cur_val_int_sites = site_folds[val_fold_ind[1]]
 

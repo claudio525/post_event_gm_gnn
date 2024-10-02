@@ -50,6 +50,8 @@ class ObservedData:
         quality_score_h1 = "score_h1"
         quality_score_h2 = "score_h2"
         quality_score_v = "score_v"
+        is_ground_level = "is_ground_level"
+        channel = "channel"
 
     SITE_COLS = list(SiteColEnums)
     EVENT_COLS = list(EventColEnums)
@@ -178,6 +180,14 @@ class ObservedData:
         self.record_df = self.record_df[~nan_mask]
         print(f"Dropped {nan_mask.sum()}/{nan_mask.shape[0]} rows with NaN values.")
 
+        self.__reset_cache()
+
+    def drop_duplicates(self, subset: Sequence[str] = None):
+        """Drops any duplicate rows."""
+        self.record_df = self.record_df.drop_duplicates(subset=subset)
+
+        self.__reset_cache()
+
     def metadata_filter(
         self,
         filter_dict: dict[str, tuple[float, float]] = None,
@@ -190,17 +200,27 @@ class ObservedData:
         Parameters
         ----------
         filter_dict: dict
-            Dictionary of key (column name) and value (range) to filter on.
-            E.g. {"mag": (5.0, 6.0), "rrup": (0.0, 10.0)}
+            Dictionary of key (column name) and
+            value (tuple, bool) to filter on.
+            E.g. {"mag": (5.0, 6.0), "rrup": (0.0, 10.0),
+            "is_ground_level": True}
         record_ids: array of strings
             Record IDs to keep.
         """
         if filter_dict is not None:
-            for cur_key, cur_key_range in filter_dict.items():
-                self.record_df = self.record_df[
-                    (self.record_df[cur_key] >= cur_key_range[0])
-                    & (self.record_df[cur_key] <= cur_key_range[1])
-                ]
+            for cur_key, cur_filter in filter_dict.items():
+                if isinstance(cur_filter, tuple):
+                    self.record_df = self.record_df[
+                        (self.record_df[cur_key] >= cur_filter[0])
+                        & (self.record_df[cur_key] <= cur_filter[1])
+                    ]
+                elif isinstance(cur_filter, bool):
+                    self.record_df = self.record_df.loc[
+                        self.record_df[cur_key] == cur_filter
+                    ]
+                else:
+                    raise ValueError(f"Unknown filter type: {type(cur_filter)}")
+
         if record_ids is not None:
             self.record_df = self.record_df[self.record_df.index.isin(record_ids)]
 
@@ -254,12 +274,20 @@ class ObservedData:
             "r_x": cls.EventSiteColEnums.rx,
         }
         other_map = {
+            "fmin_X": cls.OtherColEnums.fmin_h1,
+            "fmin_Y": cls.OtherColEnums.fmin_h2,
+            "fmin_Z": cls.OtherColEnums.fmin_v,
+            "score_X": cls.OtherColEnums.quality_score_h1,
+            "score_Y": cls.OtherColEnums.quality_score_h2,
+            "score_Z": cls.OtherColEnums.quality_score_v,
             "fmin_mean_X": cls.OtherColEnums.fmin_h1,
             "fmin_mean_Y": cls.OtherColEnums.fmin_h2,
             "fmin_mean_Z": cls.OtherColEnums.fmin_v,
             "score_mean_X": cls.OtherColEnums.quality_score_h1,
             "score_mean_Y": cls.OtherColEnums.quality_score_h2,
             "score_mean_Z": cls.OtherColEnums.quality_score_v,
+            "is_ground_level": cls.OtherColEnums.is_ground_level,
+            "chan": cls.OtherColEnums.channel,
         }
         mapping_dict = site_cols_map | event_map | event_site_map | other_map
 
@@ -383,8 +411,6 @@ class ObservedData:
         }
 
         record_df = pd.read_excel(nga_west2_flat_ffp, index_col=0)
-
-        print(f"wtf")
 
 
 class CIMResults:

@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.data as gdata
 import torch_geometric.loader as gloader
+import torch_geometric.data.batch as gbatch
 import tqdm
 
 import ml_tools as mlt
@@ -107,6 +108,7 @@ class RunConfig:
             "device": self.device,
             "ims": list(self.ims),
             "pred_std": self.pred_std,
+            "scale_IMs": self.scale_IMs,
             "n_epochs": self.n_epochs,
             "batch_size": self.batch_size,
             "n_int_node_channels": list(self.n_int_node_channels),
@@ -553,20 +555,20 @@ def get_graph_data(
 def compute_loss(
     pred_ln_im_mean: torch.Tensor,
     target: torch.Tensor,
-    pred_ln_im_std: torch.Tensor = None,
-    scale_constant: float = 10.0,
+    pred_ln_im_ln_std: torch.Tensor = None,
+    scale_constant: float = 1.0,
     reduction: str = "mean",
 ):
     """
     Computes either the MSE or the Gaussian NLL loss,
     depending on whether the standard deviation is predicted
     """
-    if pred_ln_im_std is not None:
+    if pred_ln_im_ln_std is not None:
         loss = (
             F.gaussian_nll_loss(
                 pred_ln_im_mean,
                 target,
-                torch.exp(pred_ln_im_std) ** 2,
+                torch.exp(pred_ln_im_ln_std) ** 2,
                 reduction=reduction,
             )
             * scale_constant
@@ -611,6 +613,10 @@ def train(
     metrics = {
         "loss_hist_train": np.zeros(run_config.n_epochs),
         "loss_hist_val": np.zeros(run_config.n_epochs),
+        "mse_hist_train": np.zeros(run_config.n_epochs),
+        "mse_hist_val": np.zeros(run_config.n_epochs),
+        "mean_sigma_hist_train": np.zeros(run_config.n_epochs),
+        "mean_sigma_hist_val": np.zeros(run_config.n_epochs),
     }
 
     best_val_loss = np.inf
@@ -630,53 +636,49 @@ def train(
 
             optimizer.zero_grad()
             if run_config.pred_std:
-                pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch)
+                pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch)
             else:
-                pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch), None
+                pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch), None
 
             nan_mask = torch.isnan(cur_y)
             loss = compute_loss(
                 pred_ln_im_mean[~nan_mask],
                 cur_y[~nan_mask],
-                pred_ln_im_std=(
-                    pred_ln_im_std[~nan_mask] if pred_ln_im_std is not None else None
+                pred_ln_im_ln_std=(
+                    pred_ln_im_ln_std[~nan_mask]
+                    if pred_ln_im_ln_std is not None
+                    else None
                 ),
             )
-            loss.backward()
+            cur_bresult = _get_batch_result(cur_batch, gnn_model, run_config)
+
+            cur_bresult.loss.backward()
             optimizer.step()
 
-            metrics["loss_hist_train"][cur_epoch_ix] += loss.item()
+            metrics = _save_metrics(
+                cur_bresult, metrics, run_config, cur_epoch_ix, "train"
+            )
             n_graphs += cur_batch.num_graphs
 
         metrics["loss_hist_train"][cur_epoch_ix] /= n_graphs
+        metrics["mse_hist_train"][cur_epoch_ix] /= n_graphs
+        metrics["mean_sigma_hist_train"][cur_epoch_ix] /= n_graphs
 
         ### Validation
         gnn_model.eval()
         n_graphs = 0
         with torch.no_grad():
             for cur_batch in val_loader:
-                cur_batch = cur_batch.to(run_config.device)
-                cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
+                cur_bresult = _get_batch_result(cur_batch, gnn_model, run_config)
 
-                if run_config.pred_std:
-                    pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch)
-                else:
-                    pred_ln_im_mean, pred_ln_im_std = gnn_model(cur_batch), None
-
-                nan_mask = torch.isnan(cur_y)
-                loss = compute_loss(
-                    pred_ln_im_mean[~nan_mask],
-                    cur_y[~nan_mask],
-                    pred_ln_im_std=(
-                        pred_ln_im_std[~nan_mask]
-                        if pred_ln_im_std is not None
-                        else None
-                    ),
+                metrics = _save_metrics(
+                    cur_bresult, metrics, run_config, cur_epoch_ix, "val"
                 )
-                metrics["loss_hist_val"][cur_epoch_ix] += loss.item()
                 n_graphs += cur_batch.num_graphs
 
         metrics["loss_hist_val"][cur_epoch_ix] /= n_graphs
+        metrics["mse_hist_val"][cur_epoch_ix] /= n_graphs
+        metrics["mean_sigma_hist_val"][cur_epoch_ix] /= n_graphs
 
         # Keep track of the best model
         if metrics["loss_hist_val"][cur_epoch_ix] < best_val_loss:
@@ -688,14 +690,157 @@ def train(
             print(f"Epoch {cur_epoch_ix}/{run_config.n_epochs}")
             print(
                 f"\tTraining"
-                f"\t\tLoss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}"
+                f"\t\tLoss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.4f}"
             )
             print(
                 f"\tValidation"
-                f"\t\tLoss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}"
+                f"\t\tLoss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.4f}"
             )
 
     return metrics, best_model_state, best_model_epoch
+
+
+class BatchResult(NamedTuple):
+    batch: gdata.Batch
+    """The batch data"""
+
+    y: torch.Tensor
+    """The target IM values"""
+    pred_ln_im_mean: torch.Tensor
+    """The predicted lnIM mean values"""
+    pred_ln_im_ln_std: torch.Tensor
+    """The predicted lnIM standard deviation values in logspace"""
+    pred_ln_im_std: torch.Tensor
+    """The predicted lnIM standard deviation values"""
+
+    nan_mask: torch.Tensor
+    """Mask for nan values in y"""
+    loss: torch.Tensor
+    """The loss to preform backpropagation"""
+    ind_loss: torch.Tensor
+    """The individual losses, this includes nan-values"""
+
+
+def _save_metrics(
+    batch_result: BatchResult,
+    metrics: dict[str, np.ndarray[float]],
+    run_config: RunConfig,
+    epoch_ix: int,
+    result_type: str,
+):
+    """Computes and saves the metrics for a single batch"""
+    loss_hist_key = f"loss_hist_{result_type}"
+    mse_hist_key = f"mse_hist_{result_type}"
+    mean_sigma_hist_key = f"mean_sigma_hist_{result_type}"
+
+    # Save metrics
+    metrics[loss_hist_key][epoch_ix] += (
+        batch_result.ind_loss.nanmean(dim=1).sum().item()
+    )
+    metrics[mse_hist_key][epoch_ix] += F.mse_loss(
+        batch_result.pred_ln_im_mean[~batch_result.nan_mask],
+        batch_result.y[~batch_result.nan_mask],
+    ).item()
+    if run_config.pred_std:
+        metrics[mean_sigma_hist_key][epoch_ix] += (
+            batch_result.pred_ln_im_std.mean(dim=1).sum().item()
+        )
+
+    return metrics
+
+
+def _get_batch_result(batch: gdata.Batch, gnn_model: nn.Module, run_config: RunConfig):
+    """
+    Gets the result for a single batch
+
+    Parameters
+    ----------
+    batch: gdata.Batch
+    gnn_model: nn.Module
+    run_config: RunConfig
+
+    Returns
+    -------
+    result: BatchResult
+        The batch results
+    """
+    cur_batch = batch.to(run_config.device)
+    cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
+
+    if run_config.pred_std:
+        pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch)
+    else:
+        pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch), None
+
+    nan_mask = torch.isnan(cur_y)
+    loss = compute_loss(
+        pred_ln_im_mean[~nan_mask],
+        cur_y[~nan_mask],
+        pred_ln_im_ln_std=(
+            pred_ln_im_ln_std[~nan_mask] if pred_ln_im_ln_std is not None else None
+        ),
+    )
+    ind_loss = compute_loss(
+        pred_ln_im_mean,
+        cur_y,
+        pred_ln_im_ln_std=(
+            pred_ln_im_ln_std if pred_ln_im_ln_std is not None else None
+        ),
+        reduction="none",
+    )
+
+    return BatchResult(
+        batch=batch,
+        y=cur_y,
+        pred_ln_im_mean=pred_ln_im_mean,
+        pred_ln_im_ln_std=pred_ln_im_ln_std,
+        pred_ln_im_std=(
+            torch.exp(pred_ln_im_ln_std) if pred_ln_im_ln_std is not None else None
+        ),
+        nan_mask=nan_mask,
+        loss=loss,
+        ind_loss=ind_loss,
+    )
+
+
+def revert_im_scaling(
+    scaled_ln_im_mean: np.ndarray[float],
+    run_config: RunConfig,
+    scaled_ln_im_std: np.ndarray[float] = None,
+):
+    """
+    Reverts the IM scaling
+
+    Parameters
+    ----------
+    scaled_ln_im_mean: np.ndarray[float]
+        The scaled IM (mean) values
+    run_config: RunConfig
+    scaled_ln_im_std: np.ndarray[float], optional
+        The scaled IM standard deviation values
+
+    Returns
+    -------
+    ln_im_mean: np.ndarray[float]
+        The unscaled IM (mean) values
+    ln_im_std: np.ndarray[float]
+        The unscaled IM standard deviation values.
+        Only returned if scaled_ln_im_std is not None.
+    """
+    ln_im_mean = (
+        scaled_ln_im_mean
+        * run_config.im_scale_params["std"][run_config.ims].values[None, :]
+        + +run_config.im_scale_params["mean"][run_config.ims].values[None, :]
+    )
+
+    if scaled_ln_im_std is not None:
+        ln_im_std = (
+            scaled_ln_im_std
+            * run_config.im_scale_params["std"][run_config.ims].values[None, :]
+        )
+        return ln_im_mean, ln_im_std
+
+    return ln_im_mean, None
 
 
 def get_predictions(
@@ -740,7 +885,14 @@ def get_predictions(
             ],
             index=["event_id", "site_int", "obs_sites"],
         ).T
-        cur_result.loc[:, run_config.ims] = cur_batch["y"].cpu().numpy(force=True)
+
+        ## Add observed
+        obs_ims = cur_batch["y"].cpu().numpy(force=True)
+        if run_config.scale_IMs:
+            obs_ims, _ = revert_im_scaling(obs_ims, run_config)
+        cur_result.loc[:, run_config.ims] = obs_ims
+
+        # Add predicted
         if run_config.pred_std:
             # Get the predicted mean and standard deviation
             torch_pred_ln_im_mean, torch_pred_ln_im_ln_std = cur_out
@@ -749,11 +901,8 @@ def get_predictions(
 
             # Revert the scaling
             if run_config.scale_IMs:
-                pred_ln_im_mean = (
-                    pred_ln_im_mean * run_config.im_scale_params["std"][run_config.ims].values[None, :]
-                ) + run_config.im_scale_params["mean"][run_config.ims].values[None, :]
-                pred_ln_im_std = (
-                    pred_ln_im_std * run_config.im_scale_params["std"][run_config.ims].values[None, :]
+                pred_ln_im_mean, pred_ln_im_std = revert_im_scaling(
+                    pred_ln_im_mean, run_config, pred_ln_im_std
                 )
 
             # Save
@@ -766,9 +915,7 @@ def get_predictions(
 
             # Revert the scaling
             if run_config.scale_IMs:
-                pred_ln_im_mean = (
-                    pred_ln_im_mean * run_config.im_scale_params["std"][run_config.ims].values[None, :]
-                ) + run_config.im_scale_params["mean"][run_config.ims].values[None, :]
+                pred_ln_im_mean, _ = revert_im_scaling(pred_ln_im_mean, run_config)
 
             # Save
             cur_result.loc[:, pred_im_keys] = pred_ln_im_mean.cpu().numpy(force=True)
@@ -777,7 +924,7 @@ def get_predictions(
         cur_loss = compute_loss(
             torch_pred_ln_im_mean,
             cur_batch.y,
-            pred_ln_im_std=torch_pred_ln_im_ln_std,
+            pred_ln_im_ln_std=torch_pred_ln_im_ln_std,
             reduction="none",
         )
         with warnings.catch_warnings():
