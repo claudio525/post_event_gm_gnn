@@ -13,6 +13,7 @@ import spatial_hazard as sh
 import sha_calc as sha
 
 from . import constants
+from .data_classes import ObservedData
 
 
 @dataclass
@@ -412,11 +413,6 @@ def run_emp_gmms(
     result_df.to_csv(output_ffp, index_label="id")
 
 
-def load_obs_data(obs_ffp: Path):
-    """Loads the observation data from the NZ-GMDB IM flat file"""
-    return pd.read_csv(obs_ffp, index_col=0, low_memory=False, dtype={"evid": str})
-
-
 def load_sim_waveform(sim_rupture_dir: Path, rel_id: str, site: str):
     """
     Loads the acceleration time-series data
@@ -513,3 +509,45 @@ def load_correlations(data_dir: Path):
         for cur_ffp in data_dir.iterdir()
         if cur_ffp.is_file() and not cur_ffp.stem.startswith("_")
     }
+
+
+def load_obs_data(nzgmdb_ffp: Path):
+    """
+    Load the observed data and perform the
+    necessary preparation steps, depending
+    on the version.
+
+    Parameters
+    ----------
+    nzgmdb_ffp: Path
+        Path to the NZGMDB flat file
+
+    Returns
+    -------
+    obs_data: ObservedData
+        Observed data object
+    """
+    obs_data = ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
+    assert obs_data.data_source is constants.ObsDataSource.NZGMDB
+
+    # Filter out nan values
+    obs_data = obs_data.drop_nan()
+
+    # Some basic filtering
+    if obs_data.nzgmdb_version is constants.NZGMDBVersion.v3p4:
+        obs_data = obs_data.metadata_filter(dict(rrup=(0, 250)))
+    elif obs_data.nzgmdb_version is constants.NZGMDBVersion.v4p0:
+        obs_data = obs_data.metadata_filter(dict(rrup=(0, 250), is_ground_level=True))
+    else:
+        raise NotImplementedError("Invalid NZGMDB version")
+
+    # Drop duplicates
+    obs_data = obs_data.drop_duplicates(["event_id", "site_id"])
+
+    # Apply fmin
+    obs_data = obs_data.apply_fmin_filter(ObservedData.OtherColEnums.fmin)
+
+    return obs_data
+
+
+

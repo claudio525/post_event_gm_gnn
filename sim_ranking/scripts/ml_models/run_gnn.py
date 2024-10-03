@@ -35,9 +35,7 @@ def run_holdout(
     holdout_config = sr.ml.gnn_gm.HoldoutConfig.from_yaml(holdout_config_ffp)
 
     ### Data loading
-    obs_data = sr.ObservedData.from_nzgmdb_flat(run_config.obs_data_ffp)
-    obs_data.drop_nan()
-    obs_data.apply_fmin_filter(sr.ObservedData.OtherColEnums.fmin)
+    obs_data = sr.data.load_obs_data(run_config.obs_data_ffp)
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites
     print(f"Number of events: {len(events)}")
@@ -133,9 +131,7 @@ def run_cv(
     )
 
     ### Data loading
-    obs_data = sr.ObservedData.from_nzgmdb_flat(run_config.obs_data_ffp)
-    obs_data.drop_nan()
-    obs_data.apply_fmin_filter(sr.ObservedData.OtherColEnums.fmin)
+    obs_data = sr.data.load_obs_data(run_config.obs_data_ffp)
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites
     print(f"Number of events: {len(events)}")
@@ -161,12 +157,11 @@ def run_cv(
     np.random.shuffle(int_sites)
     event_folds = np.array_split(events, n_event_folds)
     site_folds = np.array_split(int_sites, n_site_folds)
-    n_cv_iters = n_event_folds * n_site_folds
 
     fold_combs = [(i, j) for i in range(n_event_folds) for j in range(n_site_folds)]
 
     id_suffix = f"_{id_suffix}" if len(id_suffix) > 0 else ""
-    out_dir = run_config.results_dir / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+    out_dir = run_config.results_dir / f"{mlt.utils.create_run_id(False)}_cv{id_suffix}"
 
     # Run CV
     if n_procs == 1:
@@ -221,6 +216,8 @@ def run_cv(
             )
 
     # Post-processing
+    run_config.to_yaml(out_dir / "run_config.yaml")
+
     val_results, metrics = [], {}
     for cur_out_dir in out_dirs:
         cur_val_result = pd.read_parquet(cur_out_dir / "val_results.parquet")

@@ -181,12 +181,14 @@ class ObservedData:
         print(f"Dropped {nan_mask.sum()}/{nan_mask.shape[0]} rows with NaN values.")
 
         self.__reset_cache()
+        return self
 
     def drop_duplicates(self, subset: Sequence[str] = None):
         """Drops any duplicate rows."""
         self.record_df = self.record_df.drop_duplicates(subset=subset)
 
         self.__reset_cache()
+        return self
 
     def metadata_filter(
         self,
@@ -225,6 +227,7 @@ class ObservedData:
             self.record_df = self.record_df[self.record_df.index.isin(record_ids)]
 
         self.__reset_cache()
+        return self
 
     def apply_fmin_filter(self, fmin_col: str):
         """Applies fmin filtering to pSA"""
@@ -238,6 +241,8 @@ class ObservedData:
             self.record_df[cur_pSA_col] = np.where(
                 cur_period > max_usable_period, np.nan, self.record_df[cur_pSA_col]
             )
+
+        return self
 
     @classmethod
     def from_nzgmdb_flat(

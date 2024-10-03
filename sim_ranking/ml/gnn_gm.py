@@ -690,11 +690,11 @@ def train(
             print(f"Epoch {cur_epoch_ix}/{run_config.n_epochs}")
             print(
                 f"\tTraining"
-                f"\t\tLoss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.4f}"
+                f"\t\tLoss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
             )
             print(
                 f"\tValidation"
-                f"\t\tLoss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.4f}"
+                f"\t\tLoss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
             )
 
     return metrics, best_model_state, best_model_epoch
