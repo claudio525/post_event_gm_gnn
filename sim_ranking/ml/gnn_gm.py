@@ -37,6 +37,9 @@ class RunConfig:
     max_dist: float
     """Maximum distance between site-interest and observation sites"""
 
+    ### Features
+    graph_feature_keys: dict[str, Sequence[str]]
+
     device: str
     """Device to use"""
 
@@ -262,8 +265,6 @@ def run_model_training(
         max_dist=run_config.max_dist,
     )
 
-    graph_feature_keys = constants.GRAPH_FEATURE_KEYS
-
     if run_config.scale_IMs:
         scale_record_ids = []
         for cur_event in train_events:
@@ -292,7 +293,7 @@ def run_model_training(
         train_event_sites,
         train_site_combs,
         scalar_features,
-        constants.GRAPH_FEATURE_KEYS,
+        run_config.graph_feature_keys,
         run_config,
         n_procs=graph_data_n_procs,
         verbose=verbose,
@@ -303,7 +304,7 @@ def run_model_training(
         val_event_sites,
         val_site_combs,
         scalar_features,
-        constants.GRAPH_FEATURE_KEYS,
+        run_config.graph_feature_keys,
         run_config,
         n_procs=graph_data_n_procs,
         verbose=verbose,
@@ -317,10 +318,10 @@ def run_model_training(
     )
 
     gnn_model = gnn_modules.BasicAttentionGNN(
-        len(graph_feature_keys["site_obs"]) + len(run_config.ims),
-        len(graph_feature_keys["site_obs"]),
-        len(graph_feature_keys["site_int"]),
-        len(graph_feature_keys["edge"]),
+        len(run_config.graph_feature_keys["site_obs"]) + len(run_config.ims),
+        len(run_config.graph_feature_keys["site_obs"]),
+        len(run_config.graph_feature_keys["site_int"]),
+        len(run_config.graph_feature_keys["edge"]),
         run_config,
         torch.from_numpy(site_obs_scalar_feature_ind),
     )

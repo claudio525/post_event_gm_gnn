@@ -7,6 +7,26 @@ seed: 42
 rel_obs_data_ffp: gm_datasets/nz_gmdb/v3.4/Tables/ground_motion_im_table_rotd50_flat.csv
 max_dist: 25
 
+# Features
+graph_feature_keys:
+  edge:
+    - "dist"
+    - "angular_dist"
+  site_int:
+    - "vs30_site_int"
+    - "z1p0_site_int"
+    - "z2p5_site_int"
+    - "tsite_site_int"
+    - "rrup_site_int"
+    - "mag"
+  site_obs:
+      - "vs30_site_obs"
+      - "z1p0_site_obs"
+      - "z2p5_site_obs"
+      - "tsite_site_obs"
+      - "rrup_site_obs"
+
+
 # Model settings
 pred_std: True
 scale_IMs: True

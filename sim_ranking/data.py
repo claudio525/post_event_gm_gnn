@@ -317,7 +317,6 @@ def run_emp_gmms(
         site_df = site_df.rename(columns={"Vs30": "vs30", "Z1.0": "z1pt0"})
         site_df["z1pt0"] = site_df["z1pt0"] / 1000
 
-
     ### Data prep
     site_locs = np.concatenate(
         (site_df[["lon", "lat"]].values, np.zeros((site_df.shape[0], 1))), axis=1
@@ -347,8 +346,12 @@ def run_emp_gmms(
                 continue
 
             cur_data_df = site_df.loc[cur_sites].copy(True)
-            cur_data_df.loc[:, "rrup"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_rup"].values
-            cur_data_df.loc[:, "rjb"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_jb"].values
+            cur_data_df.loc[:, "rrup"] = cur_nzgmdb_flatfile.loc[
+                cur_sites, "r_rup"
+            ].values
+            cur_data_df.loc[:, "rjb"] = cur_nzgmdb_flatfile.loc[
+                cur_sites, "r_jb"
+            ].values
             cur_data_df.loc[:, "rx"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_x"].values
             cur_data_df.loc[:, "ry"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_y"].values
 
@@ -511,9 +514,9 @@ def load_correlations(data_dir: Path):
     }
 
 
-def load_obs_data(nzgmdb_ffp: Path):
+def load_obs_nzgmdb(nzgmdb_ffp: Path):
     """
-    Load the observed data and perform the
+    Load the observed data from NZGMDB and performs the
     necessary preparation steps, depending
     on the version.
 
@@ -550,4 +553,73 @@ def load_obs_data(nzgmdb_ffp: Path):
     return obs_data
 
 
+def load_obs_nga_west2(
+    nga_west2_ffp: Path,
+):
+    """
+    Load the observed data from NGA-West2 and performs the
+    necessary preparation steps.
 
+    Parameters
+    ----------
+    nga_west2_ffp: Path
+        Path to the NGA-West2 flat file
+
+    Returns
+    -------
+    obs_data: ObservedData
+        Observed data object
+    """
+    # Load
+    obs_data = ObservedData.from_nga_west2_flat(nga_west2_ffp)
+
+    # Drop nan values
+    obs_data.drop_nan()
+
+    # Drop duplicates
+    obs_data.drop_duplicates(
+        [ObservedData.EventColEnums.event_id, ObservedData.SiteColEnums.site_id]
+    )
+
+    # Distance filtering
+    obs_data = obs_data.metadata_filter(dict(rrup=(0, 250)))
+
+    # Apply fmin
+    obs_data = obs_data.apply_fmin_filter(ObservedData.OtherColEnums.fmin)
+
+    return obs_data
+
+
+def load_obs_nga_subduction(
+        nga_sub_ffp: Path
+):
+    """
+    Load the observed data from NGA-Subduction and performs the
+    necessary preparation steps.
+
+    Parameters
+    ----------
+    nga_sub_ffp: Path
+        Path to the NGA-Subduction flat file
+
+    Returns
+    -------
+    obs_data: ObservedData
+        Observed data object
+
+    """
+    # Load
+    obs_data = ObservedData.from_nga_subduction_flat(nga_sub_ffp)
+
+    # Drop nan rows
+    obs_data = obs_data.drop_nan()
+
+    # Drop duplicates
+    obs_data = obs_data.drop_duplicates(
+        [ObservedData.EventColEnums.event_id, ObservedData.SiteColEnums.site_id]
+    )
+
+    # Distance filtering
+    obs_data = obs_data.metadata_filter(dict(rrup=(0, 250)))
+
+    return obs_data

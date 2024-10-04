@@ -35,7 +35,7 @@ def run_holdout(
     holdout_config = sr.ml.gnn_gm.HoldoutConfig.from_yaml(holdout_config_ffp)
 
     ### Data loading
-    obs_data = sr.data.load_obs_data(run_config.obs_data_ffp)
+    obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites
     print(f"Number of events: {len(events)}")
@@ -131,7 +131,7 @@ def run_cv(
     )
 
     ### Data loading
-    obs_data = sr.data.load_obs_data(run_config.obs_data_ffp)
+    obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites
     print(f"Number of events: {len(events)}")

@@ -8,6 +8,8 @@ import ml_tools as mlt
 
 class ObsDataSource(StrEnum):
     NZGMDB = "NZGMDB"
+    NGAWest2 = "NGAWest2"
+    NGASubduction = "NGASubduction"
 
 class NZGMDBVersion(StrEnum):
     v3p0 = "v3.0"

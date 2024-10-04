@@ -43,10 +43,17 @@ class ObservedData:
 
     class OtherColEnums(StrEnum):
         fhp = "fhp"
+        """High-pass filter frequency"""
+        tmax = "tmax"
+        """Maximum usable period"""
         fmin = "fmin"
+        """Minimum usable frequency"""
         fmin_h1 = "fmin_h1"
+        """Minimum usable frequency for horizontal component 1"""
         fmin_h2 = "fmin_h2"
+        """Minimum usable frequency for horizontal component 2"""
         fmin_v = "fmin_v"
+        """Minimum usable frequency for vertical component"""
         quality_score_h1 = "score_h1"
         quality_score_h2 = "score_h2"
         quality_score_v = "score_v"
@@ -177,10 +184,11 @@ class ObservedData:
     def drop_nan(self):
         """Drops any rows with NaN values."""
         nan_mask = self.record_df.isna().any(axis=1)
-        self.record_df = self.record_df[~nan_mask]
-        print(f"Dropped {nan_mask.sum()}/{nan_mask.shape[0]} rows with NaN values.")
+        if np.count_nonzero(nan_mask) > 0:
+            self.record_df = self.record_df[~nan_mask]
+            print(f"Dropped {nan_mask.sum()}/{nan_mask.shape[0]} rows with NaN values.")
 
-        self.__reset_cache()
+            self.__reset_cache()
         return self
 
     def drop_duplicates(self, subset: Sequence[str] = None):
@@ -392,30 +400,156 @@ class ObservedData:
         return cls(record_df, nzgmdb_flat_ffp, constants.ObsDataSource.NZGMDB, version)
 
     @classmethod
-    def from_nga_west2_flat(
-        cls, nga_west2_flat_ffp: Path, event_site_id_index: bool = True
-    ):
+    def from_nga_west2_flat(cls, nga_west2_flat_ffp: Path):
+        """Creates an observed data object from the NGA West 2 flat file."""
         site_cols_map = {
-            "Station Name": "site_id",
-            "Vs30 (m/s) selected for analysis": "vs30",
-            "Station Latitude": "site_lat",
-            "Station Longitude": "site_lon",
+            "Station Sequence Number": cls.SiteColEnums.site_id,
+            "Vs30 (m/s) selected for analysis": cls.SiteColEnums.vs30,
+            "Station Latitude": cls.SiteColEnums.site_lat,
+            "Station Longitude": cls.SiteColEnums.site_lon,
         }
         event_map = {
-            "EQID": "event_id",
-            "Earthquake Magnitude": "mag",
-            "ev_depth": "depth",
-            "z_tor": "ztor",
-            "ev_lat": "event_lat",
-            "ev_lon": "event_lon",
+            "EQID": cls.EventColEnums.event_id,
+            "Earthquake Magnitude": cls.EventColEnums.mag,
+            "Hypocenter Depth (km)": cls.EventColEnums.depth,
+            "Depth to Top Of Fault Rupture Model": cls.EventColEnums.ztor,
+            "Hypocenter Latitude (deg)": cls.EventColEnums.event_lat,
+            "Hypocenter Longitude (deg)": cls.EventColEnums.event_lon,
         }
         event_site_map = {
-            "r_jb": "rjb",
-            "r_rup": "rrup",
-            "r_x": "rx",
+            "Joyner-Boore Dist. (km)": cls.EventSiteColEnums.rjb,
+            "ClstD (km)": cls.EventSiteColEnums.rrup,
+            "Rx": cls.EventSiteColEnums.rx,
+        }
+        other_map = {
+            "Lowest Usable Freq - H1 (Hz)": cls.OtherColEnums.fmin_h1,
+            "Lowest Usable Freq - H2 (Hz)": cls.OtherColEnums.fmin_h2,
+            "Lowest Usable Freq - Ave. Component (Hz)": cls.OtherColEnums.fmin,
+        }
+        im_map = {
+            "PGA (g)": "PGA",
+            "PGV (cm/s)": "PGV",
         }
 
-        record_df = pd.read_excel(nga_west2_flat_ffp, index_col=0)
+        def _is_pSA(col: str):
+            return col.startswith("T") and col.endswith("S")
+
+        def _get_pSA_key(col: str):
+            return f"pSA_{float(col[1:-1])}"
+
+        # Load
+        if nga_west2_flat_ffp.name.endswith(".parquet"):
+            record_df = pd.read_parquet(nga_west2_flat_ffp)
+        else:
+            record_df = pd.read_excel(nga_west2_flat_ffp, index_col=0)
+
+        # Renaming
+        im_map = im_map | {
+            cur_col: _get_pSA_key(cur_col)
+            for cur_col in record_df.columns
+            if _is_pSA(cur_col)
+        }
+        mapping_dict = site_cols_map | event_map | event_site_map | other_map | im_map
+        record_df = record_df.rename(columns=mapping_dict)
+
+        # Drop any columns not of interest
+        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
+        record_df = record_df[cols]
+
+        # Drop any records with invalid event or site id
+        drop_mask = (record_df[cls.EventColEnums.event_id] == -999) | (
+            record_df[cls.SiteColEnums.site_id] == -999
+        )
+        record_df = record_df[~drop_mask]
+
+        # Replace -999 with nan values
+        record_df = record_df.replace(-999.0, np.nan)
+
+        # Update index
+        assert (record_df.dtypes[cls.EventColEnums.event_id] == np.int64) and (
+            record_df.dtypes[cls.SiteColEnums.site_id] == np.int64
+        )
+        record_df.index = mlt.array_utils.numpy_str_join(
+            "_",
+            record_df["event_id"].values.astype(str),
+            record_df["site_id"].values.astype(str),
+        )
+
+        return cls(
+            record_df,
+            nga_west2_flat_ffp,
+            constants.ObsDataSource.NGAWest2,
+        )
+
+    @classmethod
+    def from_nga_subduction_flat(cls, nga_sub_ffp: Path):
+        site_cols_map = {
+            "NGAsubSSN": cls.SiteColEnums.site_id,
+            "Vs30_Selected_for_Analysis_m_s": cls.SiteColEnums.vs30,
+            "Station_Latitude_deg": cls.SiteColEnums.site_lat,
+            "Station_Longitude_deg": cls.SiteColEnums.site_lon,
+        }
+        event_map = {
+            "NGAsubEQID": cls.EventColEnums.event_id,
+            "Earthquake_Magnitude": cls.EventColEnums.mag,
+            "Hypocenter_Depth_km": cls.EventColEnums.depth,
+            "Ztor_km": cls.EventColEnums.ztor,
+            "Hypocenter_Latitude_deg": cls.EventColEnums.event_lat,
+            "Hypocenter_Longitude_deg": cls.EventColEnums.event_lon,
+        }
+        event_site_map = {
+            "Rjb_km": cls.EventSiteColEnums.rjb,
+            "ClstD_km": cls.EventSiteColEnums.rrup,
+            "Rx_km": cls.EventSiteColEnums.rx,
+        }
+        other_map = {
+            "Longest_Usable_Period_for_PSa_Ave_Component_sec": cls.OtherColEnums.tmax,
+        }
+        im_map = {
+            "PGA (g)": "PGA",
+            "PGV (cm/s)": "PGV",
+        }
+
+        def _is_pSA(col: str):
+            return col.startswith("T") and col.endswith("S")
+
+        def _get_pSA_key(col: str):
+            return f"pSA_{float(col[1:-1].replace('pt', '.'))}"
+
+        # Load
+        if nga_sub_ffp.name.endswith(".parquet"):
+            record_df = pd.read_parquet(nga_sub_ffp)
+        else:
+            record_df = pd.read_excel(nga_sub_ffp, index_col=0)
+
+        # Renaming
+        im_map = im_map | {
+            cur_col: _get_pSA_key(cur_col)
+            for cur_col in record_df.columns
+            if _is_pSA(cur_col)
+        }
+        mapping_dict = site_cols_map | event_map | event_site_map | other_map | im_map
+        record_df = record_df.rename(columns=mapping_dict)
+
+        # Drop any columns not of interest
+        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
+        record_df = record_df[cols]
+
+        # Replace -999 with nan values
+        record_df = record_df.replace(-999, np.nan)
+
+        # Update index
+        record_df.index = mlt.array_utils.numpy_str_join(
+            "_",
+            record_df["event_id"].values.astype(str),
+            record_df["site_id"].values.astype(str),
+        )
+
+        return cls(
+            record_df,
+            nga_sub_ffp,
+            constants.ObsDataSource.NGASubduction,
+        )
 
 
 class CIMResults:

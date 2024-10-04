@@ -57,7 +57,7 @@ def load_cv_results(results_dir: Path):
     run_config = sr.ml.gnn_gm.RunConfig.from_yaml(results_dir / "run_config.yaml")
 
     # obs_data = st_utils.get_observed_data(run_config.obs_data_ffp)
-    obs_data = sr.data.load_obs_data(run_config.obs_data_ffp)
+    obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
     dist_matrix = st_utils.get_dist_matrix(obs_data)
 
     run_results = {}
