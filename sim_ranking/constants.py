@@ -11,10 +11,21 @@ class ObsDataSource(StrEnum):
     NGAWest2 = "NGAWest2"
     NGASubduction = "NGASubduction"
 
+
 class NZGMDBVersion(StrEnum):
     v3p0 = "v3.0"
     v3p4 = "v3.4"
     v4p0 = "v4.0"
+
+
+class TectonicType(StrEnum):
+    CRUSTAL = "crustal"
+    SUBDUCTION_INTERFACE = "subduction_interface"
+    SUBDUCTION_SLAB = "subduction_slab"
+    OUTER_RISE = "outer_rise"
+    MANTLE = "mantle"
+    UNKNOWN = "unknown"
+
 
 class RankingMethod(Enum):
     emp_cMVN = 1
@@ -102,7 +113,7 @@ GRAPH_FEATURE_KEYS = {
         "z2p5_site_obs",
         "tsite_site_obs",
         "rrup_site_obs",
-    ]
+    ],
 }
 
 

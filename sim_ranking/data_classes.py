@@ -16,49 +16,49 @@ from . import constants
 class ObservedData:
 
     class EventColEnums(StrEnum):
-        event_id = "event_id"
-        mag = "mag"
-        depth = "depth"
-        rake = "rake"
-        strike = "strike"
-        dip = "dip"
-        ztor = "ztor"
-        tect_type = "tect_type"
-        event_lat = "event_lat"
-        event_lon = "event_lon"
+        EVENT_ID = "event_id"
+        MAG = "mag"
+        DEPTH = "depth"
+        RAKE = "rake"
+        STRIKE = "strike"
+        DIP = "dip"
+        ZTOR = "ztor"
+        TECT_TYPE = "tect_type"
+        EVENT_LAT = "event_lat"
+        EVENT_LON = "event_lon"
 
     class SiteColEnums(StrEnum):
-        site_id = "site_id"
-        vs30 = "vs30"
-        tsite = "tsite"
-        z1p0 = "z1p0"
-        z2p5 = "z2p5"
-        site_lat = "site_lat"
-        site_lon = "site_lon"
+        SITE_ID = "site_id"
+        VS30 = "vs30"
+        TSITE = "tsite"
+        Z1P0 = "z1p0"
+        Z2P5 = "z2p5"
+        SITE_LAT = "site_lat"
+        SITE_LON = "site_lon"
 
     class EventSiteColEnums(StrEnum):
-        rjb = "rjb"
-        rrup = "rrup"
-        rx = "rx"
+        RJB = "rjb"
+        RRUP = "rrup"
+        RX = "rx"
 
     class OtherColEnums(StrEnum):
-        fhp = "fhp"
+        FHP = "fhp"
         """High-pass filter frequency"""
-        tmax = "tmax"
+        TMAX = "tmax"
         """Maximum usable period"""
-        fmin = "fmin"
+        FMIN = "fmin"
         """Minimum usable frequency"""
-        fmin_h1 = "fmin_h1"
+        FMIN_H1 = "fmin_h1"
         """Minimum usable frequency for horizontal component 1"""
-        fmin_h2 = "fmin_h2"
+        FMIN_H2 = "fmin_h2"
         """Minimum usable frequency for horizontal component 2"""
-        fmin_v = "fmin_v"
+        FMIN_V = "fmin_v"
         """Minimum usable frequency for vertical component"""
-        quality_score_h1 = "score_h1"
-        quality_score_h2 = "score_h2"
-        quality_score_v = "score_v"
-        is_ground_level = "is_ground_level"
-        channel = "channel"
+        QUALITY_SCORE_H1 = "score_h1"
+        QUALITY_SCORE_H2 = "score_h2"
+        QUALITY_SCORE_V = "score_v"
+        IS_GROUND_LEVEL = "is_ground_level"
+        CHANNEL = "channel"
 
     SITE_COLS = list(SiteColEnums)
     EVENT_COLS = list(EventColEnums)
@@ -260,49 +260,59 @@ class ObservedData:
         event_site_id_index: bool = True,
     ):
         site_cols_map = {
-            "sta": cls.SiteColEnums.site_id,
-            "Vs30": cls.SiteColEnums.vs30,
-            "Tsite": cls.SiteColEnums.tsite,
-            "T0": cls.SiteColEnums.tsite,
-            "Z1.0": cls.SiteColEnums.z1p0,
-            "Z2.5": cls.SiteColEnums.z2p5,
-            "sta_lat": cls.SiteColEnums.site_lat,
-            "sta_lon": cls.SiteColEnums.site_lon,
+            "sta": cls.SiteColEnums.SITE_ID,
+            "Vs30": cls.SiteColEnums.VS30,
+            "Tsite": cls.SiteColEnums.TSITE,
+            "T0": cls.SiteColEnums.TSITE,
+            "Z1.0": cls.SiteColEnums.Z1P0,
+            "Z2.5": cls.SiteColEnums.Z2P5,
+            "sta_lat": cls.SiteColEnums.SITE_LAT,
+            "sta_lon": cls.SiteColEnums.SITE_LON,
         }
         event_map = {
-            "evid": cls.EventColEnums.event_id,
-            "mag": cls.EventColEnums.mag,
-            "rake": cls.EventColEnums.rake,
-            "strike": cls.EventColEnums.strike,
-            "dip": cls.EventColEnums.dip,
-            "tect_class": cls.EventColEnums.tect_type,
-            "ev_depth": cls.EventColEnums.depth,
-            "z_tor": cls.EventColEnums.ztor,
-            "ev_lat": cls.EventColEnums.event_lat,
-            "ev_lon": cls.EventColEnums.event_lon,
+            "evid": cls.EventColEnums.EVENT_ID,
+            "mag": cls.EventColEnums.MAG,
+            "rake": cls.EventColEnums.RAKE,
+            "strike": cls.EventColEnums.STRIKE,
+            "dip": cls.EventColEnums.DIP,
+            "tect_class": cls.EventColEnums.TECT_TYPE,
+            "ev_depth": cls.EventColEnums.DEPTH,
+            "z_tor": cls.EventColEnums.ZTOR,
+            "ev_lat": cls.EventColEnums.EVENT_LAT,
+            "ev_lon": cls.EventColEnums.EVENT_LON,
         }
         event_site_map = {
-            "r_jb": cls.EventSiteColEnums.rjb,
-            "r_rup": cls.EventSiteColEnums.rrup,
-            "r_x": cls.EventSiteColEnums.rx,
+            "r_jb": cls.EventSiteColEnums.RJB,
+            "r_rup": cls.EventSiteColEnums.RRUP,
+            "r_x": cls.EventSiteColEnums.RX,
         }
         other_map = {
-            "fmin_X": cls.OtherColEnums.fmin_h1,
-            "fmin_Y": cls.OtherColEnums.fmin_h2,
-            "fmin_Z": cls.OtherColEnums.fmin_v,
-            "score_X": cls.OtherColEnums.quality_score_h1,
-            "score_Y": cls.OtherColEnums.quality_score_h2,
-            "score_Z": cls.OtherColEnums.quality_score_v,
-            "fmin_mean_X": cls.OtherColEnums.fmin_h1,
-            "fmin_mean_Y": cls.OtherColEnums.fmin_h2,
-            "fmin_mean_Z": cls.OtherColEnums.fmin_v,
-            "score_mean_X": cls.OtherColEnums.quality_score_h1,
-            "score_mean_Y": cls.OtherColEnums.quality_score_h2,
-            "score_mean_Z": cls.OtherColEnums.quality_score_v,
-            "is_ground_level": cls.OtherColEnums.is_ground_level,
-            "chan": cls.OtherColEnums.channel,
+            "fmin_X": cls.OtherColEnums.FMIN_H1,
+            "fmin_Y": cls.OtherColEnums.FMIN_H2,
+            "fmin_Z": cls.OtherColEnums.FMIN_V,
+            "score_X": cls.OtherColEnums.QUALITY_SCORE_H1,
+            "score_Y": cls.OtherColEnums.QUALITY_SCORE_H2,
+            "score_Z": cls.OtherColEnums.QUALITY_SCORE_V,
+            "fmin_mean_X": cls.OtherColEnums.FMIN_H1,
+            "fmin_mean_Y": cls.OtherColEnums.FMIN_H2,
+            "fmin_mean_Z": cls.OtherColEnums.FMIN_V,
+            "score_mean_X": cls.OtherColEnums.QUALITY_SCORE_H1,
+            "score_mean_Y": cls.OtherColEnums.QUALITY_SCORE_H2,
+            "score_mean_Z": cls.OtherColEnums.QUALITY_SCORE_V,
+            "is_ground_level": cls.OtherColEnums.IS_GROUND_LEVEL,
+            "chan": cls.OtherColEnums.CHANNEL,
+            "fmin_max": cls.OtherColEnums.FMIN,
         }
         mapping_dict = site_cols_map | event_map | event_site_map | other_map
+
+        tect_type_mapping = {
+            "Crustal": constants.TectonicType.CRUSTAL,
+            "Interface": constants.TectonicType.SUBDUCTION_INTERFACE,
+            "Slab": constants.TectonicType.SUBDUCTION_SLAB,
+            "Outer-rise": constants.TectonicType.OUTER_RISE,
+            "Undetermined": constants.TectonicType.UNKNOWN,
+            np.nan: constants.TectonicType.UNKNOWN,
+        }
 
         # Determine the version if not provided
         if version is None:
@@ -337,8 +347,8 @@ class ObservedData:
             # The GMC fmin in version 3.4 is used to select fHP, hence
             # the actual fmin is not the GMC fmin values
             if (
-                cls.OtherColEnums.fmin_h1 in record_df.columns
-                and cls.OtherColEnums.fmin_h2 in record_df.columns
+                cls.OtherColEnums.FMIN_H1 in record_df.columns
+                and cls.OtherColEnums.FMIN_H2 in record_df.columns
             ):
                 # Rotd50 does not contain vertical GMC fmin, hack this in...
                 fmin_v = pd.read_csv(
@@ -359,11 +369,11 @@ class ObservedData:
                 fmin_v = fmin_v.sort_index()
                 assert fmin_v.index.equals(record_df.index)
 
-                record_df[cls.OtherColEnums.fhp] = np.max(
+                record_df[cls.OtherColEnums.FHP] = np.max(
                     np.stack(
                         (
-                            record_df[cls.OtherColEnums.fmin_h1].values,
-                            record_df[cls.OtherColEnums.fmin_h2].values,
+                            record_df[cls.OtherColEnums.FMIN_H1].values,
+                            record_df[cls.OtherColEnums.FMIN_H2].values,
                             fmin_v["fmin_mean_Z"].values,
                         ),
                         axis=1,
@@ -371,14 +381,14 @@ class ObservedData:
                     axis=1,
                 )
 
-                record_df[cls.OtherColEnums.fmin] = (
-                    record_df[cls.OtherColEnums.fhp] / 1.25
+                record_df[cls.OtherColEnums.FMIN] = (
+                        record_df[cls.OtherColEnums.FHP] / 1.25
                 )
                 record_df = record_df.drop(
                     columns=[
-                        cls.OtherColEnums.fmin_h1,
-                        cls.OtherColEnums.fmin_h2,
-                        cls.OtherColEnums.fmin_v,
+                        cls.OtherColEnums.FMIN_H1,
+                        cls.OtherColEnums.FMIN_H2,
+                        cls.OtherColEnums.FMIN_V,
                     ],
                     errors="ignore",
                 )
@@ -393,6 +403,11 @@ class ObservedData:
             # Renaming
             record_df = record_df.rename(columns=mapping_dict)
 
+        # Tectonic type
+        record_df[cls.EventColEnums.TECT_TYPE] = record_df[cls.EventColEnums.TECT_TYPE].map(
+            tect_type_mapping
+        )
+
         # Drop any columns not of interest
         cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
         record_df = record_df[cols]
@@ -403,28 +418,28 @@ class ObservedData:
     def from_nga_west2_flat(cls, nga_west2_flat_ffp: Path):
         """Creates an observed data object from the NGA West 2 flat file."""
         site_cols_map = {
-            "Station Sequence Number": cls.SiteColEnums.site_id,
-            "Vs30 (m/s) selected for analysis": cls.SiteColEnums.vs30,
-            "Station Latitude": cls.SiteColEnums.site_lat,
-            "Station Longitude": cls.SiteColEnums.site_lon,
+            "Station Sequence Number": cls.SiteColEnums.SITE_ID,
+            "Vs30 (m/s) selected for analysis": cls.SiteColEnums.VS30,
+            "Station Latitude": cls.SiteColEnums.SITE_LAT,
+            "Station Longitude": cls.SiteColEnums.SITE_LON,
         }
         event_map = {
-            "EQID": cls.EventColEnums.event_id,
-            "Earthquake Magnitude": cls.EventColEnums.mag,
-            "Hypocenter Depth (km)": cls.EventColEnums.depth,
-            "Depth to Top Of Fault Rupture Model": cls.EventColEnums.ztor,
-            "Hypocenter Latitude (deg)": cls.EventColEnums.event_lat,
-            "Hypocenter Longitude (deg)": cls.EventColEnums.event_lon,
+            "EQID": cls.EventColEnums.EVENT_ID,
+            "Earthquake Magnitude": cls.EventColEnums.MAG,
+            "Hypocenter Depth (km)": cls.EventColEnums.DEPTH,
+            "Depth to Top Of Fault Rupture Model": cls.EventColEnums.ZTOR,
+            "Hypocenter Latitude (deg)": cls.EventColEnums.EVENT_LAT,
+            "Hypocenter Longitude (deg)": cls.EventColEnums.EVENT_LON,
         }
         event_site_map = {
-            "Joyner-Boore Dist. (km)": cls.EventSiteColEnums.rjb,
-            "ClstD (km)": cls.EventSiteColEnums.rrup,
-            "Rx": cls.EventSiteColEnums.rx,
+            "Joyner-Boore Dist. (km)": cls.EventSiteColEnums.RJB,
+            "ClstD (km)": cls.EventSiteColEnums.RRUP,
+            "Rx": cls.EventSiteColEnums.RX,
         }
         other_map = {
-            "Lowest Usable Freq - H1 (Hz)": cls.OtherColEnums.fmin_h1,
-            "Lowest Usable Freq - H2 (Hz)": cls.OtherColEnums.fmin_h2,
-            "Lowest Usable Freq - Ave. Component (Hz)": cls.OtherColEnums.fmin,
+            "Lowest Usable Freq - H1 (Hz)": cls.OtherColEnums.FMIN_H1,
+            "Lowest Usable Freq - H2 (Hz)": cls.OtherColEnums.FMIN_H2,
+            "Lowest Usable Freq - Ave. Component (Hz)": cls.OtherColEnums.FMIN,
         }
         im_map = {
             "PGA (g)": "PGA",
@@ -452,13 +467,16 @@ class ObservedData:
         mapping_dict = site_cols_map | event_map | event_site_map | other_map | im_map
         record_df = record_df.rename(columns=mapping_dict)
 
+        # Tectonic Type
+        record_df[cls.EventColEnums.TECT_TYPE] = constants.TectonicType.CRUSTAL
+
         # Drop any columns not of interest
         cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
         record_df = record_df[cols]
 
         # Drop any records with invalid event or site id
-        drop_mask = (record_df[cls.EventColEnums.event_id] == -999) | (
-            record_df[cls.SiteColEnums.site_id] == -999
+        drop_mask = (record_df[cls.EventColEnums.EVENT_ID] == -999) | (
+                record_df[cls.SiteColEnums.SITE_ID] == -999
         )
         record_df = record_df[~drop_mask]
 
@@ -466,8 +484,8 @@ class ObservedData:
         record_df = record_df.replace(-999.0, np.nan)
 
         # Update index
-        assert (record_df.dtypes[cls.EventColEnums.event_id] == np.int64) and (
-            record_df.dtypes[cls.SiteColEnums.site_id] == np.int64
+        assert (record_df.dtypes[cls.EventColEnums.EVENT_ID] == np.int64) and (
+                record_df.dtypes[cls.SiteColEnums.SITE_ID] == np.int64
         )
         record_df.index = mlt.array_utils.numpy_str_join(
             "_",
@@ -484,30 +502,45 @@ class ObservedData:
     @classmethod
     def from_nga_subduction_flat(cls, nga_sub_ffp: Path):
         site_cols_map = {
-            "NGAsubSSN": cls.SiteColEnums.site_id,
-            "Vs30_Selected_for_Analysis_m_s": cls.SiteColEnums.vs30,
-            "Station_Latitude_deg": cls.SiteColEnums.site_lat,
-            "Station_Longitude_deg": cls.SiteColEnums.site_lon,
+            "NGAsubSSN": cls.SiteColEnums.SITE_ID,
+            "Vs30_Selected_for_Analysis_m_s": cls.SiteColEnums.VS30,
+            "Station_Latitude_deg": cls.SiteColEnums.SITE_LAT,
+            "Station_Longitude_deg": cls.SiteColEnums.SITE_LON,
         }
         event_map = {
-            "NGAsubEQID": cls.EventColEnums.event_id,
-            "Earthquake_Magnitude": cls.EventColEnums.mag,
-            "Hypocenter_Depth_km": cls.EventColEnums.depth,
-            "Ztor_km": cls.EventColEnums.ztor,
-            "Hypocenter_Latitude_deg": cls.EventColEnums.event_lat,
-            "Hypocenter_Longitude_deg": cls.EventColEnums.event_lon,
+            "NGAsubEQID": cls.EventColEnums.EVENT_ID,
+            "Earthquake_Magnitude": cls.EventColEnums.MAG,
+            "Hypocenter_Depth_km": cls.EventColEnums.DEPTH,
+            "Ztor_km": cls.EventColEnums.ZTOR,
+            "Hypocenter_Latitude_deg": cls.EventColEnums.EVENT_LAT,
+            "Hypocenter_Longitude_deg": cls.EventColEnums.EVENT_LON,
+            "Intra_Inter_Flag": cls.EventColEnums.TECT_TYPE
         }
         event_site_map = {
-            "Rjb_km": cls.EventSiteColEnums.rjb,
-            "ClstD_km": cls.EventSiteColEnums.rrup,
-            "Rx_km": cls.EventSiteColEnums.rx,
+            "Rjb_km": cls.EventSiteColEnums.RJB,
+            "ClstD_km": cls.EventSiteColEnums.RRUP,
+            "Rx_km": cls.EventSiteColEnums.RX,
         }
         other_map = {
-            "Longest_Usable_Period_for_PSa_Ave_Component_sec": cls.OtherColEnums.tmax,
+            "Longest_Usable_Period_for_PSa_Ave_Component_sec": cls.OtherColEnums.TMAX,
         }
         im_map = {
             "PGA (g)": "PGA",
             "PGV (cm/s)": "PGV",
+        }
+
+        tect_type_mapping = {
+            0: constants.TectonicType.SUBDUCTION_INTERFACE,
+            1: constants.TectonicType.SUBDUCTION_SLAB,
+            2: constants.TectonicType.CRUSTAL,
+            3: constants.TectonicType.MANTLE,
+            4: constants.TectonicType.OUTER_RISE,
+            -444: constants.TectonicType.OUTER_RISE,
+            5: constants.TectonicType.SUBDUCTION_SLAB,
+            -666: constants.TectonicType.CRUSTAL,
+            -777: constants.TectonicType.SUBDUCTION_SLAB,
+            -888: constants.TectonicType.SUBDUCTION_INTERFACE,
+            -999: constants.TectonicType.UNKNOWN,
         }
 
         def _is_pSA(col: str):
@@ -530,6 +563,11 @@ class ObservedData:
         }
         mapping_dict = site_cols_map | event_map | event_site_map | other_map | im_map
         record_df = record_df.rename(columns=mapping_dict)
+
+        # Tectonic type
+        record_df[cls.EventColEnums.TECT_TYPE] = record_df[cls.EventColEnums.TECT_TYPE].map(
+            tect_type_mapping
+        )
 
         # Drop any columns not of interest
         cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]

@@ -548,7 +548,7 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
     obs_data = obs_data.drop_duplicates(["event_id", "site_id"])
 
     # Apply fmin
-    obs_data = obs_data.apply_fmin_filter(ObservedData.OtherColEnums.fmin)
+    obs_data = obs_data.apply_fmin_filter(ObservedData.OtherColEnums.FMIN)
 
     return obs_data
 
@@ -578,14 +578,14 @@ def load_obs_nga_west2(
 
     # Drop duplicates
     obs_data.drop_duplicates(
-        [ObservedData.EventColEnums.event_id, ObservedData.SiteColEnums.site_id]
+        [ObservedData.EventColEnums.EVENT_ID, ObservedData.SiteColEnums.SITE_ID]
     )
 
     # Distance filtering
     obs_data = obs_data.metadata_filter(dict(rrup=(0, 250)))
 
     # Apply fmin
-    obs_data = obs_data.apply_fmin_filter(ObservedData.OtherColEnums.fmin)
+    obs_data = obs_data.apply_fmin_filter(ObservedData.OtherColEnums.FMIN)
 
     return obs_data
 
@@ -616,7 +616,7 @@ def load_obs_nga_subduction(
 
     # Drop duplicates
     obs_data = obs_data.drop_duplicates(
-        [ObservedData.EventColEnums.event_id, ObservedData.SiteColEnums.site_id]
+        [ObservedData.EventColEnums.EVENT_ID, ObservedData.SiteColEnums.SITE_ID]
     )
 
     # Distance filtering
