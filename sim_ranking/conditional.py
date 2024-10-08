@@ -38,13 +38,13 @@ class ConditionalMVNDistribution:
         return obs_sites.index.values.astype(str)
 
 
-def run_conditional_mvn_ranking(
+def run_conditional_cIM(
     output_dir: Path,
     stations_df: pd.DataFrame,
     IMs: Sequence[str],
     im_weights: np.ndarray,
     gm_params_df: pd.DataFrame,
-    sim_data: Dict,
+    # sim_data: Dict,
     obs_data: pd.DataFrame,
     int_stations: np.ndarray,
     source_info: utils.SourceInfo,
@@ -93,7 +93,7 @@ def run_conditional_mvn_ranking(
 
     assert len(im_weights) == len(IMs_str)
 
-    cIMs_result = compute_cond_MVN_distributions(
+    cIMs_result = compute_cond_IM_distributions(
         IMs,
         obs_data,
         gm_params_df,
@@ -107,47 +107,47 @@ def run_conditional_mvn_ranking(
     if cIMs_result is None:
         return None
 
-    # Compute the realisation misfit for each site of interest
-    rel_misfits = []
-    for cur_site in int_stations:
-        if (cur_sim_df := sim_data.get(cur_site)) is None:
-            if verbose:
-                print(f"No simulation data available for site: {cur_site}, skipping")
-            continue
-
-        # Fix the index
-        cur_sim_df.index = np.char.replace(
-            cur_sim_df.index.values.astype(str), f"_{cur_site}", ""
-        )
-        cur_sim_df = cur_sim_df.sort_index()
-
-        # Compute misfit for each IM
-        cur_rel_misfit = einops.einsum(
-            im_weights,
-            (
-                cIMs_result.cond_lnIM_mean_df.loc[cur_site, IMs_str].values
-                - np.log(cur_sim_df[IMs_str].values)
-            )
-            ** 2,
-            "i, j i -> j",
-        )
-
-        # Aggregate along IM axis
-        rel_misfits.append(
-            pd.Series(index=cur_sim_df.index, data=cur_rel_misfit, name=cur_site)
-        )
-
-    # Combine
-    rel_misfits_df = pd.concat(rel_misfits, axis=1)
+    # # Compute the realisation misfit for each site of interest
+    # rel_misfits = []
+    # for cur_site in int_stations:
+    #     if (cur_sim_df := sim_data.get(cur_site)) is None:
+    #         if verbose:
+    #             print(f"No simulation data available for site: {cur_site}, skipping")
+    #         continue
+    #
+    #     # Fix the index
+    #     cur_sim_df.index = np.char.replace(
+    #         cur_sim_df.index.values.astype(str), f"_{cur_site}", ""
+    #     )
+    #     cur_sim_df = cur_sim_df.sort_index()
+    #
+    #     # Compute misfit for each IM
+    #     cur_rel_misfit = einops.einsum(
+    #         im_weights,
+    #         (
+    #             cIMs_result.cond_lnIM_mean_df.loc[cur_site, IMs_str].values
+    #             - np.log(cur_sim_df[IMs_str].values)
+    #         )
+    #         ** 2,
+    #         "i, j i -> j",
+    #     )
+    #
+    #     # Aggregate along IM axis
+    #     rel_misfits.append(
+    #         pd.Series(index=cur_sim_df.index, data=cur_rel_misfit, name=cur_site)
+    #     )
+    #
+    # # Combine
+    # rel_misfits_df = pd.concat(rel_misfits, axis=1)
 
     # Save the results
     cIMs_result.save(output_dir / "cMVN_distributions.pickle")
-    rel_misfits_df.to_csv(output_dir / "rel_misfits.csv")
+    # rel_misfits_df.to_csv(output_dir / "rel_misfits.csv")
 
 
-def compute_cond_MVN_distributions(
+def compute_cond_IM_distributions(
     IMs: Sequence[gc.im.IM],
-    obs_data: pd.DataFrame,
+    obs_df: pd.DataFrame,
     gmm_params_df: pd.DataFrame,
     stations_df: pd.DataFrame,
     int_stations: np.ndarray,
@@ -159,7 +159,7 @@ def compute_cond_MVN_distributions(
     IMs_str = [str(cur_im) for cur_im in IMs]
 
     # Only need IMs from here
-    obs_data = obs_data.loc[:, IMs_str]
+    obs_df = obs_df.loc[:, IMs_str]
 
     # Compute the conditional distribution for all sites of interest
     # and all IMs
@@ -186,10 +186,11 @@ def compute_cond_MVN_distributions(
             int_stations,
             stations_df,
             cur_gmm_params_df,
-            np.log(obs_data[str(cur_im)]),
+            np.log(obs_df[str(cur_im)]),
             source_info.hypo_loc,
             sh.im_dist.get_nn_obs_site_filter_fn(
-            obs_site_sel_params["min_n_obs_sites"], obs_site_sel_params["n_obs_sites"]
+                obs_site_sel_params["min_n_obs_sites"],
+                obs_site_sel_params["n_obs_sites"],
             ),
             R=R[str(cur_im)] if R is not None else None,
             allow_obs_sites=True,
@@ -242,14 +243,9 @@ def compute_cond_MVN_distributions(
     )
 
 
-def load_emp_cim_data(data_dir: Path, event: str, method: constants.RankingMethod):
+def load_emp_cim_data(data_dir: Path, event: str):
     """Loads the empirical conditional IM data for the given event"""
-    result_ffp = (
-        data_dir
-        / event
-        / f"{constants.METHOD_RESULT_DIR_NAME_MAPPING[method]}"
-        / "cMVN_distributions.pickle"
-    )
+    result_ffp = data_dir / event / "cMVN_distributions.pickle"
     if result_ffp.exists():
         try:
             return ConditionalMVNDistribution.load(result_ffp)

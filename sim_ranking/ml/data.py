@@ -1,9 +1,12 @@
 import warnings
+from pathlib import Path
 from typing import Dict, Sequence
 from dataclasses import dataclass
+from labelled_data_array import LabelledDataArray
 
 import numpy as np
 import pandas as pd
+
 
 @dataclass
 class ScalarFeatures:
@@ -25,19 +28,6 @@ class ScalarFeatures:
             + len(self.site_to_site_feature_keys)
             + len(self.event_site_feature_keys) * 2
             + len(self.event_site_to_site_feature_keys)
-        )
-
-
-@dataclass
-class WeightScalarFeatures:
-    site_to_site_features_data: Dict[str, pd.DataFrame]
-    site_to_site_feature_keys: Sequence[str]
-    event_site_to_site_features_data: Dict[str, Dict[str, pd.DataFrame]]
-    event_site_to_site_feature_keys: Sequence[str]
-
-    def __post_init__(self):
-        self.n_scalar_features = len(self.site_to_site_feature_keys) + len(
-            self.event_site_to_site_feature_keys
         )
 
 
@@ -80,7 +70,6 @@ def compute_site_combinations(
         # All sites for the current event
         cur_sites = np.union1d(cur_int_sites, cur_obs_sites)
 
-
         # cur_sites = event_sites[cur_event]
         # cur_sites = cur_sites[
         #     np.isin(cur_sites, site_int) | np.isin(cur_sites, site_obs)
@@ -113,6 +102,9 @@ def compute_site_combinations(
             cur_sites[cur_site_combs[:, 0]], cur_int_sites
         )
 
+        if np.count_nonzero(cur_mask) == 0:
+            continue
+
         site_combs[cur_event] = cur_site_combs[cur_mask]
         used_sites[cur_event] = cur_sites
 
@@ -120,7 +112,6 @@ def compute_site_combinations(
 
 
 def create_scalar_feature_tensor(
-    events: np.ndarray,
     event_sites: Dict[str, np.ndarray],
     scalar_features: ScalarFeatures,
     event_site_combs: Dict[str, np.ndarray],
@@ -137,7 +128,8 @@ def create_scalar_feature_tensor(
         6) Site to site features
         7) Event site to site features
     """
-    assert np.all(np.asarray(list(event_sites.keys())) == events)
+    events = np.asarray(list(event_sites.keys()))
+    # assert np.all(np.asarray(list(event_sites.keys())) == events)
 
     scalar_feature_columns = np.asarray(
         [
@@ -157,7 +149,7 @@ def create_scalar_feature_tensor(
         ]
     )
 
-    scalar_features_values = []
+    scalar_features_values = {}
     for cur_event in events:
         cur_sites = event_sites[cur_event]
         cur_site_combs = event_site_combs[cur_event]
@@ -228,26 +220,18 @@ def create_scalar_feature_tensor(
                 cur_feature_df.columns.get_indexer_for(cur_site_obs),
             ]
 
-        scalar_features_values.append(cur_tensor)
+        scalar_features_values[cur_event] = pd.DataFrame(
+            data=cur_tensor, columns=scalar_feature_columns
+        )
+        # scalar_features_values.append(cur_tensor)
 
-    scalar_features_values = np.concatenate(scalar_features_values, axis=0)
+    # scalar_features_values = np.concatenate(scalar_features_values, axis=0)
     return scalar_features_values, scalar_feature_columns
-
-
-def _station_df_sanity_check(station_df: pd.DataFrame, site_features: Sequence[str]):
-    """Checks that the station_df has been normalised"""
-    assert all(
-        [np.isclose(station_df[cur_feature].mean(), 0) for cur_feature in site_features]
-    )
-    assert all(
-        [np.isclose(station_df[cur_feature].std(), 1) for cur_feature in site_features]
-    )
 
 
 def get_valid_site_ints(
     event_sites: Dict[str, np.ndarray],
     record_df: pd.DataFrame,
-    station_df: pd.DataFrame,
 ):
     """
     Gets the list of site of interests per event that experience
@@ -262,36 +246,26 @@ def get_valid_site_ints(
         Available sites per event
     record_df: Dataframe
         Record data
-    station_df: Dataframe
-        Station data
 
     Returns
     -------
     valid_int_sites: np.ndarray
-        Valid sites of interests
+        All sites that are valid sites for
+        at least one event
     valid_event_int_sites: dict
         Valid sites of interests per event
     """
     from empirical.util.classdef import TectType, GMM
     from empirical.util.openquake_wrapper_vectorized import oq_run
 
-    # Check that all event-sites are available in the record dataframe
-    assert all([
-        np.all(np.isin(event_sites[cur_event], cur_df.site_id.values.astype(str)))
-        for cur_event, cur_df in record_df.groupby("event_id")
-    ])
+    # Check for nans
+    assert np.all(~record_df.isna())
 
     # Create the rupture dataframe
     rupture_df = record_df.copy(True)
-    rupture_df = rupture_df.merge(
-        station_df[["vs30", "z1.0"]], left_on="site_id", right_index=True, how="inner"
-    )
-    if (n_records_diff := record_df.shape[0] - rupture_df.shape[0]) > 0:
-        print(f"Dropped {n_records_diff} records due to missing site data")
 
     # Constant inputs
     rupture_df["mag"] = 6.0
-    rupture_df["r_jb"] = rupture_df["r_rup"]
     rupture_df["rake"] = 45.0
     rupture_df["dip"] = 45.0
     rupture_df["z_tor"] = 0.0
@@ -299,17 +273,11 @@ def get_valid_site_ints(
     # Rename the columns to be in line what openquake expects
     rupture_df = rupture_df.rename(
         columns={
-            "z_tor": "ztor",
-            "r_rup": "rrup",
-            "r_jb": "rjb",
             "r_x": "rx",
-            "z1.0": "z1pt0",
+            "z1p0": "z1pt0",
         }
     )
     rupture_df["vs30measured"] = True
-
-    # Check for nans
-    assert rupture_df.isna().sum().sum() == 0
 
     # Get PGA results
     with warnings.catch_warnings():
@@ -329,9 +297,51 @@ def get_valid_site_ints(
     # Get the valid site of interests
     pga_result = pga_result.loc[pga_result["PGA_mean"] >= np.log(0.01)]
     valid_event_int_sites = {
-        cur_event: np.intersect1d(cur_df.site_id.values.astype(str), event_sites[cur_event])
+        cur_event: np.intersect1d(
+            cur_df.site_id.values.astype(str), event_sites[cur_event]
+        )
         for cur_event, cur_df in pga_result.groupby("event_id")
     }
     valid_int_sites = np.unique(pga_result.site_id.values.astype(str))
 
-    return valid_int_sites, valid_event_int_sites
+    valid_record_ids = pga_result.index.values.astype(str)
+
+    print(f"Valid SOI records: {pga_result.shape[0]}/{record_df.shape[0]}")
+    return valid_int_sites, valid_event_int_sites, valid_record_ids
+
+
+def load_cv_metrics(results_dir: Path):
+    """
+    Load the cross-validation metrics
+
+    Parameters
+    ----------
+    results_dir: Path
+        Path to the CV results directory
+
+    Returns
+    -------
+    lda: LabelledDataArray
+        Labelled data array of the metrics
+    """
+    metrics = pd.read_pickle(results_dir / "metrics.pickle")
+
+    cv_keys = list(metrics.keys())
+    metric_keys = list(metrics[cv_keys[0]].keys())
+
+    results = []
+    for cur_cv in cv_keys:
+        cur_cv_results = []
+        for cur_metric in metric_keys:
+            cur_cv_results.append(metrics[cur_cv][cur_metric])
+
+        results.append(np.stack(cur_cv_results, axis=1))
+
+    data = np.stack(results, axis=2)
+    lda = LabelledDataArray(
+        data,
+        (np.arange(data.shape[0]), metric_keys, cv_keys),
+        ("epoch", "metric", "cv_iter"),
+    )
+
+    return lda

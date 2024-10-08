@@ -1,24 +1,19 @@
-import os
 import pickle
-import warnings
-import multiprocessing as mp
 from pathlib import Path
-from typing import Sequence, NamedTuple, Dict, List, Union
+from typing import Sequence
 from dataclasses import dataclass
 
+import tqdm
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 
-import tqdm
 from qcore.timeseries import BBSeis, read_ascii
 import ml_tools as mlt
 import spatial_hazard as sh
 import sha_calc as sha
 
 from . import constants
-from . import conditional
-from .db import DB
+from .data_classes import ObservedData
 
 
 @dataclass
@@ -76,60 +71,6 @@ class SiteCorrelations:
         )
 
 
-class SimGMParams(NamedTuple):
-
-    event: str
-    ims: List[str]
-    sites: List[str]
-    gm_params: pd.DataFrame
-    residuals: Union[pd.DataFrame, None] = None
-    event_residuals: Union[pd.DataFrame, None] = None
-    within_residuals: Union[pd.DataFrame, None] = None
-    bias_std: Union[pd.DataFrame, None] = None
-
-    def write(self, data_dir: Path):
-        mlt.utils.write_to_yaml(
-            dict(event=str(self.event), ims=self.ims, sites=self.sites),
-            data_dir / "meta.yaml",
-        )
-
-        self.gm_params.to_csv(data_dir / "gm_params.csv")
-
-        if self.residuals is not None:
-            self.residuals.to_parquet(data_dir / "residuals.parquet")
-
-        if self.event_residuals is not None:
-            self.event_residuals.to_csv(data_dir / "event_residuals.csv")
-
-        if self.within_residuals is not None:
-            self.within_residuals.to_parquet(data_dir / "rem_residuals.parquet")
-
-        if self.bias_std is not None:
-            self.bias_std.to_csv(data_dir / "bias_std.csv")
-
-    @classmethod
-    def load(cls, data_dir: Path):
-        meta = mlt.utils.load_yaml(data_dir / "meta.yaml")
-        return cls(
-            meta["event"],
-            meta["ims"],
-            meta["sites"],
-            pd.read_csv(data_dir / "gm_params.csv", index_col=0, engine="c"),
-            pd.read_parquet(cur_path)
-            if (cur_path := data_dir / "residuals.parquet").exists()
-            else None,
-            pd.read_csv(cur_path, index_col=0, engine="c")
-            if (cur_path := data_dir / "event_residuals.csv").exists()
-            else None,
-            pd.read_parquet(cur_path)
-            if (cur_path := data_dir / "rem_residuals.parquet").exists()
-            else None,
-            pd.read_csv(cur_path, index_col=0, engine="c")
-            if (cur_path := data_dir / "bias_std.csv").exists()
-            else None,
-        )
-
-
 def gen_emp_synthetic_observed(
     emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path, nzgmdb_flat_file: Path
 ):
@@ -153,10 +94,7 @@ def gen_emp_synthetic_observed(
 
     # Shift the mean
     mean_cols = [f"{cur_im}_mean" for cur_im in constants.PSA_KEYS]
-    gm_params.loc[:, mean_cols] = (
-        gm_params.loc[:, mean_cols].values
-        + 0.5 * 0.6
-    )
+    gm_params.loc[:, mean_cols] = gm_params.loc[:, mean_cols].values + 0.5 * 0.6
 
     # Generate the realisation
     rels = gen_emp_synthethic_realisations(gm_params, site_df, n_rels=1)
@@ -294,6 +232,7 @@ def run_emp_gmms(
         "Slab": TectType.SUBDUCTION_SLAB,
         "Interface": TectType.SUBDUCTION_INTERFACE,
         "Undetermined": TectType.ACTIVE_SHALLOW,
+        "Outer-rise": TectType.SUBDUCTION_SLAB,
     }
 
     OQ_INPUT_COLUMNS = [
@@ -378,12 +317,13 @@ def run_emp_gmms(
         site_df = site_df.rename(columns={"Vs30": "vs30", "Z1.0": "z1pt0"})
         site_df["z1pt0"] = site_df["z1pt0"] / 1000
 
-    ### Distance calculation
+    ### Data prep
     site_locs = np.concatenate(
         (site_df[["lon", "lat"]].values, np.zeros((site_df.shape[0], 1))), axis=1
     )
+    print(f"Creation of rupture dataframe")
     data_dfs = []
-    for cur_event in events:
+    for cur_event in tqdm.tqdm(events):
         if srf_dir is not None:
             cur_data_df = site_df.copy(True)
             cur_data_df["rrup"], cur_data_df["rjb"] = src_site_dist.calc_rrup_rjb(
@@ -402,37 +342,45 @@ def run_emp_gmms(
                 cur_nzgmdb_flatfile.index.values.astype(str),
                 site_df.index.values.astype(str),
             )
+            if cur_sites.size == 0:
+                continue
 
             cur_data_df = site_df.loc[cur_sites].copy(True)
-            cur_data_df["rrup"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_rup"].values
-            cur_data_df["rjb"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_jb"].values
-            cur_data_df["rx"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_x"].values
-            cur_data_df["ry"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_y"].values
+            cur_data_df.loc[:, "rrup"] = cur_nzgmdb_flatfile.loc[
+                cur_sites, "r_rup"
+            ].values
+            cur_data_df.loc[:, "rjb"] = cur_nzgmdb_flatfile.loc[
+                cur_sites, "r_jb"
+            ].values
+            cur_data_df.loc[:, "rx"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_x"].values
+            cur_data_df.loc[:, "ry"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_y"].values
+
+        cur_data_df.loc[:, "site"] = cur_data_df.index.values
+        cur_data_df.loc[:, "event"] = str(cur_event)
+        cur_data_df.index = np.add(f"{cur_event}_", cur_data_df.index.values)
 
         # Enforce distance threshold
         cur_data_df = cur_data_df.loc[cur_data_df.rjb <= rjb_max]
-        cur_data_df["site"] = cur_data_df.index.values
-        cur_data_df["event"] = str(cur_event)
-        cur_data_df.index = np.add(f"{cur_event}_", cur_data_df.index.values)
-
-        # Add event data
-        cur_data_df[
-            ["mag", "tect_class", "ztor", "rake", "dip", "hypo_depth"]
-        ] = source_df.loc[
-            cur_event, ["mag", "tect_class", "z_tor", "rake", "dip", "depth"]
-        ]
 
         if cur_data_df.shape[0] > 0:
+            # Add event data
+            cur_data_df = cur_data_df.merge(
+                source_df[["mag", "tect_class", "z_tor", "rake", "dip", "depth"]],
+                left_on="event",
+                right_index=True,
+            )
             data_dfs.append(cur_data_df)
 
     data_df = pd.concat(data_dfs, axis=0)
     data_df["vs30measured"] = False
 
+    data_df = data_df.rename(columns={"z_tor": "ztor", "depth": "hypo_depth"})
+
     ### GM prediction
+    print(f"Running predictions")
     dfs = []
     sites = np.unique(data_df.site)
-    for site_ix, cur_site in enumerate(sites):
-        print(f"Processing site {cur_site}, {site_ix + 1}/{len(sites)}")
+    for cur_site in tqdm.tqdm(sites):
 
         cur_site_mask = data_df.site.values == cur_site
 
@@ -466,305 +414,6 @@ def run_emp_gmms(
 
     result_df = pd.concat(dfs, axis=0)
     result_df.to_csv(output_ffp, index_label="id")
-
-
-def compute_sim_site_corrs(sim_params_dir: Path):
-    """Generates site-correlations using all available simulations"""
-    events = [
-        cur_ffp.stem
-        for cur_ffp in sim_params_dir.iterdir()
-        if cur_ffp.is_dir() and not cur_ffp.stem.startswith("_")
-    ]
-
-    im_dfs = None
-    print(f"Combining event GM parameters")
-    for ix, cur_event in enumerate(tqdm.tqdm(events)):
-        cur_sim_gm_params = SimGMParams.load(sim_params_dir / cur_event)
-        cur_within_residuals = cur_sim_gm_params.within_residuals
-
-        if ix == 0:
-            im_dfs = {cur_im: [] for cur_im in cur_sim_gm_params.ims}
-
-        for cur_im in cur_sim_gm_params.ims:
-            cur_df = cur_within_residuals[[cur_im, "site", "rel"]].copy()
-            cur_df["sim_id"] = np.char.add(
-                f"{cur_event}_", cur_df.rel.values.astype(str)
-            )
-            cur_df = cur_df.drop(columns=["rel"])
-
-            im_dfs[cur_im].append(cur_df)
-
-    corr_dfs = {}
-    print(f"Computing correlations for each IM")
-    for cur_im, cur_dfs in tqdm.tqdm(im_dfs.items()):
-        cur_df = pd.concat(cur_dfs, axis=0)
-        cur_df = cur_df.pivot(index="sim_id", columns="site", values=cur_im)
-        cur_corr_df = cur_df.corr(method="pearson")
-
-        cur_corr_df = pd.melt(
-            cur_corr_df.reset_index(),
-            id_vars=["site"],
-            var_name="site_2",
-            value_name="corr",
-        )
-        cur_corr_df = cur_corr_df.rename(columns={"site": "site_1"}).dropna()
-        cur_corr_df.index = mlt.array_utils.numpy_str_join(
-            "_",
-            cur_corr_df.site_1.values.astype(str),
-            cur_corr_df.site_2.values.astype(str),
-        )
-
-        corr_dfs[cur_im] = cur_corr_df
-
-    return corr_dfs
-
-
-def compute_event_site_corrs_from_rels(sim_params_dir: Path):
-    """
-    Computes the site correlations for each event using the
-    within-event residuals from the realisations
-    """
-    events = [
-        cur_ffp.stem
-        for cur_ffp in sim_params_dir.iterdir()
-        if cur_ffp.is_dir() and not cur_ffp.stem.startswith("_")
-    ]
-
-    results = []
-    for ix, cur_event in enumerate(tqdm.tqdm(events)):
-        cur_sim_gm_params = SimGMParams.load(sim_params_dir / cur_event)
-        cur_ims = np.asarray(cur_sim_gm_params.ims)
-        cur_sites = np.asarray(cur_sim_gm_params.sites)
-
-        cur_site_corrs = np.full(
-            (len(cur_sites), len(cur_sites), len(cur_ims)), fill_value=np.nan
-        )
-
-        for i, cur_im in enumerate(cur_ims):
-            cur_within_residuals = cur_sim_gm_params.within_residuals[
-                [cur_im, "site", "rel"]
-            ]
-            cur_within_residuals = cur_within_residuals.pivot(
-                index="rel", columns="site", values=cur_im
-            )
-
-            cur_corrs = cur_within_residuals.loc[:, cur_sites].corr(method="pearson")
-            assert np.all(cur_corrs.index.values.astype(str) == cur_sites)
-
-            cur_site_corrs[:, :, i] = cur_corrs.values
-
-        results.append(
-            SiteCorrelations(
-                cur_site_corrs, np.asarray(cur_sites), np.asarray(cur_ims), cur_event
-            )
-        )
-
-    return results
-
-
-def compute_event_gm_params_rel_total(
-    db_ffp: Path, ims: List[str], data_source: str = None
-):
-    """
-    Computes the parametric IM distribution based
-    on the simulation data.
-    Does not use MERA, i.e. uses total residual only
-    """
-    db = DB(db_ffp)
-    events = db.get_avail_events(data_source)
-    sites = db.get_avail_sites().tolist()
-
-    results = []
-    for ix, cur_event in enumerate(events):
-        print(f"Processing event {cur_event}, {ix + 1}/{len(events)}")
-        # Get the simulation data
-        sim_data = db.get_sim_data(cur_event, sites)
-
-        gm_params = {}
-        residual_df = []
-        for cur_site, cur_sim_data in sim_data.groupby("site_id"):
-            # Compute the log mean
-            cur_mean = np.log(cur_sim_data[ims]).mean(axis=0)
-
-            # Compute the residual
-            cur_residual = np.log(cur_sim_data[ims].values) - cur_mean.values
-            cur_residual = pd.DataFrame(
-                index=cur_sim_data.index,
-                columns=ims,
-                data=cur_residual,
-            )
-            cur_sigma_total = cur_residual.std(axis=0)
-
-            cur_residual["rel"] = [
-                cur_i.split("_")[-1] for cur_i in cur_residual.index.values.astype(str)
-            ]
-            cur_residual["site"] = cur_site
-            residual_df.append(cur_residual)
-
-            # Put GM params in correct format
-            cur_mean.index = np.char.add(cur_mean.index.values.astype(str), "_mean")
-            cur_phi = cur_sigma_total.copy()
-            cur_phi.index = np.char.add(cur_phi.index.values.astype(str), "_std_Intra")
-
-            cur_tau = cur_sigma_total.copy()
-            cur_tau.loc[:] = 0.0
-            cur_tau.index = np.char.add(cur_tau.index.values.astype(str), "_std_Inter")
-
-            cur_sigma_total.index = np.char.add(
-                cur_sigma_total.index.values.astype(str), "_std_Total"
-            )
-
-            gm_params[cur_site] = {
-                **cur_mean.to_dict(),
-                **cur_tau.to_dict(),
-                **cur_phi.to_dict(),
-                **cur_sigma_total.to_dict(),
-            }
-
-        # Combine residuals
-        residual_df = pd.concat(residual_df)
-
-        gm_params = pd.DataFrame(gm_params).T
-        results.append(
-            SimGMParams(
-                cur_event,
-                ims,
-                sim_data.site_id.unique().astype(str).tolist(),
-                gm_params,
-                residual_df,
-                None,
-                residual_df,
-                None,
-            )
-        )
-
-    return results
-
-
-def _process_sim_gm_params_mera_event(event: str, db_ffp: Path, ims: List[str]):
-    """Helper function"""
-    from mera.mera_pymer4 import run_mera
-
-    print(f"Processing event {event}")
-
-    db = DB(db_ffp)
-    avail_sites = db.get_avail_sites()
-
-    gm_params = {}
-    residual_df = []
-    sites = []
-
-    ### Compute the residuals
-    cur_sim_data = db.get_sim_data(event, avail_sites)
-    cur_sim_data[ims] = np.log(cur_sim_data[ims])
-
-    site_mean_values = cur_sim_data[["site_id"] + ims].groupby("site_id").mean()
-    site_mean_values.columns = np.char.add(
-        site_mean_values.columns.values.astype(str), "_mean"
-    )
-    for cur_site in cur_sim_data.site_id.unique().astype(str):
-        sites.append(str(cur_site))
-
-        # Compute the residual
-        cur_mask = cur_sim_data.site_id.values == cur_site
-        cur_residual = (
-            cur_sim_data.loc[cur_mask, ims].values
-            - site_mean_values.loc[cur_site].values
-        )
-        cur_residual = pd.DataFrame(
-            index=cur_sim_data.loc[cur_mask].index,
-            columns=ims,
-            data=cur_residual,
-        )
-        cur_sigma_total = cur_residual.std(axis=0)
-        cur_residual["rel"] = cur_sim_data.rel_id
-        cur_residual["site"] = cur_site
-
-        gm_params[cur_site] = (site_mean_values.loc[cur_site], cur_sigma_total)
-        residual_df.append(cur_residual)
-
-    # Combine
-    residual_df = pd.concat(residual_df)
-
-    # Run the mixed-effects regression
-    # This treats each realisation as an event
-    with warnings.catch_warnings():
-        warnings.simplefilter(action="ignore", category=FutureWarning)
-        event_res_df, within_res, bias_std_df = run_mera(
-            residual_df, ims, "rel", "site", compute_site_term=False, verbose=False
-        )
-
-    # Add site and rel column to within event residuals
-    assert np.all(within_res.index == residual_df.index)
-    within_res["site"] = residual_df["site"]
-    within_res["rel"] = residual_df["rel"]
-
-    # Get the GM params
-    for cur_site, (cur_mean, cur_sigma_total) in gm_params.items():
-        # Use tau from ME-regression
-        tau = bias_std_df.tau.copy()
-        assert np.all(tau.index == cur_sigma_total.index)
-
-        # Want site-specific phi, so compute it as
-        # sqrt(sigma_total^2 - tau^2), where sigma_total is
-        # computed from the realisations
-        ## TODO: How to handle negative values??
-        phi = np.sqrt(np.abs(cur_sigma_total ** 2 - tau ** 2))
-
-        # Update the indices
-        tau.index = np.char.add(tau.index.values.astype(str), "_std_Inter")
-        phi.index = np.char.add(phi.index.values.astype(str), "_std_Intra")
-
-        sigma = cur_sigma_total
-        sigma.index = np.char.add(sigma.index.values.astype(str), "_std_Total")
-
-        gm_params[cur_site] = {
-            **cur_mean.to_dict(),
-            **tau.to_dict(),
-            **phi.to_dict(),
-            **sigma.to_dict(),
-        }
-
-    gm_params = pd.DataFrame(gm_params).T
-    return SimGMParams(
-        event,
-        ims,
-        sites,
-        gm_params,
-        residual_df,
-        event_res_df,
-        within_res,
-        bias_std_df,
-    )
-
-
-def compute_event_gm_params_rel_mera(
-    db_ffp: Path, ims: List[str], data_source: str = None, n_procs: int = 1
-):
-    """
-    Computes the parametric IM distributions based
-    on the simulation data using mixed effects regression
-    """
-    db = DB(db_ffp)
-    events = db.get_avail_events(data_source=data_source)
-
-    if n_procs > 1:
-        with mp.Pool(n_procs) as p:
-            results = p.starmap(
-                _process_sim_gm_params_mera_event,
-                [(cur_event, db_ffp, ims) for cur_event in events],
-            )
-    else:
-        results = []
-        for cur_event in events:
-            results.append(_process_sim_gm_params_mera_event(cur_event, db_ffp, ims))
-
-    return results
-
-
-def load_obs_data(obs_ffp: Path):
-    """Loads the observation data from the NZ-GMDB IM flat file"""
-    return pd.read_csv(obs_ffp, index_col=0, low_memory=False, dtype={"evid": str})
 
 
 def load_sim_waveform(sim_rupture_dir: Path, rel_id: str, site: str):
@@ -857,14 +506,6 @@ def load_obs_waveform(obs_waveform_dir: Path, site: str):
     return obs_t, obs_acc
 
 
-# def load_correlations(data_dir: Path):
-#     return {
-#         utils.reverse_im_filename(cur_ffp.stem): pd.read_csv(cur_ffp, index_col=0)
-#         for cur_ffp in data_dir.iterdir()
-#         if cur_ffp.is_file()
-#     }
-
-
 def load_correlations(data_dir: Path):
     return {
         cur_ffp.stem: SiteCorrelations.load(cur_ffp)
@@ -873,93 +514,115 @@ def load_correlations(data_dir: Path):
     }
 
 
-def load_ll_file(ffp: Path):
-    return pd.read_csv(ffp, sep=" ", index_col=2, header=None, names=["lon", "lat"])
-
-
-def load_vs30_file(ffp: Path):
-    return pd.read_csv(ffp, sep=" ", index_col=0, header=None, names=["vs30"])
-
-
-def load_sim_gm_params(data_dir: Path):
-    return SimGMParams.load(data_dir)
-
-
-def load_emp_gm_params(gm_params_ffp: Path, event: str):
-    gm_params = pd.read_csv(gm_params_ffp, index_col=0)
-
-    gm_params.event = gm_params.event.values.astype(str)
-    gm_params = gm_params.loc[gm_params.event == event]
-    gm_params = gm_params.set_index("site")
-    return gm_params
-
-
-def get_method_type(results_dir: Path):
-    return constants.RankingMethod(get_meta(results_dir)["method_type"])
-
-
-def get_meta(results_dir: Path):
-    meta = mlt.utils.load_yaml(results_dir / "meta.yaml")
-    meta = {
-        key: os.path.expandvars(val)
-        if isinstance(val, str) and (key.endswith("_ffp") or key.endswith("_dir"))
-        else val
-        for key, val in meta.items()
-    }
-    return meta
-
-
-def get_gm_params(results_dir: Path):
-    method_type = get_method_type(results_dir)
-    meta = get_meta(results_dir)
-    if method_type is constants.RankingMethod.emp_cMVN:
-        return load_emp_gm_params(meta["gm_params_ffp"], meta["rupture"])
-    else:
-        sim_gm_params = load_sim_gm_params(Path(meta["sim_gm_params_dir"]))
-        return sim_gm_params.gm_params
-
-
-def get_overlap_emp_ml_data(emp_results_dir: Path, ml_sc_sum_df: pd.DataFrame):
+def load_obs_nzgmdb(nzgmdb_ffp: Path):
     """
-    Loads & combines the conditional mean & standard deviation data for
-    the overlapping scenarios for the given ML scenario summary dataframe
+    Load the observed data from NZGMDB and performs the
+    necessary preparation steps, depending
+    on the version.
 
     Parameters
     ----------
-    emp_results_dir: Path
-    ml_sc_sum_df: DataFrame
+    nzgmdb_ffp: Path
+        Path to the NZGMDB flat file
 
     Returns
     -------
-    emp_mean_df: DataFrame
-    emp_std_df: DataFrame
-        Mean & standard deviation dataframes
-        for the empirical conditional IM distributions
-    ml_sc_sum_df: DataFrame
-        Updated ML scenario summary dataframe
+    obs_data: ObservedData
+        Observed data object
     """
-    events = ml_sc_sum_df["event_id"].unique()
+    obs_data = ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
+    assert obs_data.data_source is constants.ObsDataSource.NZGMDB
 
-    emp_mean_df, emp_std_df = [], []
-    for cur_event in events:
-        cur_cim = conditional.load_emp_cim_data(
-            emp_results_dir, cur_event, constants.RankingMethod.emp_cMVN
-        )
-        if cur_cim is not None:
-            assert cur_cim.cond_lnIM_mean_df.index.equals(
-                cur_cim.cond_lnIM_std_df.index
-            ), f"Index mismatch for {cur_event}"
-            cur_index = mlt.array_utils.numpy_str_join("_", cur_event, cur_cim.cond_lnIM_mean_df.index.values.astype(str))
-            emp_mean_df.append(cur_cim.cond_lnIM_mean_df.set_index(cur_index))
-            emp_std_df.append(cur_cim.cond_lnIM_std_df.set_index(cur_index))
+    # Filter out nan values
+    obs_data = obs_data.drop_nan()
 
-    emp_mean_df = pd.concat(emp_mean_df, axis=0).sort_index()
-    emp_std_df = pd.concat(emp_std_df, axis=0).sort_index()
+    # Some basic filtering
+    if obs_data.nzgmdb_version is constants.NZGMDBVersion.v3p4:
+        obs_data = obs_data.metadata_filter(dict(rrup=(0, 250)))
+    elif obs_data.nzgmdb_version is constants.NZGMDBVersion.v4p0:
+        obs_data = obs_data.metadata_filter(dict(rrup=(0, 250), is_ground_level=True))
+    else:
+        raise NotImplementedError("Invalid NZGMDB version")
 
-    # Get overlapping scenarios
-    ml_in_emp = np.isin(ml_sc_sum_df.index.values.astype(str), emp_mean_df.index.values.astype(str))
-    print(f"Overlapping scenarios: {np.sum(ml_in_emp)}/{ml_sc_sum_df.shape[0]}")
+    # Drop duplicates
+    obs_data = obs_data.drop_duplicates(["event_id", "site_id"])
 
-    ids = ml_sc_sum_df.index[ml_in_emp]
+    # Convert to event_site index
+    obs_data = obs_data.to_event_site_index()
 
-    return emp_mean_df.loc[ids], emp_std_df.loc[ids], ml_sc_sum_df.loc[ids]
+    # Apply fmin
+    obs_data = obs_data.apply_fmin_filter(ObservedData.OtherColEnums.FMIN)
+
+    return obs_data
+
+
+def load_obs_nga_west2(
+    nga_west2_ffp: Path,
+):
+    """
+    Load the observed data from NGA-West2 and performs the
+    necessary preparation steps.
+
+    Parameters
+    ----------
+    nga_west2_ffp: Path
+        Path to the NGA-West2 flat file
+
+    Returns
+    -------
+    obs_data: ObservedData
+        Observed data object
+    """
+    # Load
+    obs_data = ObservedData.from_nga_west2_flat(nga_west2_ffp)
+
+    # Drop nan values
+    obs_data.drop_nan()
+
+    # Drop duplicates
+    obs_data.drop_duplicates(
+        [ObservedData.EventColEnums.EVENT_ID, ObservedData.SiteColEnums.SITE_ID]
+    )
+
+    # Distance filtering
+    obs_data = obs_data.metadata_filter(dict(rrup=(0, 250)))
+
+    # Apply fmin
+    obs_data = obs_data.apply_fmin_filter(ObservedData.OtherColEnums.FMIN)
+
+    return obs_data
+
+
+def load_obs_nga_subduction(
+        nga_sub_ffp: Path
+):
+    """
+    Load the observed data from NGA-Subduction and performs the
+    necessary preparation steps.
+
+    Parameters
+    ----------
+    nga_sub_ffp: Path
+        Path to the NGA-Subduction flat file
+
+    Returns
+    -------
+    obs_data: ObservedData
+        Observed data object
+
+    """
+    # Load
+    obs_data = ObservedData.from_nga_subduction_flat(nga_sub_ffp)
+
+    # Drop nan rows
+    obs_data = obs_data.drop_nan()
+
+    # Drop duplicates
+    obs_data = obs_data.drop_duplicates(
+        [ObservedData.EventColEnums.EVENT_ID, ObservedData.SiteColEnums.SITE_ID]
+    )
+
+    # Distance filtering
+    obs_data = obs_data.metadata_filter(dict(rrup=(0, 250)))
+
+    return obs_data

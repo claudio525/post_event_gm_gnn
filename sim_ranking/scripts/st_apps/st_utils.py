@@ -1,149 +1,498 @@
 import os
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, NamedTuple
 
 import streamlit as st
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 
 import sim_ranking as sr
 import ml_tools as mlt
+import spatial_hazard as sh
+
+
+class GNNRunResults(NamedTuple):
+    run_config: sr.ml.gnn_gm.RunConfig
+    train_results: pd.DataFrame
+    val_results: pd.DataFrame
+    val_int_sites: np.ndarray[str]
+    train_int_sites: np.ndarray[str]
+    metrics: dict
+    metadata: dict
 
 
 @st.cache_data
-def load_gm_params(gm_params_ffp: Path):
-    return pd.read_csv(gm_params_ffp, index_col=0)
+def get_gnn_result(result_ffp: Path):
+    run_config = sr.ml.gnn_gm.RunConfig.from_yaml(result_ffp / "run_config.yaml")
+    metrics = pd.read_pickle(result_ffp / "metrics.pickle")
+    train_results = pd.read_parquet(result_ffp / "train_results.parquet")
+    train_int_sites = np.load(result_ffp / "train_int_sites.npy")
+    val_results = pd.read_parquet(result_ffp / "val_results.parquet")
+    val_int_sites = np.load(result_ffp / "val_int_sites.npy")
+    metadata = mlt.utils.load_yaml(result_ffp / "metadata.yaml")
 
-
-@st.cache_data
-def ml_get_sim_data(results_dir: Path, event: str):
-    metadata = ml_get_metadata(results_dir)
-    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
-
-    sites = ml_get_event_sites(results_dir)[event]
-
-    return sr.db.DB(db_ffp).get_sim_data(event, sites)
-
-
-@st.cache_data
-def ml_get_obs_df(results_dir: Path):
-    metadata = ml_get_metadata(results_dir)
-    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
-
-    return sr.db.DB(db_ffp).get_obs_df()
-
-
-@st.cache_data
-def cim_load_cmvn_result(results_dir: Path):
-    ffp = results_dir / "cMVN_distributions.pickle"
-    if ffp.exists():
-        return sr.conditional.ConditionalMVNDistribution.load(ffp)
-    return None
-
-
-@st.cache_data
-def ml_get_event_sites(results_dir: Path):
-    metadata = ml_get_metadata(results_dir)
-    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
-
-    return sr.db.DB(db_ffp).get_event_sites()
-
-
-@st.cache_data
-def ml_get_metadata(results_dir: Path):
-    return sr.data.get_meta(results_dir)
-
-
-@st.cache_data
-def ml_get_site_df(results_dir: Path):
-    return sr.db.DB(ml_get_db_ffp(results_dir)).get_site_df()
-
-@st.cache_data
-def ml_get_db_ffp(results_dir: Path):
-    metadata = ml_get_metadata(results_dir)
-    return Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
-
-
-@st.cache_data
-def ml_get_event_df(results_dir: Path):
-    metadata = ml_get_metadata(results_dir)
-    db_ffp = Path(os.path.expandvars("$wdata")) / metadata["data"]["db"]
-
-    return sr.db.DB(db_ffp).get_event_df()
-
-
-@st.cache_data
-def ml_get_event_angular_distances(results_dir: Path):
-    station_df = ml_get_site_df(results_dir)
-    event_df = ml_get_event_df(results_dir)
-    event_sites = ml_get_event_sites(results_dir)
-
-    return sr.ml.features.compute_angular_distance(
-        station_df,
-        event_df,
-        event_df.index.values.astype(str),
-        event_sites,
-        pre_process=False,
+    return GNNRunResults(
+        run_config,
+        train_results,
+        val_results,
+        val_int_sites,
+        train_int_sites,
+        metrics,
+        metadata,
     )
 
 
-@st.cache_data
-def ml_load_scenario_results(results_dir: Path):
-    train_results = pd.read_parquet(results_dir / "train_scenario_results.parquet")
-    train_sum_results = pd.read_parquet(results_dir / "train_scenario_summary.parquet")
-
-    val_results = pd.read_parquet(results_dir / "val_scenario_results.parquet")
-    val_sum_results = pd.read_parquet(results_dir / "val_scenario_summary.parquet")
-
-    return train_results, train_sum_results, val_results, val_sum_results
+@st.cache_data(hash_funcs={sr.ObservedData: lambda x: hash(x.data_ffp)})
+def get_dist_matrix(obs_data: sr.ObservedData) -> pd.DataFrame:
+    return sh.im_dist.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
 
 
 @st.cache_data
-def ml_load_sample_results(results_dir: Path):
-    train_results_df = pd.read_parquet(results_dir / "train_sample_results.parquet")
-    train_sum_results_df = pd.read_parquet(results_dir / "train_sample_summary.parquet")
+def get_observed_data(nzgmdb_ffp: Path) -> sr.ObservedData:
+    return sr.ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
 
-    val_results_df = pd.read_parquet(results_dir / "val_sample_results.parquet")
-    val_sum_results_df = pd.read_parquet(results_dir / "val_sample_summary.parquet")
 
-    angular_distances = ml_get_event_angular_distances(results_dir)
-    for cur_event in train_sum_results_df.event_id.unique():
-        train_sum_results_df.loc[
-            train_sum_results_df.event_id == cur_event, "angular_distance"
-        ] = np.rad2deg(
-            angular_distances[cur_event].values[
-                angular_distances[cur_event].index.get_indexer_for(
-                    train_sum_results_df.loc[
-                        train_sum_results_df.event_id == cur_event
-                    ].site_int.values
-                ),
-                angular_distances[cur_event].columns.get_indexer_for(
-                    train_sum_results_df.loc[
-                        train_sum_results_df.event_id == cur_event
-                    ].site_obs.values
-                ),
-            ]
+def _create_pot_sites_map(
+    event: str,
+    site_df: pd.DataFrame,
+    int_sites: np.ndarray,
+    obs_sites: np.ndarray,
+    event_df: pd.DataFrame,
+    site_int: str,
+):
+    all_sites = np.unique(np.concatenate([int_sites, obs_sites]))
+
+    fig = go.Figure(
+        data=[
+            go.Scattermapbox(
+                lat=site_df.loc[obs_sites].lat,
+                lon=site_df.loc[obs_sites].lon,
+                mode="markers",
+                marker=dict(size=10, color="blue"),
+                hovertext=obs_sites,
+                hoverinfo="text",
+                name="Potential observation sites",
+            ),
+            go.Scattermapbox(
+                lat=site_df.loc[int_sites].lat,
+                lon=site_df.loc[int_sites].lon,
+                mode="markers",
+                marker=dict(size=10, color="orange"),
+                hovertext=int_sites,
+                hoverinfo="text",
+                name="Potential sites of interest",
+            ),
+            go.Scattermapbox(
+                lat=[site_df.loc[site_int, "lat"]],
+                lon=[site_df.loc[site_int, "lon"]],
+                mode="markers",
+                marker=dict(size=20, color="red"),
+                hovertext=site_int,
+                hoverinfo="text",
+                name="Site of interest",
+            ),
+            go.Scattermapbox(
+                lat=[event_df.loc[event, "lat"]],
+                lon=[event_df.loc[event, "lon"]],
+                mode="markers",
+                marker=dict(size=25, color="black"),
+                hovertext=event,
+                hoverinfo="text",
+                name="Event",
+            ),
+        ]
+    )
+
+    fig.update_layout(height=600, margin=dict(l=0, r=0, t=0, b=0))
+    fig.update_mapboxes(
+        accesstoken="pk.eyJ1IjoiY3MyMyIsImEiOiJjbGtpeXIxNnkwbDQ3M25xbDFrZWFnNHo3In0.OD7TJ_1PegpGvCOCxfHsnA",
+        center=dict(
+            lat=site_df.loc[all_sites].lat.mean(),
+            lon=site_df.loc[all_sites].lon.mean(),
+        ),
+        zoom=8,
+    )
+
+    return fig
+
+
+def _create_scenario_map(
+    event: str,
+    site_df: pd.DataFrame,
+    emp_sites: np.ndarray,
+    sim_sites: np.ndarray,
+    ml_sites: np.ndarray,
+    event_df: pd.DataFrame,
+    site_int: str,
+):
+    all_sites = np.unique(np.concatenate([emp_sites, sim_sites, ml_sites]))
+
+    # assert np.all(np.isin(emp_sites, sim_sites))
+    cim_sites = np.unique(np.concatenate([emp_sites, sim_sites]))
+
+    cim_only_sites = np.setdiff1d(cim_sites, ml_sites)
+    ml_only_sites = np.setdiff1d(ml_sites, cim_sites)
+    both_sites = np.intersect1d(cim_sites, ml_sites)
+    assert np.all(
+        np.isin(np.concatenate((cim_only_sites, ml_only_sites, both_sites)), all_sites)
+    )
+
+    fig = go.Figure(
+        data=[
+            go.Scattermapbox(
+                lat=site_df.loc[both_sites].lat,
+                lon=site_df.loc[both_sites].lon,
+                mode="markers",
+                marker=dict(size=10, color="blue"),
+                hovertemplate="<b>Name: %{customdata.site}<br>Vs30: %{customdata.vs30}<br>Z1.0: %{customdata.z1p0}<extra></extra>",
+                customdata=[
+                    {
+                        "site": cur_site,
+                        "vs30": site_df.loc[cur_site, "vs30"],
+                        "z1p0": site_df.loc[cur_site, "z1p0"],
+                    }
+                    for cur_site in both_sites
+                ],
+                name="Observation sites - cIM & ML",
+            ),
+            go.Scattermapbox(
+                lat=site_df.loc[cim_only_sites].lat,
+                lon=site_df.loc[cim_only_sites].lon,
+                mode="markers",
+                marker=dict(size=10, color="magenta"),
+                customdata=[
+                    {
+                        "site": cur_site,
+                        "vs30": site_df.loc[cur_site, "vs30"],
+                        "z1p0": site_df.loc[cur_site, "z1p0"],
+                    }
+                    for cur_site in cim_only_sites
+                ],
+                hovertemplate="<b>Name: %{customdata.site}<br>Vs30: %{customdata.vs30}<br>Z1.0: %{customdata.z1p0}<extra></extra>",
+                name="Observation sites - cIM only",
+            ),
+            go.Scattermapbox(
+                lat=site_df.loc[ml_only_sites].lat,
+                lon=site_df.loc[ml_only_sites].lon,
+                mode="markers",
+                marker=dict(size=10, color="green"),
+                customdata=[
+                    {
+                        "site": cur_site,
+                        "vs30": site_df.loc[cur_site, "vs30"],
+                        "z1p0": site_df.loc[cur_site, "z1p0"],
+                    }
+                    for cur_site in ml_only_sites
+                ],
+                hovertemplate="<b>Name: %{customdata.site}<br>Vs30: %{customdata.vs30}<br>Z1.0: %{customdata.z1p0}<extra></extra>",
+                name="Observation sites - ML only",
+            ),
+            go.Scattermapbox(
+                lat=[site_df.loc[site_int, "lat"]],
+                lon=[site_df.loc[site_int, "lon"]],
+                mode="markers",
+                marker=dict(size=20, color="red"),
+                customdata=[
+                    {
+                        "site": cur_site,
+                        "vs30": site_df.loc[cur_site, "vs30"],
+                        "z1p0": site_df.loc[cur_site, "z1p0"],
+                    }
+                    for cur_site in [site_int]
+                ],
+                hovertemplate="<b>Name: %{customdata.site}<br>Vs30: %{customdata.vs30}<br>Z1.0: %{customdata.z1p0}<extra></extra>",
+                name="Site of interest",
+            ),
+            go.Scattermapbox(
+                lat=[event_df.loc[event, "lat"]],
+                lon=[event_df.loc[event, "lon"]],
+                mode="markers",
+                marker=dict(size=25, color="black"),
+                hovertext=event,
+                hoverinfo="text",
+                name="Event",
+            ),
+        ]
+    )
+
+    fig.update_layout(height=600, margin=dict(l=0, r=0, t=0, b=0))
+    fig.update_mapboxes(
+        accesstoken="pk.eyJ1IjoiY3MyMyIsImEiOiJjbGtpeXIxNnkwbDQ3M25xbDFrZWFnNHo3In0.OD7TJ_1PegpGvCOCxfHsnA",
+        center=dict(
+            lat=site_df.loc[all_sites].lat.mean(),
+            lon=site_df.loc[all_sites].lon.mean(),
+        ),
+        zoom=8,
+    )
+
+    return fig
+
+
+def scenario_viewer(
+    gnn_results: pd.DataFrame,
+    obs_data: sr.ObservedData,
+    dist_matrix: pd.DataFrame,
+    tab_type: str,
+):
+    events = gnn_results.event_id.unique().astype(str)
+
+    col1, col2 = st.columns([1, 6])
+
+    with col1:
+        # Select site and event
+        cur_event = st.selectbox(
+            "Event",
+            obs_data.event_df.loc[events]
+            .sort_values("mag", ascending=False)
+            .index.values.astype(str),
+            key=f"{tab_type}_event",
         )
 
-    for cur_event in val_sum_results_df.event_id.unique():
-        val_sum_results_df.loc[
-            val_sum_results_df.event_id == cur_event, "angular_distance"
-        ] = np.rad2deg(
-            angular_distances[cur_event].values[
-                angular_distances[cur_event].index.get_indexer_for(
-                    val_sum_results_df.loc[
-                        val_sum_results_df.event_id == cur_event
-                    ].site_int.values
-                ),
-                angular_distances[cur_event].columns.get_indexer_for(
-                    val_sum_results_df.loc[
-                        val_sum_results_df.event_id == cur_event
-                    ].site_obs.values
-                ),
-            ]
+        cur_gnn_result = gnn_results.loc[gnn_results.event_id == cur_event]
+
+        int_sites = cur_gnn_result.site_int.unique().astype(str)
+        obs_sites = np.unique(
+            np.concatenate(
+                [cur_result.obs_sites for _, cur_result in cur_gnn_result.iterrows()]
+            ).astype(str)
+        )
+        cur_int_site = st.selectbox(
+            "Site of Interest", int_sites, key=f"{tab_type}_site"
         )
 
-    return train_results_df, train_sum_results_df, val_results_df, val_sum_results_df
+        # Get GNN results
+        cur_gnn_result = cur_gnn_result.loc[
+            cur_gnn_result.site_int == cur_int_site
+        ].squeeze()
+
+        cur_obs_df = obs_data.record_df
+        cur_obs_df = cur_obs_df[cur_obs_df.event_id == cur_event].set_index("site_id")
+
+        # Get empirical cIM results
+        # cur_emp_cim = (
+        #     shared_data.emp_cim_data.get(cur_event, None)
+        #     if shared_data.emp_cim_data is not None
+        #     else None
+        # )
+        # if cur_emp_cim is not None:
+        #     cur_emp_cim_mean = cur_emp_cim.cond_lnIM_mean_df
+        #     cur_emp_cim_std = cur_emp_cim.cond_lnIM_std_df
+
+        st.markdown(f"Magnitude: {obs_data.event_df.loc[cur_event].mag}")
+        st.markdown(f"Loss: {cur_gnn_result.loss:.4f}")
+
+    with col2:
+        fig = _create_pot_sites_map(
+            cur_event,
+            obs_data.site_df,
+            int_sites,
+            obs_sites,
+            obs_data.event_df,
+            cur_int_site,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    with st.expander("Scenario Map"):
+        fig = _create_scenario_map(
+            cur_event,
+            obs_data.site_df,
+            [],
+            [],
+            # cur_emp_cim.get_obs_stations(cur_site),
+            # cur_sim_cim.get_obs_stations(cur_site),
+            cur_gnn_result.obs_sites,
+            obs_data.event_df,
+            cur_int_site,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    pred_im_keys = mlt.array_utils.numpy_str_join("_", sr.constants.PSA_KEYS, "pred")
+    pred_std_im_keys = mlt.array_utils.numpy_str_join(
+        "_", sr.constants.PSA_KEYS, "pred_std"
+    )
+
+    col1, col2 = st.columns(2)
+
+    line_options = ["ML", "Obs"]
+    # if cur_emp_cim is not None:
+    #     line_options.append("emp_cIM")
+    cur_obs_sites = (
+        dist_matrix.loc[cur_int_site]
+        .loc[cur_gnn_result.obs_sites.astype(str)]
+        .sort_values()
+        .index.values.astype(str)
+    )
+    line_options.extend(cur_obs_sites)
+
+    with col1:
+        log_log = st.checkbox("Log-Log Plot", value=False, key=f"{tab_type}_log_log")
+    with col2:
+        sel_line_options = st.multiselect(
+            "Lines",
+            line_options,
+            default=[
+                "ML",
+                "Obs",
+            ],  # if cur_emp_cim is None else ["ML", "Obs", "emp_cIM"],
+            key=f"{tab_type}_lines",
+        )
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # ML
+    if "ML" in sel_line_options:
+        ax.plot(
+            sr.constants.PERIODS,
+            np.exp(cur_gnn_result.loc[pred_im_keys].values.astype(float)),
+            c="blue",
+            label="ML",
+            marker=".",
+        )
+        ax.plot(
+            sr.constants.PERIODS,
+            np.stack(
+                (
+                    np.exp(
+                        cur_gnn_result.loc[pred_im_keys].values.astype(float)
+                        + cur_gnn_result.loc[pred_std_im_keys].values.astype(float)
+                    ),
+                    np.exp(
+                        cur_gnn_result.loc[pred_im_keys].values.astype(float)
+                        - cur_gnn_result.loc[pred_std_im_keys].values.astype(float)
+                    ),
+                ),
+                axis=1,
+            ),
+            c="blue",
+            linestyle="--",
+            linewidth=1.0,
+        )
+
+    # Observed
+    if "Obs" in sel_line_options:
+        ax.plot(
+            sr.constants.PERIODS,
+            np.exp(cur_gnn_result.loc[sr.constants.PSA_KEYS].values.astype(float)),
+            c="red",
+            label="Observed - SoI",
+        )
+
+    # Empirical cIM
+    # if cur_emp_cim is not None and "emp_cIM" in sel_line_options:
+    #     cur_emp_cim_mean_values = cur_emp_cim_mean.loc[
+    #         cur_int_site, sr.constants.PSA_KEYS
+    #     ].values
+    #     cur_emp_cim_std_values = cur_emp_cim_std.loc[
+    #         cur_int_site, sr.constants.PSA_KEYS
+    #     ].values
+    #
+    #     ax.plot(
+    #         sr.constants.PERIODS,
+    #         np.exp(cur_emp_cim_mean_values),
+    #         c="green",
+    #         label="cIM",
+    #     )
+    #     ax.plot(
+    #         sr.constants.PERIODS,
+    #         np.stack(
+    #             (
+    #                 np.exp(cur_emp_cim_mean_values + cur_emp_cim_std_values),
+    #                 np.exp(cur_emp_cim_mean_values - cur_emp_cim_std_values),
+    #             ),
+    #             axis=1,
+    #         ),
+    #         c="green",
+    #         linestyle="--",
+    #         linewidth=1.0,
+    #     )
+
+    # Observation sites
+    obs_sites_to_plot = np.intersect1d(sel_line_options, cur_gnn_result.obs_sites)
+    for cur_site in obs_sites_to_plot:
+        cur_site_values = cur_obs_df.loc[cur_site, sr.constants.PSA_KEYS].values.astype(
+            float
+        )
+        ax.plot(
+            sr.constants.PERIODS,
+            cur_site_values,
+            label=f"Observed - {cur_site}",
+            linestyle="dotted",
+            linewidth=1.25,
+        )
+
+    ax.set_xscale("log")
+    if log_log:
+        ax.set_yscale("log")
+
+    ax.set_xlabel(f"Period (s)")
+    ax.set_ylabel(f"pSA")
+    ax.set_xlim([0.01, 10])
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.legend()
+
+    st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
+
+    # Site information
+    st.markdown("### Site Information")
+    site_cols = ["rrup", "vs30", "z1p0", "z2p5", "tsite"]
+    site_info_sites = [cur_int_site] + cur_obs_sites.tolist()
+    site_info_records = mlt.array_utils.numpy_str_join("_", cur_event, site_info_sites)
+
+    site_info_df = obs_data.record_df.loc[site_info_records, site_cols].copy()
+    site_info_df["site_int_distance"] = (
+        dist_matrix.loc[cur_int_site].loc[site_info_sites].values
+    )
+
+    st.table(site_info_df.sort_values("site_int_distance", ascending=True))
+
+    # IM loss
+    st.markdown("### IM Loss")
+    im_loss_keys = mlt.array_utils.numpy_str_join("_", sr.constants.PSA_KEYS, "loss")
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(
+        sr.constants.PERIODS,
+        cur_gnn_result.loc[im_loss_keys].values.astype(float),
+        c="blue",
+        label="IM Loss",
+        marker=".",
+    )
+    ax.set_xscale("log")
+    ax.set_xlim([0.01, 10])
+    ax.set_xlabel(f"Period (s)")
+    ax.set_ylabel(f"Loss")
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+    fig.tight_layout()
+    st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
+
+
+# @st.cache_data
+# def cim_load_cmvn_result(results_dir: Path):
+#     ffp = results_dir / "cMVN_distributions.pickle"
+#     if ffp.exists():
+#         return sr.conditional.ConditionalMVNDistribution.load(ffp)
+#     return None
+
+# @st.cache_resource
+# def load_emp_cim_data(emp_cim_results_dir: Path):
+#     print(emp_cim_results_dir)
+#     emp_cim_events = [
+#         cur_ffp.stem for cur_ffp in emp_cim_results_dir.iterdir() if cur_ffp.is_dir()
+#     ]
+#     emp_cim_data = {
+#         cur_event: cim_load_cmvn_result(emp_cim_results_dir / cur_event)
+#         for cur_event in emp_cim_events
+#     }
+#     return emp_cim_data
 
 
 def scatter_options_form(df: pd.DataFrame, cols: Sequence[str], key_prefix: str):
@@ -179,9 +528,7 @@ def scatter_options_form(df: pd.DataFrame, cols: Sequence[str], key_prefix: str)
 
             ## Other Options
             st.markdown("### Other Options")
-            alpha = st.number_input(
-                "Alpha", 0.0, 1.0, 1.0, key=f"{key_prefix}_alpha"
-            )
+            alpha = st.number_input("Alpha", 0.0, 1.0, 1.0, key=f"{key_prefix}_alpha")
             marker_size = st.number_input(
                 "Marker Size", 1, 100, 10, key=f"{key_prefix}_marker_size"
             )
@@ -189,9 +536,7 @@ def scatter_options_form(df: pd.DataFrame, cols: Sequence[str], key_prefix: str)
         with col2:
             ## Y-axis
             st.markdown("### Y-axis")
-            y_axis = st.selectbox(
-                "Select Y-axis", cols, key=f"{key_prefix}_y_axis"
-            )
+            y_axis = st.selectbox("Select Y-axis", cols, key=f"{key_prefix}_y_axis")
 
             # Axis limits
             c1, c2 = st.columns(2)
@@ -254,9 +599,7 @@ def scatter_options_form(df: pd.DataFrame, cols: Sequence[str], key_prefix: str)
             fixed_color = st.checkbox(
                 "Use Fixed Color", key=f"{key_prefix}_use_fixed_color"
             )
-            color = st.selectbox(
-                "Select Color:", COLORS, key=f"{key_prefix}_color"
-            )
+            color = st.selectbox("Select Color:", COLORS, key=f"{key_prefix}_color")
 
             st.divider()
 

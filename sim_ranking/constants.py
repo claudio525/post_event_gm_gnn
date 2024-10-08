@@ -1,7 +1,30 @@
 import os
-from enum import Enum
+from enum import Enum, auto, StrEnum
 
 import numpy as np
+
+import ml_tools as mlt
+
+
+class ObsDataSource(StrEnum):
+    NZGMDB = "NZGMDB"
+    NGAWest2 = "NGAWest2"
+    NGASubduction = "NGASubduction"
+
+
+class NZGMDBVersion(StrEnum):
+    v3p0 = "v3.0"
+    v3p4 = "v3.4"
+    v4p0 = "v4.0"
+
+
+class TectonicType(StrEnum):
+    CRUSTAL = "crustal"
+    SUBDUCTION_INTERFACE = "subduction_interface"
+    SUBDUCTION_SLAB = "subduction_slab"
+    OUTER_RISE = "outer_rise"
+    MANTLE = "mantle"
+    UNKNOWN = "unknown"
 
 
 class RankingMethod(Enum):
@@ -14,62 +37,6 @@ class RankingMethod(Enum):
 
     ml_prob = 4
     ml_prob_per_im = 5
-
-
-METHOD_RESULT_DIR_NAME_MAPPING = {
-    RankingMethod.emp_cMVN: "empirical_cMVN",
-    RankingMethod.sim_cMVN: "sim_cMVN",
-    RankingMethod.sim_cMVN_emp_corr: "sim_cMVN_emp_corr",
-}
-
-RESULTS_DIR_NAME_METHOD_MAPPING = {
-    v: k for k, v in METHOD_RESULT_DIR_NAME_MAPPING.items()
-}
-
-
-class ScalarFeatureSetKey(str, Enum):
-    # All available scalar features
-    all = "all"
-
-    # Only the scalar features used by the
-    # empirical models for the generation
-    # of the synthetic data
-    emp_gen = "emp_gen"
-
-
-ALL_SCALAR_FEATURE_KEYS = {
-    "event": ["mag"],
-    "site": ["vs30", "z1.0", "z2.5", "tsite"],
-    "site_to_site": ["dist"],
-    "event_site": ["r_rup"],
-    "event_site_to_site": ["angular_dist"],
-}
-
-EMP_GEN_SCALAR_FEATURE_KEYS = {
-    "event": ["mag"],
-    "site": ["vs30", "z1.0", "z2.5"],
-    "site_to_site": ["dist"],
-    "event_site": ["r_rup"],
-    "event_site_to_site": [],
-}
-
-SCALAR_FEATURE_SET_LOOKUP = {
-    ScalarFeatureSetKey.all: ALL_SCALAR_FEATURE_KEYS,
-    ScalarFeatureSetKey.emp_gen: EMP_GEN_SCALAR_FEATURE_KEYS,
-}
-
-
-WEIGHT_MODEL_SCALAR_FEATURE_SET_LOOKUP = {
-    ScalarFeatureSetKey.emp_gen: ["vs30_site_int", "vs30_site_obs", "dist"],
-    # ScalarFeatureSet.emp_gen: ["dist"],
-    ScalarFeatureSetKey.all: [
-        "vs30_site_int", "vs30_site_obs",
-        "dist",
-        "z1.0_site_int", "z1.0_site_obs",
-        "z2.5_site_int", "z2.5_site_obs",
-        "tsite_site_int", "tsite_site_obs"
-    ],
-}
 
 
 PERIODS = [
@@ -94,7 +61,8 @@ PERIODS = [
     0.8,
     0.9,
     1.0,
-    1.25,
+    # 1.25,
+    1.2,
     1.5,
     2.0,
     2.5,
@@ -121,6 +89,44 @@ IM_WEIGTHS_SETS = {
 }
 
 COMPONENTS = ["090", "000", "ver"]
+
+SCALAR_FEATURE_KEYS = {
+    "event": ["mag"],
+    "site": ["vs30", "z1p0", "z2p5", "tsite"],
+    "site_to_site": ["dist"],
+    "event_site": ["rrup"],
+    "event_site_to_site": ["angular_dist"],
+}
+
+GRAPH_FEATURE_KEYS = {
+    "edge": ["dist", "angular_dist"],
+    "site_int": [
+        "vs30_site_int",
+        "z1p0_site_int",
+        "z2p5_site_int",
+        "tsite_site_int",
+        "rrup_site_int",
+        "mag",
+    ],
+    "site_obs": [
+        "vs30_site_obs",
+        "z1p0_site_obs",
+        "z2p5_site_obs",
+        "tsite_site_obs",
+        "rrup_site_obs",
+    ],
+}
+
+
+PRE_PROCESS_CONFIG = {
+    "mag": (2, 9),
+    "vs30": (100, 1500),
+    "z1p0": (0, 1500),
+    "z2p5": (0, 11000),
+    "tsite": (0, 10),
+    "rrup": (0, 200),
+    "rx": (-200, 200),
+}
 
 
 CANTERBURY_REGION = [171.54, 173.12, -43.95, -43.22]
