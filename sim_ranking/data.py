@@ -179,35 +179,18 @@ def gen_emp_synthethic_realisations(
 
 def run_emp_gmms(
     output_ffp: Path,
-    nzgmdb_source_ffp: Path,
+    nzgmdb_flat_ffp: Path,
     rjb_max: float,
-    srf_dir: Path = None,
-    nzgmdb_flatfile_ffp: Path = None,
-    site_dir: Path = None,
-    nzgmdb_site_ffp: Path = None,
     events: Sequence[str] = None,
 ):
     """
     Computes the empirical GMM parameters for all
-        specified sites and sources
-
-    Note I: One of srf_dir or nzgmdb_flatfile_ffp must be specified
-    Note II: One of site_dir or nzgmdb_site_ffp must be specified
+    specified sites and sources, based on inputs
+    from NZGMDB
 
     Parameters
     ----------
-    output_ffp: Path
-    site_dir: Path
-        Directory that contains all the site
-        information files (i.e. vs30, ll, and z)
-    nzgmdb_source_ffp: Path
-        Path to the NZ-GMDB source file
-    rjb_max: float
-        RJB distance threshold
-    srf_dir: Path, optional
-        Directory that contains the srf files
-    nzgmdb_flatfile_ffp: Path, optional
-        Path to the NZ-GMDB flat file
+
 
     Returns
     -------
@@ -215,10 +198,8 @@ def run_emp_gmms(
         The empirical GMM parameters for PGA
         and the default set of pSA periods
     """
-
     from empirical.util.openquake_wrapper_vectorized import oq_run
     from empirical.util.classdef import TectType, GMM
-    from IM_calculation.source_site_dist import src_site_dist
 
     ### Constants
     GMM_MAPPING = {
@@ -228,11 +209,11 @@ def run_emp_gmms(
     }
 
     TECT_CLASS_MAPPING = {
-        "Crustal": TectType.ACTIVE_SHALLOW,
-        "Slab": TectType.SUBDUCTION_SLAB,
-        "Interface": TectType.SUBDUCTION_INTERFACE,
-        "Undetermined": TectType.ACTIVE_SHALLOW,
-        "Outer-rise": TectType.SUBDUCTION_SLAB,
+        constants.TectonicType.CRUSTAL: TectType.ACTIVE_SHALLOW,
+        constants.TectonicType.SUBDUCTION_SLAB: TectType.SUBDUCTION_SLAB,
+        constants.TectonicType.SUBDUCTION_INTERFACE: TectType.SUBDUCTION_INTERFACE,
+        constants.TectonicType.UNKNOWN: TectType.ACTIVE_SHALLOW,
+        constants.TectonicType.OUTER_RISE: TectType.SUBDUCTION_SLAB,
     }
 
     OQ_INPUT_COLUMNS = [
@@ -249,143 +230,60 @@ def run_emp_gmms(
         "hypo_depth",
     ]
 
-    # Input sanity checking
-    assert (srf_dir is not None) or (nzgmdb_flatfile_ffp is not None)
-    assert not ((srf_dir is not None) and (nzgmdb_flatfile_ffp is not None))
+    OBS_DATA_COLS_MAPPING = {
+        ObservedData.SiteColEnums.VS30: "vs30",
+        ObservedData.EventSiteColEnums.RRUP: "rrup",
+        ObservedData.EventSiteColEnums.RJB: "rjb",
+        ObservedData.SiteColEnums.Z1P0: "z1pt0",
+        ObservedData.EventColEnums.MAG: "mag",
+        ObservedData.EventColEnums.RAKE: "rake",
+        ObservedData.EventColEnums.DIP: "dip",
+        ObservedData.EventColEnums.ZTOR: "ztor",
+        ObservedData.EventSiteColEnums.RX: "rx",
+        ObservedData.EventColEnums.DEPTH: "hypo_depth",
+    }
 
     ### Data loading
-    # Get all srf files
-    if srf_dir is not None:
-        from qcore import srf
+    obs_data = load_obs_nzgmdb(nzgmdb_flat_ffp)
 
-        srf_ffps = list(srf_dir.rglob("*.srf"))
-        srf_events = [cur_ffp.stem for cur_ffp in srf_ffps]
+    # Create rupture dataframe
+    columns = [
+        ObservedData.EventColEnums.EVENT_ID,
+        ObservedData.SiteColEnums.SITE_ID,
+        ObservedData.SiteColEnums.SITE_LON,
+        ObservedData.SiteColEnums.SITE_LAT,
+        ObservedData.EventColEnums.TECT_TYPE,
+    ] + list(OBS_DATA_COLS_MAPPING.keys())
+    rupture_df = obs_data.record_df[columns].copy(True)
 
-        # Load srf data
-        srf_points, plane_infos = {}, {}
-        for cur_srf_ffp in srf_ffps:
-            srf_points[cur_srf_ffp.stem] = srf.read_srf_points(str(cur_srf_ffp))
-            plane_infos[cur_srf_ffp.stem] = srf.read_header(str(cur_srf_ffp), idx=True)
+    # Filter events
+    if events is not None:
+        rupture_df = rupture_df.loc[rupture_df.event.isin(events)]
 
-        events = (
-            np.intersect1d(events, srf_events) if events is not None else srf_events
-        )
-    else:
-        nzgmdb_flatfile = pd.read_csv(
-            nzgmdb_flatfile_ffp, index_col=0, dtype={"evid": str}
-        )
-        nzgmdb_events = np.unique(nzgmdb_flatfile.evid).astype(str)
+    # Convert Z1.0 to kilometres
+    rupture_df[ObservedData.SiteColEnums.Z1P0] /= 1000
 
-        events = (
-            np.intersect1d(events, nzgmdb_events)
-            if events is not None
-            else nzgmdb_events
-        )
+    # Rename columns for OQ
+    rupture_df = rupture_df.rename(columns=OBS_DATA_COLS_MAPPING)
+    rupture_df["vs30measured"] = False
 
-    # Load source info
-    source_df = pd.read_csv(nzgmdb_source_ffp, index_col=0)
-
-    # Load the site_data
-    if site_dir is not None:
-        stations_df = pd.read_csv(
-            site_dir / f"{constants.STATION_FN_NAME}.ll",
-            sep=" ",
-            index_col=2,
-            header=None,
-            names=["lon", "lat"],
-        )
-        vs30_df = pd.read_csv(
-            site_dir / f"{constants.STATION_FN_NAME}.vs30",
-            sep=" ",
-            index_col=0,
-            header=None,
-            names=["vs30"],
-        )
-        z_df = pd.read_csv(site_dir / f"{constants.STATION_FN_NAME}.z", index_col=0)
-
-        ### Data merging/re-naming and tidy up
-        assert np.all(stations_df.index == vs30_df.index) and np.all(
-            stations_df.index == z_df.index
-        )
-        site_df = pd.concat([stations_df, vs30_df, z_df], axis=1)
-        site_df = site_df.rename(columns={"Z_1.0(km)": "z1pt0"})
-        del stations_df, vs30_df, z_df
-    else:
-        site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")[
-            ["lat", "lon", "Vs30", "Z1.0"]
-        ]
-        site_df = site_df.rename(columns={"Vs30": "vs30", "Z1.0": "z1pt0"})
-        site_df["z1pt0"] = site_df["z1pt0"] / 1000
-
-    ### Data prep
-    site_locs = np.concatenate(
-        (site_df[["lon", "lat"]].values, np.zeros((site_df.shape[0], 1))), axis=1
-    )
-    print(f"Creation of rupture dataframe")
-    data_dfs = []
-    for cur_event in tqdm.tqdm(events):
-        if srf_dir is not None:
-            cur_data_df = site_df.copy(True)
-            cur_data_df["rrup"], cur_data_df["rjb"] = src_site_dist.calc_rrup_rjb(
-                srf_points[cur_event], site_locs
-            )
-
-            cur_data_df["rx"], cur_data_df["ry"] = src_site_dist.calc_rx_ry(
-                srf_points[cur_event], plane_infos[cur_event], site_locs
-            )
-        else:
-            cur_nzgmdb_flatfile = nzgmdb_flatfile.loc[
-                nzgmdb_flatfile.evid == cur_event
-            ].copy(True)
-            cur_nzgmdb_flatfile = cur_nzgmdb_flatfile.set_index("sta")
-            cur_sites = np.intersect1d(
-                cur_nzgmdb_flatfile.index.values.astype(str),
-                site_df.index.values.astype(str),
-            )
-            if cur_sites.size == 0:
-                continue
-
-            cur_data_df = site_df.loc[cur_sites].copy(True)
-            cur_data_df.loc[:, "rrup"] = cur_nzgmdb_flatfile.loc[
-                cur_sites, "r_rup"
-            ].values
-            cur_data_df.loc[:, "rjb"] = cur_nzgmdb_flatfile.loc[
-                cur_sites, "r_jb"
-            ].values
-            cur_data_df.loc[:, "rx"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_x"].values
-            cur_data_df.loc[:, "ry"] = cur_nzgmdb_flatfile.loc[cur_sites, "r_y"].values
-
-        cur_data_df.loc[:, "site"] = cur_data_df.index.values
-        cur_data_df.loc[:, "event"] = str(cur_event)
-        cur_data_df.index = np.add(f"{cur_event}_", cur_data_df.index.values)
-
-        # Enforce distance threshold
-        cur_data_df = cur_data_df.loc[cur_data_df.rjb <= rjb_max]
-
-        if cur_data_df.shape[0] > 0:
-            # Add event data
-            cur_data_df = cur_data_df.merge(
-                source_df[["mag", "tect_class", "z_tor", "rake", "dip", "depth"]],
-                left_on="event",
-                right_index=True,
-            )
-            data_dfs.append(cur_data_df)
-
-    data_df = pd.concat(data_dfs, axis=0)
-    data_df["vs30measured"] = False
-
-    data_df = data_df.rename(columns={"z_tor": "ztor", "depth": "hypo_depth"})
+    # Apply rjb filter
+    rupture_df = rupture_df.loc[rupture_df.rjb <= rjb_max]
 
     ### GM prediction
     print(f"Running predictions")
     dfs = []
-    sites = np.unique(data_df.site)
+    sites = np.unique(rupture_df[ObservedData.SiteColEnums.SITE_ID])
     for cur_site in tqdm.tqdm(sites):
+        cur_site_mask = rupture_df[ObservedData.SiteColEnums.SITE_ID].values == cur_site
 
-        cur_site_mask = data_df.site.values == cur_site
-
-        for cur_tect_class in np.unique(data_df.loc[cur_site_mask].tect_class):
-            cur_tect_mask = cur_site_mask & (data_df.tect_class == cur_tect_class)
+        for cur_tect_class in np.unique(
+            rupture_df.loc[cur_site_mask, ObservedData.EventColEnums.TECT_TYPE]
+        ):
+            cur_tect_mask = cur_site_mask & (
+                rupture_df[ObservedData.EventColEnums.TECT_TYPE].values
+                == cur_tect_class
+            )
 
             if cur_tect_class not in TECT_CLASS_MAPPING:
                 continue
@@ -394,26 +292,30 @@ def run_emp_gmms(
             pga_result = oq_run(
                 GMM_MAPPING[cur_tect_type],
                 cur_tect_type,
-                data_df.loc[cur_tect_mask, OQ_INPUT_COLUMNS],
+                rupture_df.loc[cur_tect_mask, OQ_INPUT_COLUMNS],
                 "PGA",
             )
 
             psa_result = oq_run(
                 GMM_MAPPING[cur_tect_type],
                 cur_tect_type,
-                data_df.loc[cur_tect_mask, OQ_INPUT_COLUMNS],
+                rupture_df.loc[cur_tect_mask, OQ_INPUT_COLUMNS],
                 "pSA",
                 constants.PERIODS,
             )
 
             cur_df = pd.concat((pga_result, psa_result), axis=1)
-            cur_df.index = data_df.loc[cur_tect_mask].index
-            cur_df[["event", "site"]] = data_df[["event", "site"]]
+            cur_df.index = rupture_df.loc[cur_tect_mask].index
+            cur_df[
+                [ObservedData.EventColEnums.EVENT_ID, ObservedData.SiteColEnums.SITE_ID]
+            ] = rupture_df[
+                [ObservedData.EventColEnums.EVENT_ID, ObservedData.SiteColEnums.SITE_ID]
+            ]
 
             dfs.append(cur_df)
 
     result_df = pd.concat(dfs, axis=0)
-    result_df.to_csv(output_ffp, index_label="id")
+    result_df.to_parquet(output_ffp)
 
 
 def load_sim_waveform(sim_rupture_dir: Path, rel_id: str, site: str):
@@ -593,9 +495,7 @@ def load_obs_nga_west2(
     return obs_data
 
 
-def load_obs_nga_subduction(
-        nga_sub_ffp: Path
-):
+def load_obs_nga_subduction(nga_sub_ffp: Path):
     """
     Load the observed data from NGA-Subduction and performs the
     necessary preparation steps.

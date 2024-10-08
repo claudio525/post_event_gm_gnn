@@ -26,18 +26,13 @@ COLUMN_MAPPING = {
 }
 
 
-RJB_MAX = 200
 
 
 @app.command("get-emp-gm-params")
 def get_emp_gmm_params(
     output_ffp: Path,
-    nz_gmdb_source_ffp: Path,
-    srf_dir: Path = None,
-    nzgmdb_flatfile_ffp: Path = None,
-    site_dir: Path = None,
-    nzgmdb_site_ffp: Path = None,
-    rjb_max: float = RJB_MAX,
+    nzgmdb_flatfile_ffp: Path,
+    rjb_max: float,
     events_ffp: Path = None,
 ):
     """Computes the GM parameters using empirical GMMs"""
@@ -45,12 +40,8 @@ def get_emp_gmm_params(
 
     sr.data.run_emp_gmms(
         output_ffp,
-        nz_gmdb_source_ffp,
+        nzgmdb_flatfile_ffp,
         rjb_max,
-        site_dir=site_dir,
-        nzgmdb_site_ffp=nzgmdb_site_ffp,
-        srf_dir=srf_dir,
-        nzgmdb_flatfile_ffp=nzgmdb_flatfile_ffp,
         events=events,
     )
 
