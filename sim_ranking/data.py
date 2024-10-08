@@ -547,6 +547,9 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
     # Drop duplicates
     obs_data = obs_data.drop_duplicates(["event_id", "site_id"])
 
+    # Convert to event_site index
+    obs_data = obs_data.to_event_site_index()
+
     # Apply fmin
     obs_data = obs_data.apply_fmin_filter(ObservedData.OtherColEnums.FMIN)
 

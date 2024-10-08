@@ -37,9 +37,6 @@ class RunConfig:
     max_dist: float
     """Maximum distance between site-interest and observation sites"""
 
-    ### Features
-    graph_feature_keys: dict[str, Sequence[str]]
-
     device: str
     """Device to use"""
 
@@ -64,6 +61,9 @@ class RunConfig:
 
     rel_results_dir: str
     """Base output directory"""
+
+    ### Features
+    graph_feature_keys: dict[str, Sequence[str]] = None
 
     def __post_init__(self):
         assert self.obs_data_ffp.exists()
@@ -274,7 +274,6 @@ def run_model_training(
             scale_record_ids.append(
                 mlt.array_utils.numpy_str_join("_", cur_event, cur_sites)
             )
-
         scale_record_ids = np.concatenate(scale_record_ids)
 
         run_config.im_scale_params = {
@@ -739,9 +738,10 @@ def _save_metrics(
         batch_result.ind_loss.nanmean(dim=1).sum().item()
     )
     metrics[mse_hist_key][epoch_ix] += F.mse_loss(
-        batch_result.pred_ln_im_mean[~batch_result.nan_mask],
-        batch_result.y[~batch_result.nan_mask],
-    ).item()
+        batch_result.pred_ln_im_mean,
+        batch_result.y,
+        reduction="none",
+    ).nanmean(dim=1).sum().item()
     if run_config.pred_std:
         metrics[mean_sigma_hist_key][epoch_ix] += (
             batch_result.pred_ln_im_std.mean(dim=1).sum().item()

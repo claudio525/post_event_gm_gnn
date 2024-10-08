@@ -63,7 +63,7 @@ class ObservedData:
     SITE_COLS = list(SiteColEnums)
     EVENT_COLS = list(EventColEnums)
     EVENT_SITE_COLS = list(EventSiteColEnums)
-    IM_COLUMNS = constants.PSA_KEYS + ["PGA", "PGV"]
+    IM_COLUMNS = ["PGA", "PGV"]
     OTHER_COLUMNS = list(OtherColEnums)
     COLUMNS = SITE_COLS + EVENT_COLS + EVENT_SITE_COLS + IM_COLUMNS + OTHER_COLUMNS
 
@@ -108,6 +108,7 @@ class ObservedData:
         self._site_df = None
         self._event_df = None
         self._event_sites = None
+        self._ims = None
 
     def __hash__(self):
         return hash(self.data_ffp)
@@ -118,6 +119,7 @@ class ObservedData:
         self._site_df = None
         self._event_df = None
         self._event_sites = None
+        self._ims = None
 
     def get_event_data(
         self, event_id: str, sites: Optional[Sequence[str]] = None
@@ -133,6 +135,16 @@ class ObservedData:
     def __setitem__(self, column: str, value: np.ndarray | pd.Series):
         """Support adding of columns"""
         self.record_df[column] = value
+
+    @property
+    def ims(self):
+        if self._ims is None:
+            pSA_vals = [cur_col for cur_col in self.record_df.columns if cur_col.startswith("pSA")]
+            other_ims = [cur_im for cur_im in self.IM_COLUMNS if cur_im in self.record_df.columns]
+            self._ims = np.asarray(pSA_vals + other_ims)
+
+        return self._ims
+
 
     @property
     def n_records(self):
@@ -249,6 +261,22 @@ class ObservedData:
             self.record_df[cur_pSA_col] = np.where(
                 cur_period > max_usable_period, np.nan, self.record_df[cur_pSA_col]
             )
+
+        return self
+
+    def to_event_site_index(self):
+        """
+        Updates the index to be {event_id}_{site_id}
+
+        Note: This will cause if there are duplicate event_id & site_id pairs.
+        """
+        index = mlt.array_utils.numpy_str_join(
+            "_",
+            self.record_df["event_id"].values.astype(str),
+            self.record_df["site_id"].values.astype(str),
+        )
+        self.record_df.index = index
+        self.record_df = self.record_df.sort_index()
 
         return self
 
@@ -409,7 +437,8 @@ class ObservedData:
         )
 
         # Drop any columns not of interest
-        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
+        im_cols = [col for col in record_df.columns if col.startswith("pSA")]
+        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS + im_cols)]
         record_df = record_df[cols]
 
         return cls(record_df, nzgmdb_flat_ffp, constants.ObsDataSource.NZGMDB, version)
@@ -471,7 +500,8 @@ class ObservedData:
         record_df[cls.EventColEnums.TECT_TYPE] = constants.TectonicType.CRUSTAL
 
         # Drop any columns not of interest
-        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
+        im_cols = list(im_map.values())
+        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS + im_cols)]
         record_df = record_df[cols]
 
         # Drop any records with invalid event or site id
@@ -570,7 +600,8 @@ class ObservedData:
         )
 
         # Drop any columns not of interest
-        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS)]
+        im_cols = list(im_map.values())
+        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS + im_cols)]
         record_df = record_df[cols]
 
         # Replace -999 with nan values
