@@ -737,11 +737,16 @@ def _save_metrics(
     metrics[loss_hist_key][epoch_ix] += (
         batch_result.ind_loss.nanmean(dim=1).sum().item()
     )
-    metrics[mse_hist_key][epoch_ix] += F.mse_loss(
-        batch_result.pred_ln_im_mean,
-        batch_result.y,
-        reduction="none",
-    ).nanmean(dim=1).sum().item()
+    metrics[mse_hist_key][epoch_ix] += (
+        F.mse_loss(
+            batch_result.pred_ln_im_mean,
+            batch_result.y,
+            reduction="none",
+        )
+        .nanmean(dim=1)
+        .sum()
+        .item()
+    )
     if run_config.pred_std:
         metrics[mean_sigma_hist_key][epoch_ix] += (
             batch_result.pred_ln_im_std.mean(dim=1).sum().item()
@@ -951,9 +956,13 @@ def get_predictions(
     return results
 
 
-def get_residuals(gnn_results: pd.DataFrame, ims: Sequence[str] = constants.PSA_KEYS):
+def get_residuals(
+    gnn_results: pd.DataFrame,
+    ims: Sequence[str] = constants.PSA_KEYS,
+    pred_suffix: str = "pred",
+):
     """Computes the residual between the observed and predicted IMs for each scenario"""
-    pred_im_keys = mlt.array_utils.numpy_str_join("_", ims, "pred")
+    pred_im_keys = mlt.array_utils.numpy_str_join("_", ims, pred_suffix)
     res_df = pd.DataFrame(
         data=gnn_results.loc[:, ims].values - gnn_results.loc[:, pred_im_keys].values,
         columns=ims,

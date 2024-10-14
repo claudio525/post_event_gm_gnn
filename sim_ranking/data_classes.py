@@ -9,7 +9,6 @@ import ml_tools as mlt
 import sha_calc as sha
 from labelled_data_array import LabelledDataArray
 
-from . import conditional
 from . import constants
 
 
@@ -198,7 +197,6 @@ class ObservedData:
         nan_mask = self.record_df.isna().any(axis=1)
         if np.count_nonzero(nan_mask) > 0:
             self.record_df = self.record_df[~nan_mask]
-            print(f"Dropped {nan_mask.sum()}/{nan_mask.shape[0]} rows with NaN values.")
 
             self.__reset_cache()
         return self
@@ -619,87 +617,6 @@ class ObservedData:
             nga_sub_ffp,
             constants.ObsDataSource.NGASubduction,
         )
-
-
-class CIMResults:
-
-    def __init__(
-        self, emp_cim_results: dict[str, conditional.ConditionalMVNDistribution]
-    ):
-        self.emp_cim_results = emp_cim_results
-        self.ims = np.asarray(
-            [str(cur_im) for cur_im in list(emp_cim_results.values())[0].IMs]
-        )
-
-        mean_dfs, std_dfs = [], []
-        for cur_event in self.emp_cim_results.keys():
-            cur_result = self.emp_cim_results[cur_event]
-
-            cur_mean_df = cur_result.cond_lnIM_mean_df.copy()
-            cur_mean_df["site_int"] = cur_mean_df.index
-            cur_mean_df["event_id"] = cur_event
-            cur_mean_df.index = mlt.array_utils.numpy_str_join(
-                "_", cur_event, cur_mean_df.site_int
-            )
-
-            cur_std_df = cur_result.cond_lnIM_std_df.copy()
-            cur_std_df["site_int"] = cur_std_df.index
-            cur_std_df["event_id"] = cur_event
-            cur_std_df.index = mlt.array_utils.numpy_str_join(
-                "_", cur_event, cur_std_df.site_int
-            )
-
-            mean_dfs.append(cur_mean_df)
-            std_dfs.append(cur_std_df)
-
-        self.mean_df = pd.concat(mean_dfs, axis=0)
-        self.std_df = pd.concat(std_dfs, axis=0)
-
-    @property
-    def events(self):
-        return np.asarray(list(self.emp_cim_results.keys())).astype(str)
-
-    def get_residual_df(self, obs_data: ObservedData):
-        residuals = []
-        obs_df = obs_data.record_df
-        for cur_event in self.events:
-            cur_emp_cim = self.emp_cim_results[cur_event]
-
-            cur_emp_mean_df = cur_emp_cim.cond_lnIM_mean_df
-
-            cur_obs_df = obs_df.loc[obs_df.event_id == cur_event].set_index("site_id")
-            cur_residual = pd.DataFrame(
-                data=np.log(cur_obs_df.loc[cur_emp_mean_df.index, self.ims].values)
-                - cur_emp_mean_df.loc[cur_emp_mean_df.index, self.ims].values,
-                columns=self.ims,
-                index=cur_emp_mean_df.index,
-            )
-            cur_residual["event_id"] = cur_event
-            cur_residual["site_int"] = cur_residual.index
-            cur_residual.index = mlt.array_utils.numpy_str_join(
-                "_", cur_event, cur_residual.index.values.astype(str)
-            )
-
-            residuals.append(cur_residual)
-
-        residual_df = pd.concat(residuals, axis=0)
-        return residual_df
-
-    @classmethod
-    def from_dir(cls, data_dir: Path, events: Sequence[str]):
-        emp_cim_results = {}
-        no_data = []
-        for event in events:
-            cur_result = conditional.load_emp_cim_data(data_dir, event)
-            if cur_result is None:
-                no_data.append(event)
-                continue
-
-            emp_cim_results[event] = cur_result
-
-        if len(no_data) > 0:
-            print(f"No data for events: {no_data}")
-        return cls(emp_cim_results)
 
 
 class LBSiteCorrelationData:

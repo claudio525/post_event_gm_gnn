@@ -13,6 +13,36 @@ import sim_ranking as sr
 app = typer.Typer()
 
 
+@app.command("run-cIM-for-GNN")
+def run_cim_for_GNN(
+    gnn_result_dir: Path,
+    emp_gm_params_ffp: Path,
+    on_train: bool = False,
+    n_procs: int = 1,
+):
+    """Runs conditional IM ranking for the GNN results"""
+    sr.new_conditional.run_cim_for_GNN(
+        gnn_result_dir, emp_gm_params_ffp, on_train=on_train, n_procs=n_procs
+    )
+
+
+@app.command("run-cIM-for-CV-GNN")
+def run_cim_for_CV_GNN(
+    gnn_cv_results_dir: Path,
+    emp_gm_params_ffp: Path,
+    n_procs: int = 1,
+    include_train: bool = False,
+):
+    """Runs conditional IM ranking for the GNN CV results"""
+    sr.new_conditional.run_cim_for_CV_GNN(
+        gnn_cv_results_dir,
+        emp_gm_params_ffp,
+        n_procs=n_procs,
+        include_train=include_train,
+    )
+
+
+
 @app.command("cmvn-emp")
 def emp_cmvn_all(
     nzgmdb_flat_rel_ffp: Path,
