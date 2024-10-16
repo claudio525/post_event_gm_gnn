@@ -447,7 +447,8 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
         raise NotImplementedError("Invalid NZGMDB version")
 
     # Drop duplicates
-    obs_data = obs_data.drop_duplicates(["event_id", "site_id"])
+    # Use the one with the smaller fmin
+    obs_data = obs_data.drop_duplicates(["event_id", "site_id"], sort_key=ObservedData.OtherColEnums.FMIN, ascending=True)
 
     # Convert to event_site index
     obs_data = obs_data.to_event_site_index()

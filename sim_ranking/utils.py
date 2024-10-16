@@ -5,6 +5,8 @@ import pandas as pd
 
 from IM_calculation.source_site_dist.src_site_dist import calc_rrup_rjb
 
+from .data_classes import LBSiteCorrelationData
+
 
 class SourceInfo(NamedTuple):
 
@@ -67,3 +69,46 @@ def calculate_distance_matrix(
         )
         distance_matrix[i, :] = cur_dist
     return pd.DataFrame(index=stations, data=distance_matrix, columns=stations)
+
+
+def compute_constraintness(
+    result_df: pd.DataFrame, corr_data: LBSiteCorrelationData, ims: Sequence[str]
+):
+    """
+    Computes the constraintness for each scenario.
+    Constraintness is defined as the sum of the
+    correlation coefficients across all observed sites
+    and mean over all the IMs.
+
+    Note: Adds new column to the result_df called "constraintness".
+
+    Parameters
+    ----------
+    result_df: pd.DataFrame
+        Result dataframe for which to compute constraintness.
+        Required columns: "obs_sites", "site_int"
+    corr_data: LBSiteCorrelationData
+        Correlation data object. Must contain the
+        correlations for all relevant sites and IMs.
+    ims: Sequence[str]
+        List of IMs across which to compute the constraintness.
+
+    Returns
+    -------
+    result_df: pd.DataFrame
+        Result dataframe with the new column "constraintness".
+        All other columns are not modified.
+    """
+
+    for cur_key in result_df.index:
+        cur_obs_sites = result_df.loc[cur_key, "obs_sites"]
+        cur_site_int = result_df.loc[cur_key, "site_int"]
+
+        result_df.loc[cur_key, "constraintness"] = (
+            corr_data.corr_data.sel[cur_site_int, :, :]
+            .loc[cur_obs_sites]
+            .sum(axis=0)
+            .mean()
+        )
+
+    return result_df

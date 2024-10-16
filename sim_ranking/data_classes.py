@@ -201,8 +201,13 @@ class ObservedData:
             self.__reset_cache()
         return self
 
-    def drop_duplicates(self, subset: Sequence[str] = None):
-        """Drops any duplicate rows."""
+    def drop_duplicates(self, subset: Sequence[str] = None, sort_key: str = None, ascending: bool = True):
+        """
+        Drops any duplicate rows.
+        Allows for sorting of the dataframe first.
+        """
+        if sort_key is not None:
+            self.record_df = self.record_df.sort_values(sort_key, ascending=ascending)
         self.record_df = self.record_df.drop_duplicates(subset=subset)
 
         self.__reset_cache()
