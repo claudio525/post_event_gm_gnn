@@ -20,9 +20,12 @@ class CVResults(NamedTuple):
     run_config: sr.ml.gnn_gm.RunConfig
     obs_data: sr.ObservedData
     dist_matrix: pd.DataFrame
-    run_results: dict[str, st_utils.GNNRunResults]
-    comb_val_results: pd.DataFrame
+    gnn_run_results: dict[str, st_utils.GNNRunResults]
+    gnn_comb_val_results: pd.DataFrame
     metrics: dict
+
+    cim_run_results: dict[str, st_utils.CIMRunResults] = None
+    cim_comb_val_results: pd.DataFrame = None
 
 
 def get_n_scenarios_df(cv_results: CVResults) -> pd.DataFrame:
@@ -30,14 +33,14 @@ def get_n_scenarios_df(cv_results: CVResults) -> pd.DataFrame:
     cv_val_n_scenarios = pd.DataFrame(
         {
             cur_key: [cur_run_result.val_results.shape[0], cur_key, "val"]
-            for cur_key, cur_run_result in cv_results.run_results.items()
+            for cur_key, cur_run_result in cv_results.gnn_run_results.items()
         },
         index=["n_scenarios", "cv_iter", "type"],
     ).T
     cv_train_n_scenarios = pd.DataFrame(
         {
             cur_key: [cur_run_result.train_results.shape[0], cur_key, "train"]
-            for cur_key, cur_run_result in cv_results.run_results.items()
+            for cur_key, cur_run_result in cv_results.gnn_run_results.items()
         },
         index=["n_scenarios", "cv_iter", "type"],
     ).T
@@ -56,26 +59,38 @@ def load_cv_results(results_dir: Path):
     """Loads the results of a cross-validation run."""
     run_config = sr.ml.gnn_gm.RunConfig.from_yaml(results_dir / "run_config.yaml")
 
-    # obs_data = st_utils.get_observed_data(run_config.obs_data_ffp)
+    # Load observation data & compute distance matrix
     obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
     dist_matrix = st_utils.get_dist_matrix(obs_data)
 
-    run_results = {}
-    for cur_cv_dir in results_dir.iterdir():
-        if not cur_cv_dir.is_dir() or not cur_cv_dir.stem.startswith("cv_"):
-            continue
+    # Load GNN results
+    cv_dirs = [cur_ffp for cur_ffp in results_dir.iterdir() if cur_ffp.is_dir() and cur_ffp.stem.startswith("cv_")]
+    run_results = {cur_dir.stem: st_utils.get_gnn_result(cur_dir) for cur_dir in cv_dirs}
+    gnn_comb_val_results = pd.read_parquet(results_dir / "val_results.parquet")
+    # for cur_cv_dir in results_dir.iterdir():
+    #     if not cur_cv_dir.is_dir() or not cur_cv_dir.stem.startswith("cv_"):
+    #         continue
+    #
+    #     run_results[cur_cv_dir.stem] = st_utils.get_gnn_result(cur_cv_dir)
 
-        run_results[cur_cv_dir.stem] = st_utils.get_gnn_result(cur_cv_dir)
-
-    comb_val_results = pd.read_parquet(results_dir / "val_results.parquet")
+    # Load cIM results if available
+    cim_comb_val_results, cim_run_results = None, None
+    if (results_dir / "cim_results").exists():
+        cim_comb_val_results = pd.read_parquet(results_dir / "cim_results" / "val_results.parquet")
+        cim_run_results = {
+            cur_dir.stem: st_utils.get_cim_result(cur_dir)
+            for cur_dir in cv_dirs
+        }
 
     return CVResults(
         run_config,
         obs_data,
         dist_matrix,
         run_results,
-        comb_val_results,
+        gnn_comb_val_results,
         pd.read_pickle(results_dir / "metrics.pickle"),
+        cim_run_results=cim_run_results,
+        cim_comb_val_results=cim_comb_val_results
     )
 
 
@@ -126,10 +141,10 @@ def run_ind_cv_result_tab(cv_results: CVResults):
     # Select CV iteration
     cv_iter = st.selectbox(
         "CV Iteration",
-        sorted(cv_results.run_results.keys()),
+        sorted(cv_results.gnn_run_results.keys()),
     )
 
-    cur_results = cv_results.run_results[cv_iter]
+    cur_results = cv_results.gnn_run_results[cv_iter]
 
     train_tab, val_tab = st.tabs(["Train", "Validation"])
 
@@ -139,17 +154,20 @@ def run_ind_cv_result_tab(cv_results: CVResults):
             cv_results.obs_data,
             cv_results.dist_matrix,
             "train",
+            # cim_results=cv_results.cim_run_results.get(cv_iter, None),
         )
 
     with val_tab:
         st_utils.scenario_viewer(
-            cur_results.val_results, cv_results.obs_data, cv_results.dist_matrix, "val"
+            cur_results.val_results, cv_results.obs_data, cv_results.dist_matrix, "val",
+            cim_results=None if cv_results is None else cv_results.cim_run_results[cv_iter].val_results,
         )
 
 
 def run_combined_val_results_tab(cv_results: CVResults):
     st_utils.scenario_viewer(
-        cv_results.comb_val_results, cv_results.obs_data, cv_results.dist_matrix, "comb"
+        cv_results.gnn_comb_val_results, cv_results.obs_data, cv_results.dist_matrix, "comb",
+        cim_results=cv_results.cim_comb_val_results,
     )
 
 

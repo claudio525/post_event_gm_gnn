@@ -24,14 +24,14 @@ class GNNRunResults(NamedTuple):
 
 
 @st.cache_data
-def get_gnn_result(result_ffp: Path):
-    run_config = sr.ml.gnn_gm.RunConfig.from_yaml(result_ffp / "run_config.yaml")
-    metrics = pd.read_pickle(result_ffp / "metrics.pickle")
-    train_results = pd.read_parquet(result_ffp / "train_results.parquet")
-    train_int_sites = np.load(result_ffp / "train_int_sites.npy")
-    val_results = pd.read_parquet(result_ffp / "val_results.parquet")
-    val_int_sites = np.load(result_ffp / "val_int_sites.npy")
-    metadata = mlt.utils.load_yaml(result_ffp / "metadata.yaml")
+def get_gnn_result(result_dir: Path):
+    run_config = sr.ml.gnn_gm.RunConfig.from_yaml(result_dir / "run_config.yaml")
+    metrics = pd.read_pickle(result_dir / "metrics.pickle")
+    train_results = pd.read_parquet(result_dir / "train_results.parquet")
+    train_int_sites = np.load(result_dir / "train_int_sites.npy")
+    val_results = pd.read_parquet(result_dir / "val_results.parquet")
+    val_int_sites = np.load(result_dir / "val_int_sites.npy")
+    metadata = mlt.utils.load_yaml(result_dir / "metadata.yaml")
 
     return GNNRunResults(
         run_config,
@@ -42,6 +42,17 @@ def get_gnn_result(result_ffp: Path):
         metrics,
         metadata,
     )
+
+
+class CIMRunResults(NamedTuple):
+    val_results: pd.DataFrame
+
+
+@st.cache_data
+def get_cim_result(gnn_result_dir: Path):
+    val_results = pd.read_parquet(gnn_result_dir / "cim_results" / "val_results.parquet")
+    return CIMRunResults(val_results)
+
 
 
 @st.cache_data(hash_funcs={sr.ObservedData: lambda x: hash(x.data_ffp)})
@@ -122,15 +133,12 @@ def _create_scenario_map(
     event: str,
     site_df: pd.DataFrame,
     emp_sites: np.ndarray,
-    sim_sites: np.ndarray,
     ml_sites: np.ndarray,
     event_df: pd.DataFrame,
     site_int: str,
 ):
-    all_sites = np.unique(np.concatenate([emp_sites, sim_sites, ml_sites]))
-
-    # assert np.all(np.isin(emp_sites, sim_sites))
-    cim_sites = np.unique(np.concatenate([emp_sites, sim_sites]))
+    all_sites = np.unique(np.concatenate([emp_sites, ml_sites]))
+    cim_sites = emp_sites
 
     cim_only_sites = np.setdiff1d(cim_sites, ml_sites)
     ml_only_sites = np.setdiff1d(ml_sites, cim_sites)
@@ -235,6 +243,7 @@ def scenario_viewer(
     obs_data: sr.ObservedData,
     dist_matrix: pd.DataFrame,
     tab_type: str,
+    cim_results: pd.DataFrame = None,
 ):
     events = gnn_results.event_id.unique().astype(str)
 
@@ -267,21 +276,17 @@ def scenario_viewer(
             cur_gnn_result.site_int == cur_int_site
         ].squeeze()
 
+        # Get cIM results
+        if cim_results is not None:
+            cur_cim_result = cim_results.loc[
+                (cim_results.event_id == cur_event) & (cim_results.site_int == cur_int_site)
+            ].squeeze()
+
         cur_obs_df = obs_data.record_df
         cur_obs_df = cur_obs_df[cur_obs_df.event_id == cur_event].set_index("site_id")
 
-        # Get empirical cIM results
-        # cur_emp_cim = (
-        #     shared_data.emp_cim_data.get(cur_event, None)
-        #     if shared_data.emp_cim_data is not None
-        #     else None
-        # )
-        # if cur_emp_cim is not None:
-        #     cur_emp_cim_mean = cur_emp_cim.cond_lnIM_mean_df
-        #     cur_emp_cim_std = cur_emp_cim.cond_lnIM_std_df
-
         st.markdown(f"Magnitude: {obs_data.event_df.loc[cur_event].mag}")
-        st.markdown(f"Loss: {cur_gnn_result.loss:.4f}")
+        st.markdown(f"GNN Loss: {cur_gnn_result.loss:.4f}")
 
     with col2:
         fig = _create_pot_sites_map(
@@ -300,10 +305,7 @@ def scenario_viewer(
         fig = _create_scenario_map(
             cur_event,
             obs_data.site_df,
-            [],
-            [],
-            # cur_emp_cim.get_obs_stations(cur_site),
-            # cur_sim_cim.get_obs_stations(cur_site),
+            [] if cim_results is None else cur_cim_result.obs_sites,
             cur_gnn_result.obs_sites,
             obs_data.event_df,
             cur_int_site,
@@ -320,8 +322,8 @@ def scenario_viewer(
     col1, col2 = st.columns(2)
 
     line_options = ["ML", "Obs"]
-    # if cur_emp_cim is not None:
-    #     line_options.append("emp_cIM")
+    if cim_results is not None:
+        line_options.append("cIM")
     cur_obs_sites = (
         dist_matrix.loc[cur_int_site]
         .loc[cur_gnn_result.obs_sites.astype(str)]
@@ -339,7 +341,7 @@ def scenario_viewer(
             default=[
                 "ML",
                 "Obs",
-            ],  # if cur_emp_cim is None else ["ML", "Obs", "emp_cIM"],
+            ] if cim_results is None else ["ML", "Obs", "cIM"],
             key=f"{tab_type}_lines",
         )
 
@@ -384,33 +386,32 @@ def scenario_viewer(
         )
 
     # Empirical cIM
-    # if cur_emp_cim is not None and "emp_cIM" in sel_line_options:
-    #     cur_emp_cim_mean_values = cur_emp_cim_mean.loc[
-    #         cur_int_site, sr.constants.PSA_KEYS
-    #     ].values
-    #     cur_emp_cim_std_values = cur_emp_cim_std.loc[
-    #         cur_int_site, sr.constants.PSA_KEYS
-    #     ].values
-    #
-    #     ax.plot(
-    #         sr.constants.PERIODS,
-    #         np.exp(cur_emp_cim_mean_values),
-    #         c="green",
-    #         label="cIM",
-    #     )
-    #     ax.plot(
-    #         sr.constants.PERIODS,
-    #         np.stack(
-    #             (
-    #                 np.exp(cur_emp_cim_mean_values + cur_emp_cim_std_values),
-    #                 np.exp(cur_emp_cim_mean_values - cur_emp_cim_std_values),
-    #             ),
-    #             axis=1,
-    #         ),
-    #         c="green",
-    #         linestyle="--",
-    #         linewidth=1.0,
-    #     )
+    if cim_results is not None and "cIM" in sel_line_options:
+        cond_mean_pSA_keys = mlt.array_utils.numpy_str_join("_", sr.constants.PSA_KEYS, "cond_mean")
+        cond_std_pSA_keys = mlt.array_utils.numpy_str_join("_", sr.constants.PSA_KEYS, "cond_std")
+
+        cur_mean_values = cur_cim_result.loc[cond_mean_pSA_keys].values.astype(float)
+        cur_std_values = cur_cim_result.loc[cond_std_pSA_keys].values.astype(float)
+
+        ax.plot(
+            sr.constants.PERIODS,
+            np.exp(cur_mean_values),
+            c="green",
+            label="cIM",
+        )
+        ax.plot(
+            sr.constants.PERIODS,
+            np.stack(
+                (
+                    np.exp(cur_mean_values + cur_std_values),
+                    np.exp(cur_mean_values - cur_std_values),
+                ),
+                axis=1,
+            ),
+            c="green",
+            linestyle="--",
+            linewidth=1.0,
+        )
 
     # Observation sites
     obs_sites_to_plot = np.intersect1d(sel_line_options, cur_gnn_result.obs_sites)

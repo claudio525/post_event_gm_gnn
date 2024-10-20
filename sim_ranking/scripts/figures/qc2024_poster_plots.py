@@ -444,8 +444,8 @@ def event_site_map(
     event: str,
     site_int_ids: List[str],
     nzgmdb_ffp: Path,
-    val_int_site_ids_ffp: Path,
     output_dir: Path,
+    val_int_site_ids_ffp: Path = None,
     map_data_ffp: Path = None,
 ):
     """
