@@ -27,7 +27,7 @@ from ..data_classes import ObservedData
 
 @dataclass
 class RunConfig:
-    """Config for specyfing run settings"""
+    """Config for specifying run settings"""
 
     ### General settings
     seed: int
@@ -36,6 +36,8 @@ class RunConfig:
     rel_obs_data_ffp: Path
     max_dist: float
     """Maximum distance between site-interest and observation sites"""
+    max_n_obs_sites: int
+    """Maximum number of observation sites to consider"""
 
     device: str
     """Device to use"""
@@ -96,18 +98,23 @@ class RunConfig:
         return self.n_ims * 2 if self.pred_std else self.n_ims
 
     @property
+    def wdata(self) -> str:
+        return os.path.expandvars("$wdata")
+
+    @property
     def results_dir(self):
-        return Path(os.path.expandvars("$wdata")) / self.rel_results_dir
+        return Path(self.wdata) / self.rel_results_dir
 
     @property
     def obs_data_ffp(self):
-        return Path(os.path.expandvars("$wdata")) / self.rel_obs_data_ffp
+        return Path(self.wdata) / self.rel_obs_data_ffp
 
     def to_dict(self):
         return {
             "seed": self.seed,
             "rel_obs_data_ffp": self.rel_obs_data_ffp,
             "max_dist": self.max_dist,
+            "max_n_obs_sites": self.max_n_obs_sites,
             "device": self.device,
             "ims": list(self.ims),
             "pred_std": self.pred_std,
@@ -253,7 +260,9 @@ def run_model_training(
         dist_matrix,
         obs_sites,
         train_int_sites,
-        max_dist=run_config.max_dist,
+        run_config.max_dist,
+        run_config.max_n_obs_sites
+
     )
     val_site_combs, val_event_sites = ml_data.compute_site_combinations(
         event_sites,
@@ -262,7 +271,8 @@ def run_model_training(
         dist_matrix,
         obs_sites,
         val_int_sites,
-        max_dist=run_config.max_dist,
+        run_config.max_dist,
+        run_config.max_n_obs_sites,
     )
 
     if run_config.scale_IMs:

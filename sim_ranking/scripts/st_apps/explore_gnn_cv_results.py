@@ -130,6 +130,7 @@ def run_general(cv_results: CVResults):
 
     fig.tight_layout()
     st.pyplot(fig, use_container_width=False)
+    plt.close(fig)
 
     # Run config
     st.markdown("### Run Config")
@@ -160,7 +161,7 @@ def run_ind_cv_result_tab(cv_results: CVResults):
     with val_tab:
         st_utils.scenario_viewer(
             cur_results.val_results, cv_results.obs_data, cv_results.dist_matrix, "val",
-            cim_results=None if cv_results is None else cv_results.cim_run_results[cv_iter].val_results,
+            cim_results=None if cv_results.cim_run_results is None else cv_results.cim_run_results[cv_iter].val_results,
         )
 
 

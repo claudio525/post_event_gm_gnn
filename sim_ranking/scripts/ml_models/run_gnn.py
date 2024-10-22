@@ -237,6 +237,7 @@ def run_cv(
         cv_agg_notebook,
         out_dir / "cv_agg_results.html",
         results_dir=out_dir,
+        wdata=run_config.wdata,
     )
 
 

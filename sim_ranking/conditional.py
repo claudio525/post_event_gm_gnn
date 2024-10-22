@@ -367,7 +367,8 @@ def get_observation_sites_mask(
         )
     # More than required use nearest neighbor to select
     else:
-        # Get observation sites such that minimum number of observations sites is satisfied
+        # Get observation sites such that
+        # minimum number of observations sites is satisfied
         neigh = NearestNeighbors(
             n_neighbors=n_obs_sites + 1, radius=150, metric="precomputed", n_jobs=1
         )

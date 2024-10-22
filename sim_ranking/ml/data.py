@@ -2,10 +2,11 @@ import warnings
 from pathlib import Path
 from typing import Dict, Sequence
 from dataclasses import dataclass
-from labelled_data_array import LabelledDataArray
 
 import numpy as np
 import pandas as pd
+from sklearn.neighbors import NearestNeighbors
+from labelled_data_array import LabelledDataArray
 
 
 @dataclass
@@ -38,7 +39,8 @@ def compute_site_combinations(
     dist_matrix: pd.DataFrame,
     site_obs: np.ndarray,
     site_int: np.ndarray,
-    max_dist: float = 100,
+    max_dist: float,
+    max_n_obs_sites: int,
 ):
     """
     Compute the site combinations for each event
@@ -56,6 +58,11 @@ def compute_site_combinations(
         Sites that are allowed to be used as observation sites
     site_int: np.ndarray
         Sites that are allowed to be used as sites of interest
+    max_dist: float
+        Maximum allowed distance between site of interest
+        and nearest observation site
+    max_n_obs_sites: int
+        Maximum number of observation sites to use
     """
     site_combs, used_sites = {}, {}
     for cur_event in events:
@@ -79,23 +86,40 @@ def compute_site_combinations(
         if len(cur_int_sites) < 1 or len(cur_obs_sites) < 1:
             continue
 
-        # Filter for the current event sites
-        # and site-combinations less than max_dist km apart
         cur_dist_matrix = dist_matrix.loc[cur_sites, cur_sites]
-        cur_dist_mask = (cur_dist_matrix.values < max_dist) & (
-            cur_dist_matrix.values > 0
-        )
-        cur_row_ind, cur_col_ind = np.nonzero(cur_dist_mask)
+        # cur_dist_mask = (cur_dist_matrix.values < max_dist) & (
+        #     cur_dist_matrix.values > 0
+        # )
+        # cur_row_ind, cur_col_ind = np.nonzero(cur_dist_mask)
 
         # Need at least one site combination within the
         # specified distance requirements
-        if cur_row_ind.size == 0:
+        if cur_dist_matrix.shape[1] < 2:
             continue
+
+        # Get observation sites such that minimum number of observations sites is satisfied
+        neigh = NearestNeighbors(
+            metric="precomputed", n_jobs=1
+        )
+        neigh.fit(cur_dist_matrix)
+        dist, n_neigh_ind = neigh.kneighbors(
+            n_neighbors=min(max_n_obs_sites + 1, cur_dist_matrix.shape[1]), X=cur_dist_matrix, return_distance=True
+        )
+
+        # Apply distance filter
+        dist_mask = dist < max_dist
+        dist_mask[:, 0] = False
+        cur_row_ind = np.repeat(np.arange(0, len(cur_sites)), np.count_nonzero(dist_mask, axis=1))
+        cur_col_ind = n_neigh_ind[dist_mask]
 
         # Get the site combinations
         # First is the site of interest, second is the observation site
         # Indices into the sites to use for the current event
         cur_site_combs = np.stack((cur_row_ind, cur_col_ind), axis=1)
+        # t = np.stack((ri, ci), axis=1)
+        # assert all([np.any(np.all(t[i, :] == cur_site_combs, axis=1)) for i in range(t.shape[0])])
+
+        # cur_site_combs = t
 
         # Filter based on allowed observation sites and sites of interest
         cur_mask = np.isin(cur_sites[cur_site_combs[:, 1]], cur_obs_sites) & np.isin(
