@@ -50,6 +50,7 @@ class BasicAttentionGNN(torch.nn.Module):
                             ),
                             source_scalar_feature_ind=site_obs_scalar_feature_ind,
                             pred_std=run_config.pred_std,
+                            use_sigmoid=True,
                         )
                     },
                     aggr="sum",
@@ -93,10 +94,10 @@ class BasicAttentionConv(MessagePassing):
         att_model: nn.Module,
         source_scalar_feature_ind: torch.Tensor,
         pred_std: bool = True,
+        use_sigmoid: bool = False,
         **kwargs,
     ):
         """
-
         Parameters
         ----------
         in_channels: tuple
@@ -105,6 +106,10 @@ class BasicAttentionConv(MessagePassing):
             The output channels
         att_model: torch.nn.Module
             Self-attention model
+        use_sigmoid: bool, optional
+            If True, use sigmoid on the attention coefficients
+            instead of softmax. This removes normalisation across
+            the observation sites.
         kwargs
         """
         super().__init__(**kwargs)
@@ -115,12 +120,14 @@ class BasicAttentionConv(MessagePassing):
         self.out_channels = out_channels
 
         self.att_model = att_model
-        self.bias = nn.Parameter(torch.empty(self.out_channels))
+        self.use_sigmoid = use_sigmoid
+
+        # self.bias = nn.Parameter(torch.empty(self.out_channels))
         self.obs_transform = nn.Linear(
             self.in_channels_source, self.out_channels, bias=False
         )
         self.source_transform = nn.Linear(
-            self.in_channels_target, self.out_channels, bias=False
+            self.in_channels_target, self.out_channels, bias=True
         )
 
         self.source_scalar_feature_ind = source_scalar_feature_ind
@@ -134,7 +141,7 @@ class BasicAttentionConv(MessagePassing):
         ginits.reset(self.att_model)
         ginits.reset(self.obs_transform)
         ginits.reset(self.source_transform)
-        ginits.zeros(self.bias)
+        # ginits.zeros(self.bias)
 
     def forward(
         self,
@@ -143,14 +150,14 @@ class BasicAttentionConv(MessagePassing):
         edge_attr: torch.Tensor,
     ) -> torch.Tensor:
         # Compute the messages
-        m_i = self.propagate(
+        m_s = self.propagate(
             edge_index=edge_index,
             edge_attr=edge_attr,
             x=x,
         )
 
         # Update the nodes
-        out = m_i + self.source_transform(x[1]) + self.bias
+        out = m_s + self.source_transform(x[1]) #+ self.bias
         return out
 
     def message(
@@ -166,8 +173,12 @@ class BasicAttentionConv(MessagePassing):
         a = self.att_model(
             torch.cat((x_j[:, self.source_scalar_feature_ind], edge_attr, x_i), dim=1)
         )
-        # Normalise
-        alpha = gutils.softmax(a, dest_ind)
+
+        if self.use_sigmoid:
+            alpha = torch.sigmoid(a)
+        else:
+            # Normalise
+            alpha = gutils.softmax(a, dest_ind)
 
         if self.pred_std:
             m = alpha.tile((1, 2)) * self.obs_transform(x_j)
