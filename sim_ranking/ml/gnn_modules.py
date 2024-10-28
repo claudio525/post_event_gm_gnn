@@ -33,6 +33,7 @@ class BasicAttentionGNN(torch.nn.Module):
 
         self.convs = torch.nn.ModuleList()
         for cur_n_channels in run_config.n_int_node_channels:
+            assert cur_n_channels % len(run_config.ims) == 0
             self.convs.append(
                 gnn.HeteroConv(
                     {
@@ -60,6 +61,7 @@ class BasicAttentionGNN(torch.nn.Module):
                                 # nn.LeakyReLU(negative_slope=0.2),
                             ),
                             source_scalar_feature_ind=site_obs_scalar_feature_ind,
+                            node_embedding_size=cur_n_channels,
                             pred_std=run_config.pred_std,
                             use_sigmoid=True,
                         )
@@ -105,6 +107,7 @@ class BasicAttentionConv(MessagePassing):
         target_transform_model: nn.Module,
         att_model: nn.Module,
         source_scalar_feature_ind: torch.Tensor,
+        node_embedding_size: int,
         pred_std: bool = True,
         use_sigmoid: bool = False,
         **kwargs,
@@ -132,6 +135,7 @@ class BasicAttentionConv(MessagePassing):
 
         self.source_transform_model = source_transform_model
         self.target_transform_model = target_transform_model
+        self.node_embedding_size = node_embedding_size
 
         # self.bias = nn.Parameter(torch.empty(self.out_channels))
         # self.source_transform_model = nn.Linear(
@@ -191,10 +195,16 @@ class BasicAttentionConv(MessagePassing):
             # Normalise
             alpha = gutils.softmax(a, dest_ind)
 
-        if self.pred_std:
-            m = alpha.tile((1, 2)) * self.source_transform_model(x_j)
+        source_messages = self.source_transform_model(x_j)
+        if alpha.shape[1] < source_messages.shape[1]:
+            m = alpha.repeat_interleave(source_messages.shape[1] // alpha.shape[1], dim=1) * source_messages
         else:
             m = alpha * self.source_transform_model(x_j)
+
+        # if self.pred_std:
+        #     m = alpha.tile((1, 2)) * self.source_transform_model(x_j)
+        # else:
+        #     m = alpha * self.source_transform_model(x_j)
 
         return m
 
