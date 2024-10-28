@@ -35,8 +35,8 @@ scale_IMs: True
 # Hyperparameters
 n_epochs: 100
 batch_size: 1024
-fc_n_units: 32
-n_int_node_channels: [62]
+fc_n_units: 62
+n_int_node_channels: 62
 
 # Output settings
 rel_results_dir: sim_ranking/results/gnn

@@ -37,8 +37,18 @@ class BasicAttentionGNN(torch.nn.Module):
                 gnn.HeteroConv(
                     {
                         ("site_obs", "informs", "site_int"): BasicAttentionConv(
-                            in_channels=(n_obs_node_features, n_int_node_features),
-                            out_channels=cur_n_channels,
+                            source_transform_model=nn.Sequential(
+                                nn.Linear(
+                                        n_obs_node_features, cur_n_channels, bias=True
+                                    ),
+                                nn.ELU(),
+                            ),
+                            target_transform_model=nn.Sequential(
+                                nn.Linear(
+                                        n_int_node_features, cur_n_channels, bias=True
+                                    ),
+                                nn.ELU(),
+                            ),
                             att_model=nn.Sequential(
                                 nn.Linear(
                                     n_obs_scalar_node_features
@@ -46,7 +56,8 @@ class BasicAttentionGNN(torch.nn.Module):
                                     + n_int_node_features,
                                     run_config.n_ims,
                                 ),
-                                nn.LeakyReLU(negative_slope=0.2),
+                                nn.ELU(),
+                                # nn.LeakyReLU(negative_slope=0.2),
                             ),
                             source_scalar_feature_ind=site_obs_scalar_feature_ind,
                             pred_std=run_config.pred_std,
@@ -71,7 +82,8 @@ class BasicAttentionGNN(torch.nn.Module):
 
         x_site_int = x_dict["site_int"]
 
-        x = F.relu(self.fc1(x_site_int))
+        x = F.elu(self.fc1(x_site_int))
+        # x = F.relu(self.fc1(x_site_int))
         out = self.out_fc(x)
 
         if self.run_config.pred_std:
@@ -89,8 +101,8 @@ class BasicAttentionConv(MessagePassing):
 
     def __init__(
         self,
-        in_channels: tuple[int, int],
-        out_channels: int,
+        source_transform_model: nn.Module,
+        target_transform_model: nn.Module,
         att_model: nn.Module,
         source_scalar_feature_ind: torch.Tensor,
         pred_std: bool = True,
@@ -100,10 +112,10 @@ class BasicAttentionConv(MessagePassing):
         """
         Parameters
         ----------
-        in_channels: tuple
-            The input channels for the source and target nodes
-        out_channels: int
-            The output channels
+        source_transform_model: torch.nn.Module
+            Transformation model for the source nodes
+        target_transform_model: torch.nn.Module
+            Transformation model for the target nodes
         att_model: torch.nn.Module
             Self-attention model
         use_sigmoid: bool, optional
@@ -115,20 +127,19 @@ class BasicAttentionConv(MessagePassing):
         super().__init__(**kwargs)
         self.pred_std = pred_std
 
-        self.in_channels_target = in_channels[1]
-        self.in_channels_source = in_channels[0]
-        self.out_channels = out_channels
-
         self.att_model = att_model
         self.use_sigmoid = use_sigmoid
 
+        self.source_transform_model = source_transform_model
+        self.target_transform_model = target_transform_model
+
         # self.bias = nn.Parameter(torch.empty(self.out_channels))
-        self.obs_transform = nn.Linear(
-            self.in_channels_source, self.out_channels, bias=False
-        )
-        self.source_transform = nn.Linear(
-            self.in_channels_target, self.out_channels, bias=True
-        )
+        # self.source_transform_model = nn.Linear(
+        #     self.in_channels_source, self.out_channels, bias=False
+        # )
+        # self.target_transform_model = nn.Linear(
+        #     self.in_channels_target, self.out_channels, bias=True
+        # )
 
         self.source_scalar_feature_ind = source_scalar_feature_ind
 
@@ -139,8 +150,8 @@ class BasicAttentionConv(MessagePassing):
     def reset_parameters(self):
         super().reset_parameters()
         ginits.reset(self.att_model)
-        ginits.reset(self.obs_transform)
-        ginits.reset(self.source_transform)
+        ginits.reset(self.source_transform_model)
+        ginits.reset(self.target_transform_model)
         # ginits.zeros(self.bias)
 
     def forward(
@@ -157,7 +168,7 @@ class BasicAttentionConv(MessagePassing):
         )
 
         # Update the nodes
-        out = m_s + self.source_transform(x[1]) #+ self.bias
+        out = m_s + self.target_transform_model(x[1]) #+ self.bias
         return out
 
     def message(
@@ -181,9 +192,9 @@ class BasicAttentionConv(MessagePassing):
             alpha = gutils.softmax(a, dest_ind)
 
         if self.pred_std:
-            m = alpha.tile((1, 2)) * self.obs_transform(x_j)
+            m = alpha.tile((1, 2)) * self.source_transform_model(x_j)
         else:
-            m = alpha * self.obs_transform(x_j)
+            m = alpha * self.source_transform_model(x_j)
 
         return m
 

@@ -14,6 +14,7 @@ import sha_calc as sha
 
 from . import constants
 from .data_classes import ObservedData
+from . import utils
 
 
 @dataclass
@@ -145,7 +146,7 @@ def gen_emp_synthethic_realisations(
     events = gm_params.event.unique().astype(str)
 
     # Calculate the distance matrix
-    dist_matrix = sh.im_dist.calculate_distance_matrix(
+    dist_matrix =  utils.calculate_distance_matrix(
         site_df.index.values.astype(str), site_df
     )
     ims = constants.PSA_KEYS
