@@ -3,7 +3,7 @@ from typing import Sequence, NamedTuple, Tuple
 import numpy as np
 import pandas as pd
 
-from IM_calculation.source_site_dist.src_site_dist import calc_rrup_rjb
+from qcore.src_site_dist import calc_rrup_rjb
 
 from .data_classes import LBSiteCorrelationData
 

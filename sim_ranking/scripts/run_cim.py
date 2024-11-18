@@ -21,7 +21,7 @@ def run_cim_for_GNN(
     n_procs: int = 1,
 ):
     """Runs conditional IM ranking for the GNN results"""
-    sr.new_conditional.run_cim_for_GNN(
+    sr.conditional.run_cim_for_GNN(
         gnn_result_dir, emp_gm_params_ffp, on_train=on_train, n_procs=n_procs
     )
 
@@ -34,7 +34,7 @@ def run_cim_for_CV_GNN(
     include_train: bool = False,
 ):
     """Runs conditional IM ranking for the GNN CV results"""
-    sr.new_conditional.run_cim_for_CV_GNN(
+    sr.conditional.run_cim_for_CV_GNN(
         gnn_cv_results_dir,
         emp_gm_params_ffp,
         n_procs=n_procs,

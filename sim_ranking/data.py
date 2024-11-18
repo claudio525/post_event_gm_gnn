@@ -8,13 +8,9 @@ import pandas as pd
 import numpy as np
 
 from qcore.timeseries import BBSeis, read_ascii
-import ml_tools as mlt
-import spatial_hazard as sh
-import sha_calc as sha
 
 from . import constants
 from .data_classes import ObservedData
-from . import utils
 
 
 @dataclass
@@ -72,112 +68,6 @@ class SiteCorrelations:
         )
 
 
-def gen_emp_synthetic_observed(
-    emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path, nzgmdb_flat_file: Path
-):
-    """
-    Generates synthetic observed data
-    based on the (perturbed) empirical
-    GMM parameters correlated using the
-    Loth and Baker spatial correlation model
-
-    The nzgmdb_flat_file is only used to get
-    r_rup and r_x
-    """
-    # Load data
-    gm_params = pd.read_csv(emp_gm_params_ffp, index_col=0)
-    site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")
-
-    nzgmdb_df = pd.read_csv(nzgmdb_flat_file, dtype={"evid": str})
-    nzgmdb_df.index = mlt.array_utils.numpy_str_join(
-        "_", nzgmdb_df.evid.values.astype(str), nzgmdb_df.sta.values.astype(str)
-    )
-
-    # Shift the mean
-    mean_cols = [f"{cur_im}_mean" for cur_im in constants.PSA_KEYS]
-    gm_params.loc[:, mean_cols] = gm_params.loc[:, mean_cols].values + 0.5 * 0.6
-
-    # Generate the realisation
-    rels = gen_emp_synthethic_realisations(gm_params, site_df, n_rels=1)
-
-    # Combine
-    dfs = []
-    for cur_key, cur_df in rels.items():
-        cur_event = cur_key.split("_")[0]
-        cur_df["event"] = cur_event
-        cur_df["site"] = cur_df.index.values.astype(str)
-        cur_df.index = mlt.array_utils.numpy_str_join(
-            "_", cur_df.event.values.astype(str), cur_df.site.values.astype(str)
-        )
-        dfs.append(cur_df)
-
-    obs_df = pd.concat(dfs, axis=0)
-    obs_df["r_rup"] = nzgmdb_df.loc[obs_df.index, "r_rup"].values
-    obs_df["r_x"] = nzgmdb_df.loc[obs_df.index, "r_x"].values
-    obs_df = obs_df.rename(columns={"event": "evid", "site": "sta"})
-
-    return obs_df, gm_params
-
-
-def gen_emp_synthethic_realisations(
-    gm_params: pd.DataFrame, site_df: pd.DataFrame, n_rels: int = 25
-):
-    """
-    Generates correlated synthetic observed data
-    based on the empirical GM parameters
-    and the Loth and Baker spatial correlation
-    model
-
-    Parameters
-    ----------
-    gm_params: DataFrame
-        The empirical GM parameters
-    site_df: DataFrame
-        The NZGMDB site data
-    n_rels: int, optional
-        The number of realisations to generate
-
-    Returns
-    -------
-    dict[str, DataFrame]
-        The generated realisations
-        Keys are {event}_{rel}
-    """
-    events = gm_params.event.unique().astype(str)
-
-    # Calculate the distance matrix
-    dist_matrix =  utils.calculate_distance_matrix(
-        site_df.index.values.astype(str), site_df
-    )
-    ims = constants.PSA_KEYS
-
-    # Generate the realisations
-    result_dict = {}
-    for event_ix, cur_event in enumerate(tqdm.tqdm(events)):
-        # print(f"Processing event: {cur_event}, {event_ix + 1}/{events.size}")
-        cur_df = gm_params.loc[gm_params.event == cur_event, :].set_index("site")
-        cur_sites = cur_df.index.values.astype(str)
-
-        im_values, between_event, within_event = sh.im_dist.gen_im_rels(
-            cur_df,
-            dist_matrix.loc[cur_sites, cur_sites],
-            ims,
-            n_rels,
-            corr_fn=sha.models.loth_baker_corr_model.get_correlations,
-        )
-
-        # Save the results
-        for ix in range(n_rels):
-            cur_df = pd.DataFrame(
-                data=np.exp(im_values[:, :, ix]),
-                index=cur_sites,
-                columns=ims,
-            )
-            result_dict[f"{cur_event}_REL{ix + 1:02}"] = cur_df
-
-    return result_dict
-
-
 def run_emp_gmms(
     output_ffp: Path,
     nzgmdb_flat_ffp: Path,
@@ -204,7 +94,7 @@ def run_emp_gmms(
 
     ### Constants
     GMM_MAPPING = {
-        TectType.ACTIVE_SHALLOW: GMM.Br_10,
+        TectType.ACTIVE_SHALLOW: GMM.Br_13,
         TectType.SUBDUCTION_SLAB: GMM.ZA_06,
         TectType.SUBDUCTION_INTERFACE: GMM.ZA_06,
     }
@@ -449,7 +339,11 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
 
     # Drop duplicates
     # Use the one with the smaller fmin
-    obs_data = obs_data.drop_duplicates(["event_id", "site_id"], sort_key=ObservedData.OtherColEnums.FMIN, ascending=True)
+    obs_data = obs_data.drop_duplicates(
+        ["event_id", "site_id"],
+        sort_key=ObservedData.OtherColEnums.FMIN,
+        ascending=True,
+    )
 
     # Convert to event_site index
     obs_data = obs_data.to_event_site_index()
@@ -528,3 +422,20 @@ def load_obs_nga_subduction(nga_sub_ffp: Path):
     obs_data = obs_data.metadata_filter(dict(rrup=(0, 250)))
 
     return obs_data
+
+
+def load_emp_gmm_params(emp_gmm_ffp: Path):
+    """
+    Load the empirical GMM parameters
+
+    Parameters
+    ----------
+    emp_gmm_ffp: Path
+        Path to the empirical GMM parameters
+
+    Returns
+    -------
+    emp_gmm_params: DataFrame
+        Empirical GMM parameters
+    """
+    return pd.read_parquet(emp_gmm_ffp)

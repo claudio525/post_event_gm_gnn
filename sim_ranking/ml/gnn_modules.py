@@ -32,7 +32,9 @@ class BasicAttentionGNN(torch.nn.Module):
         self.run_config = run_config
 
         self.convs = torch.nn.ModuleList()
-        for cur_n_channels in run_config.n_int_node_channels:
+        self.bns = torch.nn.ModuleList()
+        for ix, cur_n_channels in enumerate(run_config.n_int_node_channels):
+            n_in_channels = n_int_node_features if ix == 0 else run_config.n_int_node_channels[ix - 1]
             assert cur_n_channels % len(run_config.ims) == 0
             self.convs.append(
                 gnn.HeteroConv(
@@ -42,23 +44,25 @@ class BasicAttentionGNN(torch.nn.Module):
                                 nn.Linear(
                                         n_obs_node_features, cur_n_channels, bias=True
                                     ),
-                                nn.ELU(),
+                                # nn.ELU(),
+                                nn.Tanh(),
                             ),
                             target_transform_model=nn.Sequential(
                                 nn.Linear(
-                                        n_int_node_features, cur_n_channels, bias=True
+                                        n_in_channels, cur_n_channels, bias=True
                                     ),
-                                nn.ELU(),
+                                # nn.ELU(),
+                                nn.Tanh(),
                             ),
                             att_model=nn.Sequential(
                                 nn.Linear(
                                     n_obs_scalar_node_features
                                     + n_edge_features
-                                    + n_int_node_features,
+                                    + n_in_channels,
                                     run_config.n_ims,
                                 ),
-                                nn.ELU(),
-                                # nn.LeakyReLU(negative_slope=0.2),
+                                # nn.ELU(),
+                                nn.Tanh(),
                             ),
                             source_scalar_feature_ind=site_obs_scalar_feature_ind,
                             node_embedding_size=cur_n_channels,
@@ -70,22 +74,31 @@ class BasicAttentionGNN(torch.nn.Module):
                 )
             )
 
+            self.bns.append(nn.BatchNorm1d(cur_n_channels))
+
         self.fc1 = nn.Linear(run_config.n_int_node_channels[-1], run_config.fc_n_units)
         self.out_fc = nn.Linear(run_config.fc_n_units, run_config.n_outputs)
 
     def forward(self, data: gdata.HeteroData):
-        for cur_conv in self.convs:
+        for ix, cur_conv in enumerate(self.convs):
+            # Overwrite with result from previous layer if not the first layer
+            x_dict = data.x_dict if ix == 0 else data.x_dict | x_dict
+
+            # Apply convolution
             x_dict = cur_conv(
-                data.x_dict,
+                x_dict,
                 data.edge_index_dict,
                 edge_attr_dict=data.edge_attr_dict,
             )
-            x_dict = {key: x.relu() for key, x in x_dict.items()}
+            # Save results
+            # x_dict = {key: x.relu() for key, x in x_dict.items()}
+            # x_dict = {key: F.tanh(x) for key, x in x_dict.items()}
+            x_dict = {key: F.tanh(self.bns[ix](x)) for key, x in x_dict.items()}
 
         x_site_int = x_dict["site_int"]
 
-        x = F.elu(self.fc1(x_site_int))
-        # x = F.relu(self.fc1(x_site_int))
+        x = F.tanh(self.fc1(x_site_int))
+        # x = F.elu(self.fc1(x_site_int))
         out = self.out_fc(x)
 
         if self.run_config.pred_std:
@@ -96,6 +109,7 @@ class BasicAttentionGNN(torch.nn.Module):
             ln_im_mean = torch.clamp(ln_im_mean, min=-15, max=5)
 
             return ln_im_mean, ln_im_std
+
         return out
 
 
@@ -136,14 +150,6 @@ class BasicAttentionConv(MessagePassing):
         self.source_transform_model = source_transform_model
         self.target_transform_model = target_transform_model
         self.node_embedding_size = node_embedding_size
-
-        # self.bias = nn.Parameter(torch.empty(self.out_channels))
-        # self.source_transform_model = nn.Linear(
-        #     self.in_channels_source, self.out_channels, bias=False
-        # )
-        # self.target_transform_model = nn.Linear(
-        #     self.in_channels_target, self.out_channels, bias=True
-        # )
 
         self.source_scalar_feature_ind = source_scalar_feature_ind
 
@@ -200,11 +206,6 @@ class BasicAttentionConv(MessagePassing):
             m = alpha.repeat_interleave(source_messages.shape[1] // alpha.shape[1], dim=1) * source_messages
         else:
             m = alpha * self.source_transform_model(x_j)
-
-        # if self.pred_std:
-        #     m = alpha.tile((1, 2)) * self.source_transform_model(x_j)
-        # else:
-        #     m = alpha * self.source_transform_model(x_j)
 
         return m
 
