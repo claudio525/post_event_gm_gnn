@@ -201,6 +201,13 @@ class ObservedData:
             self.__reset_cache()
         return self
 
+    def drop_events(self, events: Sequence[str]):
+        """Drops all records associated with the specified events."""
+        self.record_df = self.record_df[~self.record_df[self.EventColEnums.EVENT_ID].isin(events)]
+
+        self.__reset_cache()
+        return self
+
     def drop_duplicates(self, subset: Sequence[str] = None, sort_key: str = None, ascending: bool = True):
         """
         Drops any duplicate rows.

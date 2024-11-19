@@ -299,14 +299,6 @@ def load_obs_waveform(obs_waveform_dir: Path, site: str):
     return obs_t, obs_acc
 
 
-def load_correlations(data_dir: Path):
-    return {
-        cur_ffp.stem: SiteCorrelations.load(cur_ffp)
-        for cur_ffp in data_dir.iterdir()
-        if cur_ffp.is_file() and not cur_ffp.stem.startswith("_")
-    }
-
-
 def load_obs_nzgmdb(nzgmdb_ffp: Path):
     """
     Load the observed data from NZGMDB and performs the

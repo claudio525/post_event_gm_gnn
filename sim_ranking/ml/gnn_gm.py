@@ -38,6 +38,8 @@ class RunConfig:
     """Maximum distance between site-interest and observation sites"""
     max_n_obs_sites: int
     """Maximum number of observation sites to consider"""
+    ignore_events: Sequence[str]
+    """Events to ignore"""
 
     device: str
     """Device to use"""
@@ -58,8 +60,17 @@ class RunConfig:
     """Batch size"""
     n_int_node_channels: Sequence[int]
     """Number of site of interest node channels"""
+    embedding_act_fn: str | None
+    """Activation function for the embedding update models"""
+    att_act_fn: str | None
+    """Activation function for the attention models"""
+    gcn_act_fn: str | None
+    """Activation function following a graph convolution"""
+    fcc_act_fn: str | None
+    """Activation function for the FC output model"""
+
     fc_n_units: int
-    """Number of fully connected units for the output MLP"""
+    """Number of FC units for the output model"""
 
     rel_results_dir: str
     """Base output directory"""
@@ -115,6 +126,7 @@ class RunConfig:
             "rel_obs_data_ffp": self.rel_obs_data_ffp,
             "max_dist": self.max_dist,
             "max_n_obs_sites": self.max_n_obs_sites,
+            "ignore_events": list(self.ignore_events),
             "device": self.device,
             "ims": list(self.ims),
             "pred_std": self.pred_std,
@@ -123,6 +135,10 @@ class RunConfig:
             "batch_size": self.batch_size,
             "n_int_node_channels": list(self.n_int_node_channels),
             "fc_n_units": self.fc_n_units,
+            "embedding_act_fn": self.embedding_act_fn,
+            "att_act_fn": self.att_act_fn,
+            "gcn_act_fn": self.gcn_act_fn,
+            "fcc_act_fn": self.fcc_act_fn,
             "rel_results_dir": self.rel_results_dir,
         }
 
@@ -274,6 +290,10 @@ def run_model_training(
         run_config.max_dist,
         run_config.max_n_obs_sites,
     )
+
+    # Sanity check
+    assert np.isin(val_int_sites, train_int_sites).sum() == 0
+    assert np.isin(val_events, train_events).sum() == 0
 
     if run_config.scale_IMs:
         scale_record_ids = []

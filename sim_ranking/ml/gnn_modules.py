@@ -13,6 +13,8 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.typing import Adj, Size
 import numpy as np
 
+import ml_tools as mlt
+
 if TYPE_CHECKING:
     from . import gnn_gm
 
@@ -36,34 +38,63 @@ class BasicAttentionGNN(torch.nn.Module):
         for ix, cur_n_channels in enumerate(run_config.n_int_node_channels):
             n_in_channels = n_int_node_features if ix == 0 else run_config.n_int_node_channels[ix - 1]
             assert cur_n_channels % len(run_config.ims) == 0
+
+            # Source node transform model
+            source_transform_model = nn.Sequential(
+                nn.Linear(n_obs_node_features, cur_n_channels, bias=True),
+            )
+            if run_config.embedding_act_fn is not None:
+                source_transform_model.add_module("act_fn", mlt.torch.get_act_fn_layer(run_config.embedding_act_fn))
+
+            # Target node transform model
+            target_transform_model = nn.Sequential(
+                nn.Linear(n_in_channels, cur_n_channels, bias=True),
+            )
+            if run_config.embedding_act_fn is not None:
+                target_transform_model.add_module("act_fn", mlt.torch.get_act_fn_layer(run_config.embedding_act_fn))
+
+            # Attention model
+            att_model = nn.Sequential(
+                nn.Linear(
+                    n_obs_scalar_node_features + n_edge_features + n_in_channels,
+                    run_config.n_ims,
+                ),
+            )
+            if run_config.att_act_fn is not None:
+                att_model.add_module("act_fn", mlt.torch.get_act_fn_layer(run_config.att_act_fn))
+
+
             self.convs.append(
                 gnn.HeteroConv(
                     {
                         ("site_obs", "informs", "site_int"): BasicAttentionConv(
-                            source_transform_model=nn.Sequential(
-                                nn.Linear(
-                                        n_obs_node_features, cur_n_channels, bias=True
-                                    ),
-                                # nn.ELU(),
-                                nn.Tanh(),
-                            ),
-                            target_transform_model=nn.Sequential(
-                                nn.Linear(
-                                        n_in_channels, cur_n_channels, bias=True
-                                    ),
-                                # nn.ELU(),
-                                nn.Tanh(),
-                            ),
-                            att_model=nn.Sequential(
-                                nn.Linear(
-                                    n_obs_scalar_node_features
-                                    + n_edge_features
-                                    + n_in_channels,
-                                    run_config.n_ims,
-                                ),
-                                # nn.ELU(),
-                                nn.Tanh(),
-                            ),
+                            source_transform_model=source_transform_model,
+                            target_transform_model=target_transform_model,
+                            att_model=att_model,
+                            # source_transform_model=nn.Sequential(
+                            #     nn.Linear(
+                            #             n_obs_node_features, cur_n_channels, bias=True
+                            #         ),
+                            #     # nn.ELU(),
+                            #     nn.Tanh(),
+                            # ),
+                            # target_transform_model=nn.Sequential(
+                            #     nn.Linear(
+                            #             n_in_channels, cur_n_channels, bias=True
+                            #         ),
+                            #     # nn.ELU(),
+                            #     nn.Tanh(),
+                            # ),
+                            # att_model=nn.Sequential(
+                            #     nn.Linear(
+                            #         n_obs_scalar_node_features
+                            #         + n_edge_features
+                            #         + n_in_channels,
+                            #         run_config.n_ims,
+                            #     ),
+                            #     # nn.ELU(),
+                            #     nn.Tanh(),
+                            # ),
                             source_scalar_feature_ind=site_obs_scalar_feature_ind,
                             node_embedding_size=cur_n_channels,
                             pred_std=run_config.pred_std,
@@ -91,14 +122,12 @@ class BasicAttentionGNN(torch.nn.Module):
                 edge_attr_dict=data.edge_attr_dict,
             )
             # Save results
-            # x_dict = {key: x.relu() for key, x in x_dict.items()}
-            # x_dict = {key: F.tanh(x) for key, x in x_dict.items()}
-            x_dict = {key: F.tanh(self.bns[ix](x)) for key, x in x_dict.items()}
+            # x_dict = {key: F.tanh(self.bns[ix](x)) for key, x in x_dict.items()}
+            x_dict = {key: mlt.torch.get_act_fn(self.run_config.gcn_act_fn)(x) for key, x in x_dict.items()}
 
         x_site_int = x_dict["site_int"]
 
-        x = F.tanh(self.fc1(x_site_int))
-        # x = F.elu(self.fc1(x_site_int))
+        x = mlt.torch.get_act_fn(self.run_config.fcc_act_fn)(self.fc1(x_site_int))
         out = self.out_fc(x)
 
         if self.run_config.pred_std:

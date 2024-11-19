@@ -1,5 +1,4 @@
-import time
-import os
+import copy
 from pathlib import Path
 
 import torch
@@ -10,7 +9,6 @@ import typer
 
 import ml_tools as mlt
 import sim_ranking as sr
-import spatial_hazard as sh
 
 device = "cpu"
 if torch.cuda.is_available():
@@ -87,7 +85,7 @@ def run_holdout(
     print(f"------------------------------------------------")
 
     print(f"Computing distance matrix")
-    dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, obs_data.site_df)
+    dist_matrix = sr.utils.calculate_distance_matrix(all_sites, obs_data.site_df)
 
     print(f"Getting scalar features")
     scalar_features = sr.ml.features.get_scalar_features(
@@ -132,6 +130,9 @@ def run_cv(
 
     ### Data loading
     obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
+    if len(run_config.ignore_events) > 0:
+        obs_data = obs_data.drop_events(run_config.ignore_events)
+
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites
     print(f"Number of events: {len(events)}")
@@ -144,7 +145,7 @@ def run_cv(
     events = np.intersect1d(events, np.asarray(list(valid_event_int_sites.keys())))
 
     print(f"Computing distance matrix")
-    dist_matrix = sh.im_dist.calculate_distance_matrix(all_sites, obs_data.site_df)
+    dist_matrix = sr.utils.calculate_distance_matrix(all_sites, obs_data.site_df)
 
     print(f"Getting scalar features")
     scalar_features = sr.ml.features.get_scalar_features(
@@ -181,7 +182,7 @@ def run_cv(
                     dist_matrix,
                     obs_data,
                     scalar_features,
-                    run_config,
+                    copy.deepcopy(run_config),
                     out_dir,
                     cv_iter,
                     True,
@@ -290,7 +291,7 @@ def _run_mp_helper(
 def get_cv_iterator(fold_combs: list[tuple[int, int]]):
     for val_fold_ind in fold_combs:
         train_folds_ind = [
-            cur_fold for cur_fold in fold_combs if cur_fold != val_fold_ind
+            cur_fold for cur_fold in fold_combs if (cur_fold[0] != val_fold_ind[0]) and (cur_fold[1] != val_fold_ind[1])
         ]
         yield train_folds_ind, val_fold_ind
 
