@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Sequence, NamedTuple
 
@@ -10,7 +9,6 @@ import matplotlib.pyplot as plt
 
 import sim_ranking as sr
 import ml_tools as mlt
-import spatial_hazard as sh
 
 
 class GNNRunResults(NamedTuple):
@@ -57,7 +55,7 @@ def get_cim_result(gnn_result_dir: Path):
 
 @st.cache_data(hash_funcs={sr.ObservedData: lambda x: hash(x.data_ffp)})
 def get_dist_matrix(obs_data: sr.ObservedData) -> pd.DataFrame:
-    return sh.im_dist.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
+    return sr.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
 
 
 @st.cache_data

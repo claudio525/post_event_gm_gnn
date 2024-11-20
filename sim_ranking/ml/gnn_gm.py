@@ -60,6 +60,9 @@ class RunConfig:
     """Batch size"""
     n_int_node_channels: Sequence[int]
     """Number of site of interest node channels"""
+    fc_n_units: int
+    """Number of FC units for the output model"""
+
     embedding_act_fn: str | None
     """Activation function for the embedding update models"""
     att_act_fn: str | None
@@ -69,8 +72,8 @@ class RunConfig:
     fcc_act_fn: str | None
     """Activation function for the FC output model"""
 
-    fc_n_units: int
-    """Number of FC units for the output model"""
+    l2_reg: float
+    """L2 regularization coefficient"""
 
     rel_results_dir: str
     """Base output directory"""
@@ -139,6 +142,7 @@ class RunConfig:
             "att_act_fn": self.att_act_fn,
             "gcn_act_fn": self.gcn_act_fn,
             "fcc_act_fn": self.fcc_act_fn,
+            "l2_reg": self.l2_reg,
             "rel_results_dir": self.rel_results_dir,
         }
 
@@ -346,7 +350,7 @@ def run_model_training(
         val_graph_data, batch_size=run_config.batch_size, shuffle=True
     )
 
-    gnn_model = gnn_modules.BasicAttentionGNN(
+    gnn_model = gnn_modules.CustomAttentionGNN(
         len(run_config.graph_feature_keys["site_obs"]) + len(run_config.ims),
         len(run_config.graph_feature_keys["site_obs"]),
         len(run_config.graph_feature_keys["site_int"]),
@@ -652,7 +656,7 @@ def train(
     best_val_loss = np.inf
     best_model_state, best_model_epoch = None, None
 
-    optimizer = torch.optim.Adam(gnn_model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(gnn_model.parameters(), lr=run_config.l2_reg)
     for cur_epoch_ix in range(run_config.n_epochs):
         if verbose:
             print(f"Epoch: {cur_epoch_ix}")
@@ -662,24 +666,24 @@ def train(
         gnn_model.train()
         for cur_batch in tqdm.tqdm(train_loader, disable=not verbose):
             cur_batch = cur_batch.to(run_config.device)
-            cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
+            # cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
             optimizer.zero_grad()
-            if run_config.pred_std:
-                pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch)
-            else:
-                pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch), None
+            # if run_config.pred_std:
+            #     pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch)
+            # else:
+            #     pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch), None
 
-            nan_mask = torch.isnan(cur_y)
-            loss = compute_loss(
-                pred_ln_im_mean[~nan_mask],
-                cur_y[~nan_mask],
-                pred_ln_im_ln_std=(
-                    pred_ln_im_ln_std[~nan_mask]
-                    if pred_ln_im_ln_std is not None
-                    else None
-                ),
-            )
+            # nan_mask = torch.isnan(cur_y)
+            # loss = compute_loss(
+            #     pred_ln_im_mean[~nan_mask],
+            #     cur_y[~nan_mask],
+            #     pred_ln_im_ln_std=(
+            #         pred_ln_im_ln_std[~nan_mask]
+            #         if pred_ln_im_ln_std is not None
+            #         else None
+            #     ),
+            # )
             cur_bresult = _get_batch_result(cur_batch, gnn_model, run_config)
 
             cur_bresult.loss.backward()

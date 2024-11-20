@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from . import gnn_gm
 
 
-class BasicAttentionGNN(torch.nn.Module):
+class CustomAttentionGNN(torch.nn.Module):
 
     def __init__(
         self,
@@ -36,7 +36,11 @@ class BasicAttentionGNN(torch.nn.Module):
         self.convs = torch.nn.ModuleList()
         self.bns = torch.nn.ModuleList()
         for ix, cur_n_channels in enumerate(run_config.n_int_node_channels):
-            n_in_channels = n_int_node_features if ix == 0 else run_config.n_int_node_channels[ix - 1]
+            n_in_channels = (
+                n_int_node_features
+                if ix == 0
+                else run_config.n_int_node_channels[ix - 1]
+            )
             assert cur_n_channels % len(run_config.ims) == 0
 
             # Source node transform model
@@ -44,14 +48,18 @@ class BasicAttentionGNN(torch.nn.Module):
                 nn.Linear(n_obs_node_features, cur_n_channels, bias=True),
             )
             if run_config.embedding_act_fn is not None:
-                source_transform_model.add_module("act_fn", mlt.torch.get_act_fn_layer(run_config.embedding_act_fn))
+                source_transform_model.add_module(
+                    "act_fn", mlt.torch.get_act_fn_layer(run_config.embedding_act_fn)
+                )
 
             # Target node transform model
             target_transform_model = nn.Sequential(
                 nn.Linear(n_in_channels, cur_n_channels, bias=True),
             )
             if run_config.embedding_act_fn is not None:
-                target_transform_model.add_module("act_fn", mlt.torch.get_act_fn_layer(run_config.embedding_act_fn))
+                target_transform_model.add_module(
+                    "act_fn", mlt.torch.get_act_fn_layer(run_config.embedding_act_fn)
+                )
 
             # Attention model
             att_model = nn.Sequential(
@@ -61,13 +69,14 @@ class BasicAttentionGNN(torch.nn.Module):
                 ),
             )
             if run_config.att_act_fn is not None:
-                att_model.add_module("act_fn", mlt.torch.get_act_fn_layer(run_config.att_act_fn))
-
+                att_model.add_module(
+                    "act_fn", mlt.torch.get_act_fn_layer(run_config.att_act_fn)
+                )
 
             self.convs.append(
                 gnn.HeteroConv(
                     {
-                        ("site_obs", "informs", "site_int"): BasicAttentionConv(
+                        ("site_obs", "informs", "site_int"): CustomAttentionConv(
                             source_transform_model=source_transform_model,
                             target_transform_model=target_transform_model,
                             att_model=att_model,
@@ -123,7 +132,12 @@ class BasicAttentionGNN(torch.nn.Module):
             )
             # Save results
             # x_dict = {key: F.tanh(self.bns[ix](x)) for key, x in x_dict.items()}
-            x_dict = {key: mlt.torch.get_act_fn(self.run_config.gcn_act_fn)(x) for key, x in x_dict.items()}
+
+            x_dict = {
+                key: F.dropout(mlt.torch.get_act_fn(self.run_config.gcn_act_fn)(x), p=0.5, training=self.training)
+                # key: mlt.torch.get_act_fn(self.run_config.gcn_act_fn)(x)
+                for key, x in x_dict.items()
+            }
 
         x_site_int = x_dict["site_int"]
 
@@ -133,16 +147,16 @@ class BasicAttentionGNN(torch.nn.Module):
         if self.run_config.pred_std:
             ln_im_mean, ln_im_std = out.chunk(2, dim=1)
 
-            # Clip predicted values prevent numerical issues
-            ln_im_std = torch.clamp(ln_im_std, min=-15, max=5)
-            ln_im_mean = torch.clamp(ln_im_mean, min=-15, max=5)
+            # Clip predicted values to prevent numerical issues
+            ln_im_std = torch.clamp(ln_im_std, min=-20, max=5)
+            ln_im_mean = torch.clamp(ln_im_mean, min=-20, max=5)
 
             return ln_im_mean, ln_im_std
 
         return out
 
 
-class BasicAttentionConv(MessagePassing):
+class CustomAttentionConv(MessagePassing):
 
     def __init__(
         self,
@@ -207,8 +221,22 @@ class BasicAttentionConv(MessagePassing):
         )
 
         # Update the nodes
-        out = m_s + self.target_transform_model(x[1]) #+ self.bias
+        out = m_s + self.target_transform_model(x[1])  # + self.bias
         return out
+
+    def compute_attn_weights(self, x_j: torch.Tensor, x_i: torch.Tensor, edge_attr: torch.Tensor, dest_ind: torch.Tensor) -> torch.Tensor:
+        """Compute the attention coefficients"""
+        a = self.att_model(
+            torch.cat((x_j[:, self.source_scalar_feature_ind], edge_attr, x_i), dim=1)
+        )
+
+        if self.use_sigmoid:
+            alpha = torch.sigmoid(a)
+        else:
+            # Normalise
+            alpha = gutils.softmax(a, dest_ind)
+
+        return alpha
 
     def message(
         self,
@@ -230,9 +258,16 @@ class BasicAttentionConv(MessagePassing):
             # Normalise
             alpha = gutils.softmax(a, dest_ind)
 
+        t = self.compute_attn_weights(x_j, x_i, edge_attr, dest_ind)
+
         source_messages = self.source_transform_model(x_j)
         if alpha.shape[1] < source_messages.shape[1]:
-            m = alpha.repeat_interleave(source_messages.shape[1] // alpha.shape[1], dim=1) * source_messages
+            m = (
+                alpha.repeat_interleave(
+                    source_messages.shape[1] // alpha.shape[1], dim=1
+                )
+                * source_messages
+            )
         else:
             m = alpha * self.source_transform_model(x_j)
 

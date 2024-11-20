@@ -6,8 +6,8 @@ seed: 42
 # Input data settings
 #rel_obs_data_ffp: gm_datasets/nz_gmdb/v3.4/Tables/ground_motion_im_table_rotd50_flat.csv
 rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.0/Tables/ground_motion_im_table_rotd50_flat.csv
-max_dist: 20
-max_n_obs_sites: 10
+max_dist: 10
+max_n_obs_sites: 5
 
 ignore_events: ["3468575"]
 
@@ -18,17 +18,17 @@ graph_feature_keys:
     - "angular_dist"
   site_int:
     - "vs30_site_int"
-    - "z1p0_site_int"
-    - "z2p5_site_int"
-    - "tsite_site_int"
-    - "rrup_site_int"
+#    - "z1p0_site_int"
+#    - "z2p5_site_int"
+#    - "tsite_site_int"
+#    - "rrup_site_int"
     - "mag"
   site_obs:
     - "vs30_site_obs"
-    - "z1p0_site_obs"
-    - "z2p5_site_obs"
-    - "tsite_site_obs"
-    - "rrup_site_obs"
+#    - "z1p0_site_obs"
+#    - "z2p5_site_obs"
+#    - "tsite_site_obs"
+#    - "rrup_site_obs"
 
 # Model settings
 pred_std: True
@@ -38,12 +38,14 @@ scale_IMs: True
 n_epochs: 100
 batch_size: 1024
 fc_n_units: 62
-n_int_node_channels: [62]
+n_int_node_channels: [31, 31]
 
-embedding_act_fn: "relu"
+embedding_act_fn: null
 att_act_fn: null
-gcn_act_fn: "relu"
-fcc_act_fn: "relu"
+gcn_act_fn: "tanh"
+fcc_act_fn: "tanh"
+
+l2_reg: 0.001
 
 # Output settings
 rel_results_dir: sim_ranking/results/gnn

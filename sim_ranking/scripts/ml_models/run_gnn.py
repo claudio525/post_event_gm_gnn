@@ -241,6 +241,15 @@ def run_cv(
         wdata=run_config.wdata,
     )
 
+    ind_notebook = Path(__file__).parent / "report_notebooks/ind_scenarios.ipynb"
+    mlt.quarto.render_quarto(
+        "mamba activate sim-ranking-pip",
+        ind_notebook,
+        out_dir / "ind_scenarios.html",
+        gnn_results_dir=out_dir,
+        wdata=run_config.wdata,
+    )
+
 
 def _run_mp_helper(
     event_folds: list[np.ndarray[str]],
