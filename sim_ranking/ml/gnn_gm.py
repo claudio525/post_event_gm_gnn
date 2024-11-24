@@ -15,6 +15,7 @@ import torch.nn.functional as F
 import torch_geometric.data as gdata
 import torch_geometric.loader as gloader
 import torch_geometric.data.batch as gbatch
+import torch_geometric.utils as gutils
 import tqdm
 
 import ml_tools as mlt
@@ -38,6 +39,8 @@ class RunConfig:
     """Maximum distance between site-interest and observation sites"""
     max_n_obs_sites: int
     """Maximum number of observation sites to consider"""
+    min_n_obs_sites: int
+    """Minimum number of observation sites required"""
     ignore_events: Sequence[str]
     """Events to ignore"""
 
@@ -47,8 +50,6 @@ class RunConfig:
     ### Model settings
     ims: Sequence[str]
     """IMs to predict"""
-    pred_std: bool
-    """Whether to predict the standard deviation"""
 
     scale_IMs: bool
     """Whether to scale the IMs"""
@@ -58,19 +59,24 @@ class RunConfig:
     """Number of training epochs"""
     batch_size: int
     """Batch size"""
-    n_int_node_channels: Sequence[int]
-    """Number of site of interest node channels"""
     fc_n_units: int
     """Number of FC units for the output model"""
-
-    embedding_act_fn: str | None
-    """Activation function for the embedding update models"""
-    att_act_fn: str | None
-    """Activation function for the attention models"""
-    gcn_act_fn: str | None
-    """Activation function following a graph convolution"""
     fcc_act_fn: str | None
     """Activation function for the FC output model"""
+
+    target_embedding_act_fn: str | None
+    """Activation function for the target embedding update models"""
+    source_embedding_act_fn: str | None
+    """Activation function for the source embedding update models"""
+    n_int_node_channels: Sequence[int]
+    """Number of site of interest node channels"""
+    gcn_act_fn: str | None
+    """Activation function following a graph convolution"""
+
+    att_act_fn: str | None
+    """Activation function for the attention models"""
+    att_n_units: Sequence[int]
+    """Number of attention units"""
 
     l2_reg: float
     """L2 regularization coefficient"""
@@ -109,7 +115,27 @@ class RunConfig:
 
     @property
     def n_outputs(self):
-        return self.n_ims * 2 if self.pred_std else self.n_ims
+        return self.n_ims * 2
+
+    @property
+    def site_obs_n_scalar_features(self):
+        return (
+            0
+            if self.graph_feature_keys["site_obs"] is None
+            else len(self.graph_feature_keys["site_obs"])
+        )
+
+    @property
+    def site_obs_n_features(self):
+        return self.site_obs_n_scalar_features + self.n_ims
+
+    @property
+    def site_int_n_features(self):
+        return len(self.graph_feature_keys["site_int"])
+
+    @property
+    def n_edge_features(self):
+        return len(self.graph_feature_keys["edge"])
 
     @property
     def wdata(self) -> str:
@@ -129,19 +155,21 @@ class RunConfig:
             "rel_obs_data_ffp": self.rel_obs_data_ffp,
             "max_dist": self.max_dist,
             "max_n_obs_sites": self.max_n_obs_sites,
+            "min_n_obs_sites": self.min_n_obs_sites,
             "ignore_events": list(self.ignore_events),
             "device": self.device,
             "ims": list(self.ims),
-            "pred_std": self.pred_std,
             "scale_IMs": self.scale_IMs,
             "n_epochs": self.n_epochs,
             "batch_size": self.batch_size,
             "n_int_node_channels": list(self.n_int_node_channels),
             "fc_n_units": self.fc_n_units,
-            "embedding_act_fn": self.embedding_act_fn,
+            "target_embedding_act_fn": self.target_embedding_act_fn,
+            "source_embedding_act_fn": self.source_embedding_act_fn,
             "att_act_fn": self.att_act_fn,
             "gcn_act_fn": self.gcn_act_fn,
             "fcc_act_fn": self.fcc_act_fn,
+            "att_n_units": list(self.att_n_units),
             "l2_reg": self.l2_reg,
             "rel_results_dir": self.rel_results_dir,
         }
@@ -281,8 +309,8 @@ def run_model_training(
         obs_sites,
         train_int_sites,
         run_config.max_dist,
-        run_config.max_n_obs_sites
-
+        run_config.max_n_obs_sites,
+        run_config.min_n_obs_sites,
     )
     val_site_combs, val_event_sites = ml_data.compute_site_combinations(
         event_sites,
@@ -293,6 +321,7 @@ def run_model_training(
         val_int_sites,
         run_config.max_dist,
         run_config.max_n_obs_sites,
+        run_config.min_n_obs_sites,
     )
 
     # Sanity check
@@ -321,7 +350,7 @@ def run_model_training(
 
     if verbose:
         print(f"Getting graph data")
-    train_graph_data, site_obs_scalar_feature_ind = get_graph_data(
+    train_graph_data = get_graph_data(
         obs_data,
         train_event_sites,
         train_site_combs,
@@ -332,7 +361,7 @@ def run_model_training(
         verbose=verbose,
     )
 
-    val_graph_data, _ = get_graph_data(
+    val_graph_data = get_graph_data(
         obs_data,
         val_event_sites,
         val_site_combs,
@@ -351,12 +380,15 @@ def run_model_training(
     )
 
     gnn_model = gnn_modules.CustomAttentionGNN(
-        len(run_config.graph_feature_keys["site_obs"]) + len(run_config.ims),
-        len(run_config.graph_feature_keys["site_obs"]),
-        len(run_config.graph_feature_keys["site_int"]),
-        len(run_config.graph_feature_keys["edge"]),
+        # len(run_config.graph_feature_keys["site_obs"]) + len(run_config.ims),
+        run_config.site_obs_n_features,
+        # len(run_config.graph_feature_keys["site_obs"]),
+        run_config.site_obs_n_scalar_features,
+        # len(run_config.graph_feature_keys["site_int"]),
+        run_config.site_int_n_features,
+        # len(run_config.graph_feature_keys["edge"]),
+        run_config.n_edge_features,
         run_config,
-        torch.from_numpy(site_obs_scalar_feature_ind),
     )
     gnn_model.to(run_config.device)
 
@@ -396,15 +428,21 @@ def run_model_training(
     torch.save(gnn_model, out_dir / "model.pt")
 
     # Save the results
-    train_results_df = get_predictions(
+    train_results_df, train_attn_coeffs_df = get_predictions(
         run_config, gnn_model, train_graph_data, verbose=verbose
     )
     train_results_df.to_parquet(out_dir / "train_results.parquet")
+    train_attn_coeffs_df.to_parquet(out_dir / "train_attn_coeffs.parquet")
 
-    val_results_df = get_predictions(
+    val_results_df, val_attn_coeffs = get_predictions(
         run_config, gnn_model, val_graph_data, verbose=verbose
     )
     val_results_df.to_parquet(out_dir / "val_results.parquet")
+    val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
+
+    # Sanity checks
+    assert ~np.any(val_results_df.event_id.isin(train_results_df.event_id))
+    assert ~np.any(val_results_df.site_int.isin(train_results_df.site_int))
 
     # Write the metadata
     metadata = {
@@ -427,12 +465,10 @@ def _get_event_graph_data(
 ):
     """Helper function, see get_graph_data"""
     graph_data = []
-
     cur_site_int_inds = np.unique(site_combs[:, 0])
 
     # Get and normalise the IM data
     cur_im_data = np.log(obs_data.get_event_data(event, sites).loc[:, run_config.ims])
-
     if run_config.scale_IMs:
         cur_im_data = (
             cur_im_data - run_config.im_scale_params["mean"][run_config.ims]
@@ -448,23 +484,29 @@ def _get_event_graph_data(
             cur_site_combs_mask, graph_feature_keys["site_int"]
         ].values[0]
 
-        # Create the site_obs node features
-        cur_obs_sites_features = scalar_feature_values.loc[
-            cur_site_combs_mask,
-            graph_feature_keys["site_obs"],
-        ].values
         # Get observation site IM values and deal with nan values
         cur_obs_sites_im_values = (
             cur_im_data.loc[cur_obs_sites, run_config.ims].replace(np.nan, 99).values
         )
-        # Add the IM values
-        cur_obs_sites_features = np.concatenate(
-            (
-                cur_obs_sites_features,
-                cur_obs_sites_im_values,
-            ),
-            axis=1,
-        )
+        if (
+            graph_feature_keys["site_obs"] is not None
+            and len(graph_feature_keys["site_obs"]) > 0
+        ):
+            # Create the site_obs node features
+            cur_obs_sites_features = scalar_feature_values.loc[
+                cur_site_combs_mask,
+                graph_feature_keys["site_obs"],
+            ].values
+            # Add the IM values
+            cur_obs_sites_features = np.concatenate(
+                (
+                    cur_obs_sites_features,
+                    cur_obs_sites_im_values,
+                ),
+                axis=1,
+            )
+        else:
+            cur_obs_sites_features = cur_obs_sites_im_values
 
         # Create the edge features
         cur_edge_features = scalar_feature_values.loc[
@@ -488,6 +530,7 @@ def _get_event_graph_data(
         )
 
         cur_sc_data["metadata"] = {
+            "sc_id": f"{event}_{cur_site_int}",
             "event": event,
             "site_int": cur_site_int,
             "obs_sites": cur_obs_sites,
@@ -534,8 +577,6 @@ def get_graph_data(
     Returns
     -------
     graph_data: list[gdata.HeteroData]
-    site_obs_scalar_feature_ind: np.ndarray
-        Indices of the scalar features for the site_obs node features
     """
     # Create the scalar features tensors
     scalar_event_feature_values, scalar_feature_columns = (
@@ -543,8 +584,6 @@ def get_graph_data(
             event_sites, scalar_features, event_site_combs
         )
     )
-
-    site_obs_scalar_feature_ind = np.arange(len(graph_feature_keys["site_obs"]))
 
     # Create the graph data objects
     graph_data = []
@@ -583,7 +622,7 @@ def get_graph_data(
 
     graph_data = [pickle.loads(data) for data in graph_data]
     graph_data = list(itertools.chain(*graph_data))
-    return graph_data, site_obs_scalar_feature_ind
+    return graph_data
 
 
 def compute_loss(
@@ -656,7 +695,9 @@ def train(
     best_val_loss = np.inf
     best_model_state, best_model_epoch = None, None
 
-    optimizer = torch.optim.Adam(gnn_model.parameters(), lr=run_config.l2_reg)
+    optimizer = torch.optim.Adam(
+        gnn_model.parameters(), lr=0.001, weight_decay=run_config.l2_reg
+    )
     for cur_epoch_ix in range(run_config.n_epochs):
         if verbose:
             print(f"Epoch: {cur_epoch_ix}")
@@ -665,29 +706,14 @@ def train(
         n_graphs = 0
         gnn_model.train()
         for cur_batch in tqdm.tqdm(train_loader, disable=not verbose):
-            cur_batch = cur_batch.to(run_config.device)
-            # cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
-
             optimizer.zero_grad()
-            # if run_config.pred_std:
-            #     pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch)
-            # else:
-            #     pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch), None
-
-            # nan_mask = torch.isnan(cur_y)
-            # loss = compute_loss(
-            #     pred_ln_im_mean[~nan_mask],
-            #     cur_y[~nan_mask],
-            #     pred_ln_im_ln_std=(
-            #         pred_ln_im_ln_std[~nan_mask]
-            #         if pred_ln_im_ln_std is not None
-            #         else None
-            #     ),
-            # )
             cur_bresult = _get_batch_result(cur_batch, gnn_model, run_config)
-
             cur_bresult.loss.backward()
             optimizer.step()
+
+            for name, param in gnn_model.named_parameters():
+                if param.grad is None:
+                    print(f"No gradient for {name}")
 
             metrics = _save_metrics(
                 cur_bresult, metrics, run_config, cur_epoch_ix, "train"
@@ -781,10 +807,9 @@ def _save_metrics(
         .sum()
         .item()
     )
-    if run_config.pred_std:
-        metrics[mean_sigma_hist_key][epoch_ix] += (
-            batch_result.pred_ln_im_std.mean(dim=1).sum().item()
-        )
+    metrics[mean_sigma_hist_key][epoch_ix] += (
+        batch_result.pred_ln_im_std.mean(dim=1).sum().item()
+    )
 
     return metrics
 
@@ -807,10 +832,7 @@ def _get_batch_result(batch: gdata.Batch, gnn_model: nn.Module, run_config: RunC
     cur_batch = batch.to(run_config.device)
     cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
 
-    if run_config.pred_std:
-        pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch)
-    else:
-        pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch), None
+    pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch)
 
     nan_mask = torch.isnan(cur_y)
     loss = compute_loss(
@@ -820,6 +842,7 @@ def _get_batch_result(batch: gdata.Batch, gnn_model: nn.Module, run_config: RunC
             pred_ln_im_ln_std[~nan_mask] if pred_ln_im_ln_std is not None else None
         ),
     )
+
     ind_loss = compute_loss(
         pred_ln_im_mean,
         cur_y,
@@ -885,7 +908,8 @@ def revert_im_scaling(
 
 def get_predictions(
     run_config: RunConfig,
-    gnn_model: torch.nn.Module,
+    # gnn_model: torch.nn.Module,
+    gnn_model: gnn_modules.CustomAttentionGNN,
     graph_data: Sequence[gdata.HeteroData],
     verbose: bool = True,
 ):
@@ -906,16 +930,19 @@ def get_predictions(
         GM estimation for each scenario
     """
     gnn_model.eval()
-    loader = gloader.DataLoader(graph_data, batch_size=128, shuffle=False)
+    loader = gloader.DataLoader(graph_data, batch_size=1024, shuffle=False)
 
     pred_im_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred")
     pred_im_std_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_std")
     loss_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "loss")
 
     results = []
+    attn_coeffs = []
     for cur_batch in tqdm.tqdm(loader, disable=not verbose):
         cur_batch = cur_batch.to(run_config.device)
         cur_out = gnn_model(cur_batch)
+
+        cur_attn_coeffs_df = gnn_model.get_attention_coeff(cur_batch)
 
         cur_result = pd.DataFrame(
             data=[
@@ -932,33 +959,21 @@ def get_predictions(
             obs_ims, _ = revert_im_scaling(obs_ims, run_config)
         cur_result.loc[:, run_config.ims] = obs_ims
 
-        # Add predicted
-        if run_config.pred_std:
-            # Get the predicted mean and standard deviation
-            torch_pred_ln_im_mean, torch_pred_ln_im_ln_std = cur_out
-            pred_ln_im_std = torch.exp(torch_pred_ln_im_ln_std).cpu().numpy(force=True)
-            pred_ln_im_mean = torch_pred_ln_im_mean.cpu().numpy(force=True)
+        ## Add predicted
+        # Get the predicted mean and standard deviation
+        torch_pred_ln_im_mean, torch_pred_ln_im_ln_std = cur_out
+        pred_ln_im_std = torch.exp(torch_pred_ln_im_ln_std).cpu().numpy(force=True)
+        pred_ln_im_mean = torch_pred_ln_im_mean.cpu().numpy(force=True)
 
-            # Revert the scaling
-            if run_config.scale_IMs:
-                pred_ln_im_mean, pred_ln_im_std = revert_im_scaling(
-                    pred_ln_im_mean, run_config, pred_ln_im_std
-                )
+        # Revert the scaling
+        if run_config.scale_IMs:
+            pred_ln_im_mean, pred_ln_im_std = revert_im_scaling(
+                pred_ln_im_mean, run_config, pred_ln_im_std
+            )
 
-            # Save
-            cur_result.loc[:, pred_im_keys] = pred_ln_im_mean
-            cur_result.loc[:, pred_im_std_keys] = pred_ln_im_std
-        else:
-            # Get the mean prediction
-            torch_pred_ln_im_mean, torch_pred_ln_im_ln_std = cur_out, None
-            pred_ln_im_mean = torch_pred_ln_im_mean.cpu().numpy(force=True)
-
-            # Revert the scaling
-            if run_config.scale_IMs:
-                pred_ln_im_mean, _ = revert_im_scaling(pred_ln_im_mean, run_config)
-
-            # Save
-            cur_result.loc[:, pred_im_keys] = pred_ln_im_mean.cpu().numpy(force=True)
+        # Save
+        cur_result.loc[:, pred_im_keys] = pred_ln_im_mean
+        cur_result.loc[:, pred_im_std_keys] = pred_ln_im_std
 
         # Loss
         cur_loss = compute_loss(
@@ -984,10 +999,12 @@ def get_predictions(
         # Number of observation sites
         cur_result.loc[:, "n_obs_sites"] = cur_result["obs_sites"].apply(len)
 
+        attn_coeffs.append(cur_attn_coeffs_df)
         results.append(cur_result)
 
+    attn_coeffs_df = pd.concat(attn_coeffs, axis=0)
     results = pd.concat(results, axis=0)
-    return results
+    return results, attn_coeffs_df
 
 
 def get_residuals(

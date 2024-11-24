@@ -41,6 +41,7 @@ def compute_site_combinations(
     site_int: np.ndarray,
     max_dist: float,
     max_n_obs_sites: int,
+    min_n_obs_sites: int,
 ):
     """
     Compute the site combinations for each event
@@ -63,6 +64,8 @@ def compute_site_combinations(
         and nearest observation site
     max_n_obs_sites: int
         Maximum number of observation sites to use
+    min_n_obs_sites: int
+        Minimum number of observation sites required
     """
     site_combs, used_sites = {}, {}
     for cur_event in events:
@@ -87,13 +90,8 @@ def compute_site_combinations(
             continue
 
         cur_dist_matrix = dist_matrix.loc[cur_sites, cur_sites]
-        # cur_dist_mask = (cur_dist_matrix.values < max_dist) & (
-        #     cur_dist_matrix.values > 0
-        # )
-        # cur_row_ind, cur_col_ind = np.nonzero(cur_dist_mask)
 
-        # Need at least one site combination within the
-        # specified distance requirements
+        # No observation sites
         if cur_dist_matrix.shape[1] < 2:
             continue
 
@@ -121,10 +119,18 @@ def compute_site_combinations(
 
         # cur_site_combs = t
 
+        # TODO: Add filter for minimum number of observation sites
+
         # Filter based on allowed observation sites and sites of interest
         cur_mask = np.isin(cur_sites[cur_site_combs[:, 1]], cur_obs_sites) & np.isin(
             cur_sites[cur_site_combs[:, 0]], cur_int_sites
         )
+
+        # Filter for minimum number of observation sites
+        if min_n_obs_sites > 1:
+            cur_int_ind, cur_int_count = np.unique(cur_site_combs[:, 0], return_counts=True)
+            cur_valid_int_ind = cur_int_ind[cur_int_count >= min_n_obs_sites]
+            cur_mask &= np.isin(cur_site_combs[:, 0], cur_valid_int_ind)
 
         if np.count_nonzero(cur_mask) == 0:
             continue

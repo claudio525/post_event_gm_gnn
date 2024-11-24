@@ -1,6 +1,7 @@
 from typing import Any, Sequence, TYPE_CHECKING
 
 import einops
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,50 +29,51 @@ class CustomAttentionGNN(torch.nn.Module):
         n_int_node_features: int,
         n_edge_features: int,
         run_config: "gnn_gm.RunConfig",
-        site_obs_scalar_feature_ind: torch.Tensor,
     ):
         super().__init__()
         self.run_config = run_config
 
         self.convs = torch.nn.ModuleList()
-        self.bns = torch.nn.ModuleList()
         for ix, cur_n_channels in enumerate(run_config.n_int_node_channels):
             n_in_channels = (
                 n_int_node_features
                 if ix == 0
                 else run_config.n_int_node_channels[ix - 1]
             )
-            assert cur_n_channels % len(run_config.ims) == 0
 
             # Source node transform model
             source_transform_model = nn.Sequential(
                 nn.Linear(n_obs_node_features, cur_n_channels, bias=True),
             )
-            if run_config.embedding_act_fn is not None:
+            if run_config.source_embedding_act_fn is not None:
                 source_transform_model.add_module(
-                    "act_fn", mlt.torch.get_act_fn_layer(run_config.embedding_act_fn)
+                    "act_fn", mlt.torch.get_act_fn_layer(run_config.source_embedding_act_fn)
                 )
 
             # Target node transform model
             target_transform_model = nn.Sequential(
                 nn.Linear(n_in_channels, cur_n_channels, bias=True),
             )
-            if run_config.embedding_act_fn is not None:
+            if run_config.target_embedding_act_fn is not None:
                 target_transform_model.add_module(
-                    "act_fn", mlt.torch.get_act_fn_layer(run_config.embedding_act_fn)
+                    "act_fn", mlt.torch.get_act_fn_layer(run_config.target_embedding_act_fn)
                 )
 
             # Attention model
-            att_model = nn.Sequential(
+            att_model = nn.Sequential()
+            for ix, n_units in enumerate(run_config.att_n_units):
                 nn.Linear(
-                    n_obs_scalar_node_features + n_edge_features + n_in_channels,
-                    run_config.n_ims,
+                    n_edge_features if ix == 0 else run_config.att_n_units[ix - 1],
+                    n_units,
                 ),
-            )
-            if run_config.att_act_fn is not None:
-                att_model.add_module(
-                    "act_fn", mlt.torch.get_act_fn_layer(run_config.att_act_fn)
-                )
+                if run_config.att_act_fn is not None:
+                    att_model.add_module(
+                        "act_fn", mlt.torch.get_act_fn_layer(run_config.att_act_fn)
+                    )
+            nn.Linear(
+                run_config.att_n_units[-1],
+                1,
+            ),
 
             self.convs.append(
                 gnn.HeteroConv(
@@ -80,44 +82,64 @@ class CustomAttentionGNN(torch.nn.Module):
                             source_transform_model=source_transform_model,
                             target_transform_model=target_transform_model,
                             att_model=att_model,
-                            # source_transform_model=nn.Sequential(
-                            #     nn.Linear(
-                            #             n_obs_node_features, cur_n_channels, bias=True
-                            #         ),
-                            #     # nn.ELU(),
-                            #     nn.Tanh(),
-                            # ),
-                            # target_transform_model=nn.Sequential(
-                            #     nn.Linear(
-                            #             n_in_channels, cur_n_channels, bias=True
-                            #         ),
-                            #     # nn.ELU(),
-                            #     nn.Tanh(),
-                            # ),
-                            # att_model=nn.Sequential(
-                            #     nn.Linear(
-                            #         n_obs_scalar_node_features
-                            #         + n_edge_features
-                            #         + n_in_channels,
-                            #         run_config.n_ims,
-                            #     ),
-                            #     # nn.ELU(),
-                            #     nn.Tanh(),
-                            # ),
-                            source_scalar_feature_ind=site_obs_scalar_feature_ind,
                             node_embedding_size=cur_n_channels,
-                            pred_std=run_config.pred_std,
-                            use_sigmoid=True,
                         )
                     },
                     aggr="sum",
                 )
             )
 
-            self.bns.append(nn.BatchNorm1d(cur_n_channels))
+        # self.fc1 = nn.Linear(run_config.n_int_node_channels[-1], run_config.fc_n_units)
+        # self.out_fc = nn.Linear(run_config.fc_n_units, run_config.n_outputs)
 
-        self.fc1 = nn.Linear(run_config.n_int_node_channels[-1], run_config.fc_n_units)
-        self.out_fc = nn.Linear(run_config.fc_n_units, run_config.n_outputs)
+        self.out_fc = nn.Linear(
+            run_config.n_int_node_channels[-1], run_config.n_outputs
+        )
+
+    def get_attention_coeff(self, data: gdata.HeteroData):
+        """
+        Gets the attention coefficient per layer
+
+        Note: Not part of the prediction or training process,
+        only for extraction of attention coefficients!
+        """
+        rel_data = data[("site_obs", "informs", "site_int")]
+        dest_ind = rel_data["edge_index"][1].numpy(force=True)
+        sc_id = data["metadata"]["sc_id"]
+
+        attn_coeffs = {sc_id[dest_ix]: [] for dest_ix in np.unique(dest_ind)}
+        obs_sites = {
+            sc_id[dest_ix]: data["metadata"]["obs_sites"][dest_ix]
+            for dest_ix in np.unique(dest_ind)
+        }
+        for ix, cur_conv in enumerate(self.convs):
+            cur_attn_coeffs = (
+                cur_conv.convs[("site_obs", "informs", "site_int")]
+                .compute_attn_coeffs(rel_data["edge_attr"])
+                .numpy(force=True)
+            )
+
+            for dest_ix in np.unique(dest_ind):
+                attn_coeffs[sc_id[dest_ix]].append(cur_attn_coeffs[dest_ind == dest_ix])
+
+        result = []
+        for ix, (key, value) in enumerate(attn_coeffs.items()):
+            cur_df = pd.DataFrame(
+                index=mlt.array_utils.numpy_str_join("_", key, obs_sites[key]),
+                data=np.concatenate(value, axis=1),
+                columns=[f"conv_{i}" for i in range(len(value))],
+            )
+            cur_df["event"] = data["metadata"]["event"][ix]
+            cur_df["obs_site"] = obs_sites[key]
+            cur_df["site_int"] = data["metadata"]["site_int"][ix]
+
+            result.append(cur_df)
+
+        # result = {
+        #     key: pd.DataFrame(index=mlt.array_utils.numpy_str_join("_", key, obs_sites[key]), data=np.concatenate(value, axis=1))
+        #     for key, value in attn_coeffs.items()
+        # }
+        return pd.concat(result, axis=0)
 
     def forward(self, data: gdata.HeteroData):
         for ix, cur_conv in enumerate(self.convs):
@@ -130,30 +152,27 @@ class CustomAttentionGNN(torch.nn.Module):
                 data.edge_index_dict,
                 edge_attr_dict=data.edge_attr_dict,
             )
-            # Save results
-            # x_dict = {key: F.tanh(self.bns[ix](x)) for key, x in x_dict.items()}
 
+            # Save results
             x_dict = {
-                key: F.dropout(mlt.torch.get_act_fn(self.run_config.gcn_act_fn)(x), p=0.5, training=self.training)
-                # key: mlt.torch.get_act_fn(self.run_config.gcn_act_fn)(x)
+                # key: F.dropout(mlt.torch.get_act_fn(self.run_config.gcn_act_fn)(x), p=0.5, training=self.training)
+                key: mlt.torch.get_act_fn(self.run_config.gcn_act_fn)(x)
                 for key, x in x_dict.items()
             }
 
         x_site_int = x_dict["site_int"]
 
-        x = mlt.torch.get_act_fn(self.run_config.fcc_act_fn)(self.fc1(x_site_int))
-        out = self.out_fc(x)
+        # x = mlt.torch.get_act_fn(self.run_config.fcc_act_fn)(self.fc1(x_site_int))
+        # out = self.out_fc(x)
 
-        if self.run_config.pred_std:
-            ln_im_mean, ln_im_std = out.chunk(2, dim=1)
+        out = self.out_fc(x_site_int)
+        ln_im_mean, ln_im_std = out.chunk(2, dim=1)
 
-            # Clip predicted values to prevent numerical issues
-            ln_im_std = torch.clamp(ln_im_std, min=-20, max=5)
-            ln_im_mean = torch.clamp(ln_im_mean, min=-20, max=5)
+        # Clip predicted values to prevent numerical issues
+        # ln_im_std = torch.clamp(ln_im_std, min=-20, max=5)
+        # ln_im_mean = torch.clamp(ln_im_mean, min=-20, max=5)
 
-            return ln_im_mean, ln_im_std
-
-        return out
+        return ln_im_mean, ln_im_std
 
 
 class CustomAttentionConv(MessagePassing):
@@ -163,10 +182,7 @@ class CustomAttentionConv(MessagePassing):
         source_transform_model: nn.Module,
         target_transform_model: nn.Module,
         att_model: nn.Module,
-        source_scalar_feature_ind: torch.Tensor,
         node_embedding_size: int,
-        pred_std: bool = True,
-        use_sigmoid: bool = False,
         **kwargs,
     ):
         """
@@ -178,23 +194,15 @@ class CustomAttentionConv(MessagePassing):
             Transformation model for the target nodes
         att_model: torch.nn.Module
             Self-attention model
-        use_sigmoid: bool, optional
-            If True, use sigmoid on the attention coefficients
-            instead of softmax. This removes normalisation across
-            the observation sites.
         kwargs
         """
         super().__init__(**kwargs)
-        self.pred_std = pred_std
 
         self.att_model = att_model
-        self.use_sigmoid = use_sigmoid
 
         self.source_transform_model = source_transform_model
         self.target_transform_model = target_transform_model
         self.node_embedding_size = node_embedding_size
-
-        self.source_scalar_feature_ind = source_scalar_feature_ind
 
         self.aggr = "add"
 
@@ -205,7 +213,6 @@ class CustomAttentionConv(MessagePassing):
         ginits.reset(self.att_model)
         ginits.reset(self.source_transform_model)
         ginits.reset(self.target_transform_model)
-        # ginits.zeros(self.bias)
 
     def forward(
         self,
@@ -221,21 +228,14 @@ class CustomAttentionConv(MessagePassing):
         )
 
         # Update the nodes
-        out = m_s + self.target_transform_model(x[1])  # + self.bias
+        out = m_s + self.target_transform_model(x[1])
         return out
 
-    def compute_attn_weights(self, x_j: torch.Tensor, x_i: torch.Tensor, edge_attr: torch.Tensor, dest_ind: torch.Tensor) -> torch.Tensor:
+    def compute_attn_coeffs(self, edge_attr: torch.Tensor) -> torch.Tensor:
         """Compute the attention coefficients"""
-        a = self.att_model(
-            torch.cat((x_j[:, self.source_scalar_feature_ind], edge_attr, x_i), dim=1)
-        )
+        a = self.att_model(edge_attr)
 
-        if self.use_sigmoid:
-            alpha = torch.sigmoid(a)
-        else:
-            # Normalise
-            alpha = gutils.softmax(a, dest_ind)
-
+        alpha = torch.sigmoid(a)
         return alpha
 
     def message(
@@ -248,29 +248,9 @@ class CustomAttentionConv(MessagePassing):
         source_ind, dest_ind = edge_index
 
         # Compute the attention coefficients
-        a = self.att_model(
-            torch.cat((x_j[:, self.source_scalar_feature_ind], edge_attr, x_i), dim=1)
-        )
+        alpha = self.compute_attn_coeffs(edge_attr)
 
-        if self.use_sigmoid:
-            alpha = torch.sigmoid(a)
-        else:
-            # Normalise
-            alpha = gutils.softmax(a, dest_ind)
-
-        t = self.compute_attn_weights(x_j, x_i, edge_attr, dest_ind)
-
-        source_messages = self.source_transform_model(x_j)
-        if alpha.shape[1] < source_messages.shape[1]:
-            m = (
-                alpha.repeat_interleave(
-                    source_messages.shape[1] // alpha.shape[1], dim=1
-                )
-                * source_messages
-            )
-        else:
-            m = alpha * self.source_transform_model(x_j)
-
+        m = alpha * self.source_transform_model(x_j)
         return m
 
 
@@ -323,8 +303,10 @@ class BasicGNN(torch.nn.Module):
 
         x_site_int = x_dict["site_int"]
 
-        x = F.relu(self.fc1(x_site_int))
-        out = self.out_fc(x)
+        # x = F.relu(self.fc1(x_site_int))
+        # out = self.out_fc(x)
+
+        out = self.out_fc(x_site_int)
 
         return out
 

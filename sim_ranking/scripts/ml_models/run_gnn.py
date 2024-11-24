@@ -186,6 +186,7 @@ def run_cv(
                     out_dir,
                     cv_iter,
                     True,
+                    graph_data_n_procs=mp.cpu_count(),
                 )
             )
     else:
@@ -220,14 +221,23 @@ def run_cv(
     run_config.to_yaml(out_dir / "run_config.yaml")
 
     val_results, metrics = [], {}
+    val_attn_coeffs = []
     for cur_out_dir in out_dirs:
         cur_val_result = pd.read_parquet(cur_out_dir / "val_results.parquet")
         cur_val_result["cv_iter"] = cur_out_dir.stem
         val_results.append(cur_val_result)
+
+        cur_val_attn_coeffs = pd.read_parquet(cur_out_dir / "val_attn_coeffs.parquet")
+        cur_val_attn_coeffs["cv_iter"] = cur_out_dir.stem
+        val_attn_coeffs.append(cur_val_attn_coeffs)
+
         metrics[cur_out_dir.stem] = pd.read_pickle(cur_out_dir / "metrics.pickle")
 
     val_results = pd.concat(val_results, axis=0)
     val_results.to_parquet(out_dir / "val_results.parquet")
+
+    val_attn_coeffs = pd.concat(val_attn_coeffs, axis=0)
+    val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
 
     pd.to_pickle(metrics, out_dir / "metrics.pickle")
 
@@ -241,14 +251,14 @@ def run_cv(
         wdata=run_config.wdata,
     )
 
-    ind_notebook = Path(__file__).parent / "report_notebooks/ind_scenarios.ipynb"
-    mlt.quarto.render_quarto(
-        "mamba activate sim-ranking-pip",
-        ind_notebook,
-        out_dir / "ind_scenarios.html",
-        gnn_results_dir=out_dir,
-        wdata=run_config.wdata,
-    )
+    # ind_notebook = Path(__file__).parent / "report_notebooks/ind_scenarios.ipynb"
+    # mlt.quarto.render_quarto(
+    #     "mamba activate sim-ranking-pip",
+    #     ind_notebook,
+    #     out_dir / "ind_scenarios.html",
+    #     gnn_results_dir=out_dir,
+    #     wdata=run_config.wdata,
+    # )
 
 
 def _run_mp_helper(
@@ -266,6 +276,7 @@ def _run_mp_helper(
     out_dir: Path,
     cv_iter: int,
     verbose: bool,
+    graph_data_n_procs: int = 1,
 ):
     cur_val_events = event_folds[val_fold_ind[0]]
     cur_val_int_sites = site_folds[val_fold_ind[1]]
@@ -290,7 +301,7 @@ def _run_mp_helper(
         obs_data,
         scalar_features,
         run_config,
-        graph_data_n_procs=1,
+        graph_data_n_procs=graph_data_n_procs,
         verbose=verbose,
     )
 
