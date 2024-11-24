@@ -64,9 +64,9 @@ class RunConfig:
     fcc_act_fn: str | None
     """Activation function for the FC output model"""
 
-    target_embedding_act_fn: str | None
+    int_embedding_act_fn: str | None
     """Activation function for the target embedding update models"""
-    source_embedding_act_fn: str | None
+    obs_embedding_act_fn: str | None
     """Activation function for the source embedding update models"""
     n_int_node_channels: Sequence[int]
     """Number of site of interest node channels"""
@@ -164,8 +164,8 @@ class RunConfig:
             "batch_size": self.batch_size,
             "n_int_node_channels": list(self.n_int_node_channels),
             "fc_n_units": self.fc_n_units,
-            "target_embedding_act_fn": self.target_embedding_act_fn,
-            "source_embedding_act_fn": self.source_embedding_act_fn,
+            "int_embedding_act_fn": self.int_embedding_act_fn,
+            "obs_embedding_act_fn": self.obs_embedding_act_fn,
             "att_act_fn": self.att_act_fn,
             "gcn_act_fn": self.gcn_act_fn,
             "fcc_act_fn": self.fcc_act_fn,
@@ -528,6 +528,10 @@ def _get_event_graph_data(
         cur_sc_data["site_obs", "informs", "site_int"].edge_attr = torch.tensor(
             cur_edge_features, dtype=torch.float32
         )
+
+        cur_sc_data["site_obs", "self_loop", "site_obs"].edge_index = torch.tensor(
+            [[ix, ix] for ix in range(len(cur_obs_sites))], dtype=torch.long
+        ).T
 
         cur_sc_data["metadata"] = {
             "sc_id": f"{event}_{cur_site_int}",

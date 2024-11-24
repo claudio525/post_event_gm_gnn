@@ -35,28 +35,32 @@ class CustomAttentionGNN(torch.nn.Module):
 
         self.convs = torch.nn.ModuleList()
         for ix, cur_n_channels in enumerate(run_config.n_int_node_channels):
-            n_in_channels = (
+            # Source node transform model
+            n_obs_in_channels = (
+                n_obs_node_features
+                if ix == 0
+                else run_config.n_int_node_channels[ix - 1]
+            )
+            obs_transform_model = nn.Sequential(
+                nn.Linear(n_obs_in_channels, cur_n_channels, bias=True),
+            )
+            if run_config.obs_embedding_act_fn is not None:
+                obs_transform_model.append(
+                    mlt.torch.get_act_fn_layer(run_config.obs_embedding_act_fn)
+                )
+
+            # Target node transform model
+            n_int_in_channels = (
                 n_int_node_features
                 if ix == 0
                 else run_config.n_int_node_channels[ix - 1]
             )
-
-            # Source node transform model
-            source_transform_model = nn.Sequential(
-                nn.Linear(n_obs_node_features, cur_n_channels, bias=True),
+            int_transform_model = nn.Sequential(
+                nn.Linear(n_int_in_channels, cur_n_channels, bias=True),
             )
-            if run_config.source_embedding_act_fn is not None:
-                source_transform_model.append(
-                    mlt.torch.get_act_fn_layer(run_config.source_embedding_act_fn)
-                )
-
-            # Target node transform model
-            target_transform_model = nn.Sequential(
-                nn.Linear(n_in_channels, cur_n_channels, bias=True),
-            )
-            if run_config.target_embedding_act_fn is not None:
-                target_transform_model.append(
-                    mlt.torch.get_act_fn_layer(run_config.target_embedding_act_fn)
+            if run_config.int_embedding_act_fn is not None:
+                int_transform_model.append(
+                    mlt.torch.get_act_fn_layer(run_config.int_embedding_act_fn)
                 )
 
             # Attention model
@@ -80,11 +84,13 @@ class CustomAttentionGNN(torch.nn.Module):
             self.convs.append(
                 gnn.HeteroConv(
                     {
-                        ("site_obs", "informs", "site_int"): CustomAttentionConv(
-                            source_transform_model=source_transform_model,
-                            target_transform_model=target_transform_model,
+                        ("site_obs", "self_loop", "site_obs"): ObsNodeConv(
+                            obs_transform_model=obs_transform_model,
+                        ),
+                        ("site_obs", "informs", "site_int"): IntNodeConv(
+                            obs_transform_model=obs_transform_model,
+                            int_transform_model=int_transform_model,
                             att_model=att_model,
-                            node_embedding_size=cur_n_channels,
                         )
                     },
                     aggr="sum",
@@ -177,44 +183,57 @@ class CustomAttentionGNN(torch.nn.Module):
         return ln_im_mean, ln_im_std
 
 
-class CustomAttentionConv(MessagePassing):
+class ObsNodeConv(MessagePassing):
+
+    def __init__(self, obs_transform_model: nn.Module, **kwargs):
+        super().__init__(aggr="add", **kwargs)
+
+        self.obs_transform_model = obs_transform_model
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+    ) -> torch.Tensor:
+        out = self.obs_transform_model(x)
+        return out
+
+
+class IntNodeConv(MessagePassing):
 
     def __init__(
         self,
-        source_transform_model: nn.Module,
-        target_transform_model: nn.Module,
+        obs_transform_model: nn.Module,
+        int_transform_model: nn.Module,
         att_model: nn.Module,
-        node_embedding_size: int,
         **kwargs,
     ):
         """
         Parameters
         ----------
-        source_transform_model: torch.nn.Module
+        obs_transform_model: torch.nn.Module
             Transformation model for the source nodes
-        target_transform_model: torch.nn.Module
+        int_transform_model: torch.nn.Module
             Transformation model for the target nodes
         att_model: torch.nn.Module
             Self-attention model
         kwargs
         """
-        super().__init__(**kwargs)
+        super().__init__(aggr="add", **kwargs)
 
         self.att_model = att_model
 
-        self.source_transform_model = source_transform_model
-        self.target_transform_model = target_transform_model
-        self.node_embedding_size = node_embedding_size
+        self.obs_transform_model = obs_transform_model
+        self.int_transform_model = int_transform_model
 
-        self.aggr = "add"
-
+        # self.aggr = "add"
         self.reset_parameters()
 
     def reset_parameters(self):
         super().reset_parameters()
         ginits.reset(self.att_model)
-        ginits.reset(self.source_transform_model)
-        ginits.reset(self.target_transform_model)
+        ginits.reset(self.obs_transform_model)
+        ginits.reset(self.int_transform_model)
 
     def forward(
         self,
@@ -230,7 +249,7 @@ class CustomAttentionConv(MessagePassing):
         )
 
         # Update the nodes
-        out = m_s + self.target_transform_model(x[1])
+        out = m_s + self.int_transform_model(x[1])
         return out
 
     def compute_attn_coeffs(self, edge_attr: torch.Tensor) -> torch.Tensor:
@@ -252,7 +271,7 @@ class CustomAttentionConv(MessagePassing):
         # Compute the attention coefficients
         alpha = self.compute_attn_coeffs(edge_attr)
 
-        m = alpha * self.source_transform_model(x_j)
+        m = alpha * self.obs_transform_model(x_j)
         return m
 
 
