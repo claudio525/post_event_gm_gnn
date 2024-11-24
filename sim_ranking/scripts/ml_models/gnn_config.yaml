@@ -46,7 +46,7 @@ source_embedding_act_fn: "tanh"
 n_int_node_channels: [32]
 gcn_act_fn: "elu"
 
-att_n_units: [4]
+att_n_units: [8, 8]
 att_act_fn: "elu"
 
 l2_reg: 0.0005

@@ -128,7 +128,7 @@ def compute_site_combinations(
 
         # Filter for minimum number of observation sites
         if min_n_obs_sites > 1:
-            cur_int_ind, cur_int_count = np.unique(cur_site_combs[:, 0], return_counts=True)
+            cur_int_ind, cur_int_count = np.unique(cur_site_combs[cur_mask, 0], return_counts=True)
             cur_valid_int_ind = cur_int_ind[cur_int_count >= min_n_obs_sites]
             cur_mask &= np.isin(cur_site_combs[:, 0], cur_valid_int_ind)
 

@@ -711,10 +711,6 @@ def train(
             cur_bresult.loss.backward()
             optimizer.step()
 
-            for name, param in gnn_model.named_parameters():
-                if param.grad is None:
-                    print(f"No gradient for {name}")
-
             metrics = _save_metrics(
                 cur_bresult, metrics, run_config, cur_epoch_ix, "train"
             )

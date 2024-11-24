@@ -46,8 +46,8 @@ class CustomAttentionGNN(torch.nn.Module):
                 nn.Linear(n_obs_node_features, cur_n_channels, bias=True),
             )
             if run_config.source_embedding_act_fn is not None:
-                source_transform_model.add_module(
-                    "act_fn", mlt.torch.get_act_fn_layer(run_config.source_embedding_act_fn)
+                source_transform_model.append(
+                    mlt.torch.get_act_fn_layer(run_config.source_embedding_act_fn)
                 )
 
             # Target node transform model
@@ -55,24 +55,26 @@ class CustomAttentionGNN(torch.nn.Module):
                 nn.Linear(n_in_channels, cur_n_channels, bias=True),
             )
             if run_config.target_embedding_act_fn is not None:
-                target_transform_model.add_module(
-                    "act_fn", mlt.torch.get_act_fn_layer(run_config.target_embedding_act_fn)
+                target_transform_model.append(
+                    mlt.torch.get_act_fn_layer(run_config.target_embedding_act_fn)
                 )
 
             # Attention model
             att_model = nn.Sequential()
             for ix, n_units in enumerate(run_config.att_n_units):
-                nn.Linear(
-                    n_edge_features if ix == 0 else run_config.att_n_units[ix - 1],
-                    n_units,
+                att_model.append(
+                    nn.Linear(
+                        n_edge_features if ix == 0 else run_config.att_n_units[ix - 1],
+                        n_units,
+                    )
                 ),
                 if run_config.att_act_fn is not None:
-                    att_model.add_module(
-                        "act_fn", mlt.torch.get_act_fn_layer(run_config.att_act_fn)
-                    )
-            nn.Linear(
-                run_config.att_n_units[-1],
-                1,
+                    att_model.append(mlt.torch.get_act_fn_layer(run_config.att_act_fn))
+            att_model.append(
+                nn.Linear(
+                    run_config.att_n_units[-1],
+                    1,
+                )
             ),
 
             self.convs.append(
