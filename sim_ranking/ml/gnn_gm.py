@@ -22,6 +22,7 @@ import ml_tools as mlt
 
 from . import data as ml_data
 from . import gnn_modules
+from .. import utils
 from .. import constants
 from ..data_classes import ObservedData
 
@@ -37,6 +38,8 @@ class RunConfig:
     rel_obs_data_ffp: Path
     max_dist: float
     """Maximum distance between site-interest and observation sites"""
+    closest_max_dist: float
+    """Maximum distance between the site of interest and the closest observation site"""
     max_n_obs_sites: int
     """Maximum number of observation sites to consider"""
     min_n_obs_sites: int
@@ -154,6 +157,7 @@ class RunConfig:
             "seed": self.seed,
             "rel_obs_data_ffp": self.rel_obs_data_ffp,
             "max_dist": self.max_dist,
+            "closest_max_dist": self.closest_max_dist,
             "max_n_obs_sites": self.max_n_obs_sites,
             "min_n_obs_sites": self.min_n_obs_sites,
             "ignore_events": list(self.ignore_events),
@@ -309,6 +313,7 @@ def run_model_training(
         obs_sites,
         train_int_sites,
         run_config.max_dist,
+        run_config.closest_max_dist,
         run_config.max_n_obs_sites,
         run_config.min_n_obs_sites,
     )
@@ -320,6 +325,7 @@ def run_model_training(
         obs_sites,
         val_int_sites,
         run_config.max_dist,
+        run_config.closest_max_dist,
         run_config.max_n_obs_sites,
         run_config.min_n_obs_sites,
     )
@@ -428,14 +434,19 @@ def run_model_training(
     torch.save(gnn_model, out_dir / "model.pt")
 
     # Save the results
+    dist_matrix = utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
     train_results_df, train_attn_coeffs_df = get_predictions(
-        run_config, gnn_model, train_graph_data, verbose=verbose
+        run_config,
+        gnn_model,
+        train_graph_data,
+        dist_matrix=dist_matrix,
+        verbose=verbose,
     )
     train_results_df.to_parquet(out_dir / "train_results.parquet")
     train_attn_coeffs_df.to_parquet(out_dir / "train_attn_coeffs.parquet")
 
     val_results_df, val_attn_coeffs = get_predictions(
-        run_config, gnn_model, val_graph_data, verbose=verbose
+        run_config, gnn_model, val_graph_data, dist_matrix=dist_matrix, verbose=verbose
     )
     val_results_df.to_parquet(out_dir / "val_results.parquet")
     val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
@@ -908,9 +919,9 @@ def revert_im_scaling(
 
 def get_predictions(
     run_config: RunConfig,
-    # gnn_model: torch.nn.Module,
     gnn_model: gnn_modules.CustomAttentionGNN,
     graph_data: Sequence[gdata.HeteroData],
+    dist_matrix: pd.DataFrame = None,
     verbose: bool = True,
 ):
     """
@@ -921,6 +932,9 @@ def get_predictions(
     run_config: RunConfig
     gnn_model: torch.nn.Module
     graph_data: Sequence[gdata.HeteroData]
+    dist_matrix: pd.DataFrame, optional
+        Distance matrix, by default None
+        Allows for computation of the closest observation site
     verbose: bool, optional
         Whether to print progress information, by default True
 
@@ -998,6 +1012,9 @@ def get_predictions(
 
         # Number of observation sites
         cur_result.loc[:, "n_obs_sites"] = cur_result["obs_sites"].apply(len)
+
+        # Closest observation site distance
+        cur_result.loc[:, "closest_dist"] = [dist_matrix.loc[cur_row.site_int, cur_row.obs_sites].min() for cur_key, cur_row in cur_result.iterrows()]
 
         attn_coeffs.append(cur_attn_coeffs_df)
         results.append(cur_result)

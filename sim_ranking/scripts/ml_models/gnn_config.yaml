@@ -6,9 +6,10 @@ seed: 42
 # Input data settings
 #rel_obs_data_ffp: gm_datasets/nz_gmdb/v3.4/Tables/ground_motion_im_table_rotd50_flat.csv
 rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.0/Tables/ground_motion_im_table_rotd50_flat.csv
-max_dist: 20
+max_dist: 30
+closest_max_dist: 10
 max_n_obs_sites: 10
-min_n_obs_sites: 3
+min_n_obs_sites: 2
 
 ignore_events: ["3468575"]
 
