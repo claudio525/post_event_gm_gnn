@@ -44,10 +44,10 @@ fcc_act_fn: null
 
 int_embedding_act_fn: null
 obs_embedding_act_fn: "tanh"
-n_int_node_channels: [64, 64]
+n_int_node_channels: [32, 32]
 gcn_act_fn: "elu"
 
-att_n_units: [8]
+att_n_units: [4, 4]
 att_act_fn: "elu"
 
 l2_reg: 0.001
