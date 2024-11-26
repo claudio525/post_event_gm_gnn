@@ -68,11 +68,16 @@ class RunConfig:
     """Activation function for the FC output model"""
 
     int_embedding_act_fn: str | None
-    """Activation function for the target embedding update models"""
+    """Activation function for the SoI embedding update/transform models"""
     obs_embedding_act_fn: str | None
-    """Activation function for the source embedding update models"""
+    """Activation function for the observation embedding update models"""
+    n_obs_node_channels: Sequence[int]
+    """Number of observation site node channels"""
     n_int_node_channels: Sequence[int]
-    """Number of site of interest node channels"""
+    """Number of site of interest node channels per attention coefficient. 
+    Total number of channels = n_int_node_channels * n_attention_heads"""
+    n_att_heads: Sequence[int]
+    """Number of attention heads to use"""
     gcn_act_fn: str | None
     """Activation function following a graph convolution"""
 
@@ -166,7 +171,9 @@ class RunConfig:
             "scale_IMs": self.scale_IMs,
             "n_epochs": self.n_epochs,
             "batch_size": self.batch_size,
+            "n_obs_node_channels": list(self.n_obs_node_channels),
             "n_int_node_channels": list(self.n_int_node_channels),
+            "n_att_heads": self.n_att_heads,
             "fc_n_units": self.fc_n_units,
             "int_embedding_act_fn": self.int_embedding_act_fn,
             "obs_embedding_act_fn": self.obs_embedding_act_fn,
@@ -387,13 +394,13 @@ def run_model_training(
 
     gnn_model = gnn_modules.CustomAttentionGNN(
         # len(run_config.graph_feature_keys["site_obs"]) + len(run_config.ims),
-        run_config.site_obs_n_features,
+        # run_config.site_obs_n_features,
         # len(run_config.graph_feature_keys["site_obs"]),
-        run_config.site_obs_n_scalar_features,
+        # run_config.site_obs_n_scalar_features,
         # len(run_config.graph_feature_keys["site_int"]),
-        run_config.site_int_n_features,
+        # run_config.site_int_n_features,
         # len(run_config.graph_feature_keys["edge"]),
-        run_config.n_edge_features,
+        # run_config.n_edge_features,
         run_config,
     )
     gnn_model.to(run_config.device)

@@ -20,78 +20,138 @@ if TYPE_CHECKING:
     from . import gnn_gm
 
 
+def _create_single_mlp(
+    n_inputs: int, n_outputs: int, act_fn_str: str | None, bias: bool = True
+) -> nn.Sequential:
+    mlp = nn.Sequential(
+        nn.Linear(n_inputs, n_outputs, bias=bias),
+    )
+    if act_fn_str is not None:
+        mlp.append(mlt.torch.get_act_fn_layer(act_fn_str))
+
+    return mlp
+
+
+def _create_multi_mlp(
+    n_inputs: int,
+    n_units: Sequence[int],
+    n_outputs: int,
+    act_fn_str: str | None,
+    bias: bool = True,
+) -> nn.Sequential:
+    mlp = nn.Sequential()
+    for ix, cur_n_units in enumerate(n_units):
+        mlp.append(
+            nn.Linear(
+                n_inputs if ix == 0 else n_units[ix - 1],
+                cur_n_units,
+                bias=bias,
+            )
+        ),
+        if act_fn_str is not None:
+            mlp.append(mlt.torch.get_act_fn_layer(act_fn_str))
+    mlp.append(
+        nn.Linear(
+            n_units[-1],
+            n_outputs,
+            bias=bias,
+        )
+    )
+
+    return mlp
+
+
 class CustomAttentionGNN(torch.nn.Module):
 
     def __init__(
         self,
-        n_obs_node_features: int,
-        n_obs_scalar_node_features: int,
-        n_int_node_features: int,
-        n_edge_features: int,
+        # n_obs_node_features: int,
+        # n_int_node_features: int,
+        # n_edge_features: int,
         run_config: "gnn_gm.RunConfig",
     ):
         super().__init__()
         self.run_config = run_config
 
-        self.convs = torch.nn.ModuleList()
-        for ix, cur_n_channels in enumerate(run_config.n_int_node_channels):
-            # Source node transform model
-            n_obs_in_channels = (
-                n_obs_node_features
-                if ix == 0
-                else run_config.n_int_node_channels[ix - 1]
-            )
-            obs_transform_model = nn.Sequential(
-                nn.Linear(n_obs_in_channels, cur_n_channels, bias=True),
-            )
-            if run_config.obs_embedding_act_fn is not None:
-                obs_transform_model.append(
-                    mlt.torch.get_act_fn_layer(run_config.obs_embedding_act_fn)
-                )
+        # Sanity check
+        assert len(run_config.n_int_node_channels) == len(
+            run_config.n_obs_node_channels
+        ) and len(run_config.n_int_node_channels) == len(run_config.n_att_heads)
+        self.n_convs = len(self.run_config.n_int_node_channels)
 
-            # Target node transform model
-            n_int_in_channels = (
-                n_int_node_features
+        self.convs = torch.nn.ModuleList()
+        for ix, (cur_n_att_heads, cur_int_n_channels, cur_obs_n_channels) in enumerate(
+            zip(
+                run_config.n_att_heads,
+                run_config.n_int_node_channels,
+                run_config.n_obs_node_channels,
+            )
+        ):
+            ## Observation node update model
+            # This model updates the observation nodes via a self loop
+            n_obs_update_in_channels = (
+                run_config.site_obs_n_features
                 if ix == 0
-                else run_config.n_int_node_channels[ix - 1]
+                else run_config.n_obs_node_channels[ix - 1]
             )
-            int_transform_model = nn.Sequential(
-                nn.Linear(n_int_in_channels, cur_n_channels, bias=True),
+            obs_update_model = _create_single_mlp(
+                n_obs_update_in_channels,
+                cur_obs_n_channels,
+                # Use tanh for first layer to handle large nan replacement values
+                "tanh" if ix == 0 else run_config.obs_embedding_act_fn,
             )
-            if run_config.int_embedding_act_fn is not None:
-                int_transform_model.append(
-                    mlt.torch.get_act_fn_layer(run_config.int_embedding_act_fn)
-                )
+
+            ## Observation node transform model
+            # This model performs the transformation of the observation
+            # nodes used to update the SoI node
+            n_obs_transform_in_channels = (
+                run_config.site_obs_n_features
+                if ix == 0
+                else run_config.n_obs_node_channels[ix - 1]
+            )
+            obs_transform_models = nn.ModuleList(
+                [
+                    _create_single_mlp(
+                        n_obs_transform_in_channels,
+                        cur_int_n_channels,
+                        # Use tanh for first layer to handle large nan replacement values
+                        "tanh" if ix == 0 else run_config.int_embedding_act_fn,
+                    )
+                    for _ in range(cur_n_att_heads)
+                ]
+            )
+
+            # SoI node transform models
+            n_int_in_channels = (
+                run_config.site_int_n_features
+                if ix == 0
+                else run_config.n_int_node_channels[ix - 1] * run_config.n_att_heads[ix]
+            )
+            int_transform_model = _create_single_mlp(
+                        n_int_in_channels,
+                        cur_int_n_channels * run_config.n_att_heads[ix],
+                        run_config.int_embedding_act_fn,
+                    )
 
             # Attention model
-            att_model = nn.Sequential()
-            for ix, n_units in enumerate(run_config.att_n_units):
-                att_model.append(
-                    nn.Linear(
-                        n_edge_features if ix == 0 else run_config.att_n_units[ix - 1],
-                        n_units,
-                    )
-                ),
-                if run_config.att_act_fn is not None:
-                    att_model.append(mlt.torch.get_act_fn_layer(run_config.att_act_fn))
-            att_model.append(
-                nn.Linear(
-                    run_config.att_n_units[-1],
-                    1,
-                )
-            ),
+            att_model = _create_multi_mlp(
+                run_config.n_edge_features,
+                run_config.att_n_units,
+                cur_n_att_heads,
+                run_config.att_act_fn,
+            )
 
             self.convs.append(
                 gnn.HeteroConv(
                     {
                         ("site_obs", "self_loop", "site_obs"): ObsNodeConv(
-                            obs_transform_model=obs_transform_model,
+                            obs_update_model=obs_update_model,
                         ),
                         ("site_obs", "informs", "site_int"): IntNodeConv(
-                            obs_transform_model=obs_transform_model,
+                            obs_transform_models=obs_transform_models,
                             int_transform_model=int_transform_model,
                             att_model=att_model,
-                        )
+                        ),
                     },
                     aggr="sum",
                 )
@@ -101,7 +161,7 @@ class CustomAttentionGNN(torch.nn.Module):
         # self.out_fc = nn.Linear(run_config.fc_n_units, run_config.n_outputs)
 
         self.out_fc = nn.Linear(
-            run_config.n_int_node_channels[-1], run_config.n_outputs
+            run_config.n_int_node_channels[-1] * run_config.n_att_heads[-1], run_config.n_outputs
         )
 
     def get_attention_coeff(self, data: gdata.HeteroData):
@@ -134,8 +194,8 @@ class CustomAttentionGNN(torch.nn.Module):
         for ix, (key, value) in enumerate(attn_coeffs.items()):
             cur_df = pd.DataFrame(
                 index=mlt.array_utils.numpy_str_join("_", key, obs_sites[key]),
-                data=np.concatenate(value, axis=1),
-                columns=[f"conv_{i}" for i in range(len(value))],
+                data=einops.rearrange(np.stack(value, axis=2), "obs att conv -> obs (conv att)"),
+                columns=[f"conv_{i}_head_{j}" for i in range(self.n_convs) for j in range(self.run_config.n_att_heads[i])],
             )
             cur_df["event"] = data["metadata"]["event"][ix]
             cur_df["obs_site"] = obs_sites[key]
@@ -185,17 +245,17 @@ class CustomAttentionGNN(torch.nn.Module):
 
 class ObsNodeConv(MessagePassing):
 
-    def __init__(self, obs_transform_model: nn.Module, **kwargs):
+    def __init__(self, obs_update_model: nn.Module, **kwargs):
         super().__init__(aggr="add", **kwargs)
 
-        self.obs_transform_model = obs_transform_model
+        self.obs_update_model = obs_update_model
 
     def forward(
         self,
         x: torch.Tensor,
         edge_index: torch.Tensor,
     ) -> torch.Tensor:
-        out = self.obs_transform_model(x)
+        out = self.obs_update_model(x)
         return out
 
 
@@ -203,7 +263,10 @@ class IntNodeConv(MessagePassing):
 
     def __init__(
         self,
-        obs_transform_model: nn.Module,
+        # obs_transform_model: nn.Module,
+        # int_transform_model: nn.Module,
+        # att_model: nn.Module,
+        obs_transform_models: nn.ModuleList,
         int_transform_model: nn.Module,
         att_model: nn.Module,
         **kwargs,
@@ -223,8 +286,13 @@ class IntNodeConv(MessagePassing):
 
         self.att_model = att_model
 
-        self.obs_transform_model = obs_transform_model
+        self.obs_transform_models = obs_transform_models
         self.int_transform_model = int_transform_model
+
+        self.n_heads = len(self.obs_transform_models)
+
+        # self.obs_transform_model = obs_transform_model
+        # self.int_transform_model = int_transform_model
 
         # self.aggr = "add"
         self.reset_parameters()
@@ -232,7 +300,7 @@ class IntNodeConv(MessagePassing):
     def reset_parameters(self):
         super().reset_parameters()
         ginits.reset(self.att_model)
-        ginits.reset(self.obs_transform_model)
+        ginits.reset(self.obs_transform_models)
         ginits.reset(self.int_transform_model)
 
     def forward(
@@ -266,12 +334,20 @@ class IntNodeConv(MessagePassing):
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
     ) -> Tensor:
-        source_ind, dest_ind = edge_index
-
         # Compute the attention coefficients
         alpha = self.compute_attn_coeffs(edge_attr)
 
-        m = alpha * self.obs_transform_model(x_j)
+        # Compute the message
+        # 1) Compute the transformed source node
+        # 2) Multiply with the attention coefficient
+        # 3) Concatenate the results
+        m = torch.cat(
+            [
+                alpha[:, i][:, None] * self.obs_transform_models[i](x_j)
+                for i in range(self.n_heads)
+            ],
+            dim=1,
+        )
         return m
 
 
