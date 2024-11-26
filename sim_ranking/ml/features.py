@@ -35,7 +35,6 @@ def get_scalar_features(
     event_site_features_df = _pre_process_event_site_features(
         record_df.copy(), scalar_feature_keys["event_site"]
     )
-
     event_groups = event_site_features_df.groupby("event_id")
     event_site_features = {
         cur_event: cur_record_df.set_index("site_id")[scalar_feature_keys["event_site"]]
@@ -44,12 +43,12 @@ def get_scalar_features(
 
     ### Site-to-site features
     site_to_site_features = _compute_site_to_site_features(
-        dist_matrix, run_config.max_dist
+        site_df, dist_matrix, run_config.max_dist
     )
 
     ### Event site-to-site features
     event_site_to_site_features = _compute_event_site_to_site_features(
-        events, event_sites, event_df, site_df
+        events, event_sites, event_df, site_df, record_df, run_config.max_dist
     )
 
     scalar_features = ml_data.ScalarFeatures(
@@ -67,7 +66,7 @@ def get_scalar_features(
     return scalar_features
 
 
-def _compute_site_to_site_features(dist_matrix: pd.DataFrame, max_dist: float):
+def _compute_site_to_site_features(site_df: pd.DataFrame, dist_matrix: pd.DataFrame, max_dist: float):
     """Computes and pre-processes site-to-site features"""
     site_to_site_features = {}
 
@@ -76,6 +75,22 @@ def _compute_site_to_site_features(dist_matrix: pd.DataFrame, max_dist: float):
     # as per the maximum allowed site-to-site
     # distance when computing the site combinations
     site_to_site_features["dist"] = ((dist_matrix.copy() / max_dist) * 2) - 1
+
+    vs30_diff = pd.DataFrame(data=site_df.vs30.values[:, None] - site_df.vs30.values[None, :], index=site_df.index, columns=site_df.index)
+    vs30_diff_min, vs30_diff_max = constants.PRE_PROCESS_CONFIG["vs30_diff"]
+    site_to_site_features["vs30_diff"] = (2 * (vs30_diff - vs30_diff_min) / (vs30_diff_max - vs30_diff_min)) - 1
+
+    z1p0_diff = pd.DataFrame(data=site_df.z1p0.values[:, None] - site_df.z1p0.values[None, :], index=site_df.index, columns=site_df.index)
+    z1p0_diff_min, z1p0_diff_max = constants.PRE_PROCESS_CONFIG["z1p0_diff"]
+    site_to_site_features["z1p0_diff"] = (2 * (z1p0_diff - z1p0_diff_min) / (z1p0_diff_max - z1p0_diff_min)) - 1
+
+    z2p5_diff = pd.DataFrame(data=site_df.z2p5.values[:, None] - site_df.z2p5.values[None, :], index=site_df.index, columns=site_df.index)
+    z2p5_diff_min, z2p5_diff_max = constants.PRE_PROCESS_CONFIG["z2p5_diff"]
+    site_to_site_features["z2p5_diff"] = (2 * (z2p5_diff - z2p5_diff_min) / (z2p5_diff_max - z2p5_diff_min)) - 1
+
+    tsite_diff = pd.DataFrame(data=site_df.tsite.values[:, None] - site_df.tsite.values[None, :], index=site_df.index, columns=site_df.index)
+    tsite_diff_min, tsite_diff_max = constants.PRE_PROCESS_CONFIG["tsite_diff"]
+    site_to_site_features["tsite_diff"] = (2 * (tsite_diff - tsite_diff_min) / (tsite_diff_max - tsite_diff_min)) - 1
 
     return site_to_site_features
 
@@ -107,6 +122,8 @@ def _compute_event_site_to_site_features(
     event_sites: dict[str, np.ndarray],
     event_df: pd.DataFrame,
     site_df: pd.DataFrame,
+    record_df: pd.DataFrame,
+    max_dist: float,
 ):
     """
     Computes event site-to-site features
@@ -118,6 +135,17 @@ def _compute_event_site_to_site_features(
         site_df, event_df, events, event_sites
     )
 
+    # Compute the Rrup difference between the sites
+    rrup_diff = {}
+    for cur_event in events:
+        cur_sites = event_sites[cur_event]
+        cur_record_df = record_df.loc[record_df.event_id == cur_event]
+
+        cur_rrup_diff = cur_record_df.rrup.values[:, None] - cur_record_df.rrup.values[None, :]
+        cur_rrup_diff = (2 * (cur_rrup_diff - (-max_dist)) / (max_dist - (-max_dist))) - 1
+        rrup_diff[cur_event] = pd.DataFrame(data=cur_rrup_diff, index=cur_sites, columns=cur_sites)
+
+    event_site_to_site_features["rrup_diff"] = rrup_diff
     return event_site_to_site_features
 
 

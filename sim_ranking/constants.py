@@ -99,28 +99,9 @@ COMPONENTS = ["090", "000", "ver"]
 SCALAR_FEATURE_KEYS = {
     "event": ["mag"],
     "site": ["vs30", "z1p0", "z2p5", "tsite"],
-    "site_to_site": ["dist"],
+    "site_to_site": ["dist", "vs30_diff", "z1p0_diff", "z2p5_diff", "tsite_diff"],
     "event_site": ["rrup"],
-    "event_site_to_site": ["angular_dist"],
-}
-
-GRAPH_FEATURE_KEYS = {
-    "edge": ["dist", "angular_dist"],
-    "site_int": [
-        "vs30_site_int",
-        "z1p0_site_int",
-        "z2p5_site_int",
-        "tsite_site_int",
-        "rrup_site_int",
-        "mag",
-    ],
-    "site_obs": [
-        "vs30_site_obs",
-        "z1p0_site_obs",
-        "z2p5_site_obs",
-        "tsite_site_obs",
-        "rrup_site_obs",
-    ],
+    "event_site_to_site": ["angular_dist", "rrup_diff"],
 }
 
 
@@ -132,6 +113,10 @@ PRE_PROCESS_CONFIG = {
     "tsite": (0, 10),
     "rrup": (0, 200),
     "rx": (-200, 200),
+    "vs30_diff": (-1400, 1400),
+    "z1p0_diff": (-1350, 1350),
+    "z2p5_diff": (-10.5, 10.5),
+    "tsite_diff": (-7.10, 7.10),
 }
 
 

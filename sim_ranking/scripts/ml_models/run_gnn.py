@@ -187,6 +187,7 @@ def run_cv(
                     cv_iter,
                     True,
                     graph_data_n_procs=mp.cpu_count(),
+                    # graph_data_n_procs=1,
                 )
             )
     else:
@@ -256,7 +257,7 @@ def run_cv(
         "mamba activate sim-ranking-pip",
         ind_notebook,
         out_dir / "ind_scenarios.html",
-        gnn_results_dir=out_dir,
+        results_dir=out_dir,
         wdata=run_config.wdata,
     )
 
