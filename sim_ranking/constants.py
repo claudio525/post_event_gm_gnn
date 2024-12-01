@@ -16,6 +16,7 @@ class NZGMDBVersion(StrEnum):
     v3p0 = "v3.0"
     v3p4 = "v3.4"
     v4p0 = "v4.0"
+    v4p1 = "v4.1"
 
 
 class TectonicType(StrEnum):

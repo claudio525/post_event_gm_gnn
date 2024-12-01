@@ -5,10 +5,10 @@ seed: 42
 
 # Input data settings
 #rel_obs_data_ffp: gm_datasets/nz_gmdb/v3.4/Tables/ground_motion_im_table_rotd50_flat.csv
-rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.0/Tables/ground_motion_im_table_rotd50_flat.csv
+rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.1/Tables/ground_motion_im_table_rotd50_flat.csv
 max_dist: 30
 closest_max_dist: 10
-max_n_obs_sites: 15
+max_n_obs_sites: 10
 min_n_obs_sites: 2
 
 ignore_events: ["3468575"]
@@ -50,15 +50,18 @@ fcc_act_fn: null
 
 int_embedding_act_fn: null
 obs_embedding_act_fn: null
+edge_embedding_act_fn: null
 n_att_heads: [5, 5]
 n_int_node_channels: [8, 8]
 n_obs_node_channels: [32, 32]
+n_edge_channels: [8, 8]
 gcn_act_fn: "elu"
 
-att_n_units: [8, 8]
+att_n_units: [8]
 att_act_fn: "tanh"
 
-l2_reg: 0.001
+l2_reg: 0.0001
+dropout_rate: 0.1
 
 # Output settings
-rel_results_dir: sim_ranking/results/gnn/simple
+rel_results_dir: sim_ranking/results/gnn

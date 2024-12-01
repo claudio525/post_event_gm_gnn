@@ -68,14 +68,18 @@ class RunConfig:
     """Activation function for the FC output model"""
 
     int_embedding_act_fn: str | None
-    """Activation function for the SoI embedding update/transform models"""
+    """Activation function for the SoI embedding update/transform model"""
     obs_embedding_act_fn: str | None
     """Activation function for the observation embedding update models"""
+    edge_embedding_act_fn: str | None
+    """Activation function for the edge embedding update model"""
     n_obs_node_channels: Sequence[int]
     """Number of observation site node channels"""
     n_int_node_channels: Sequence[int]
     """Number of site of interest node channels per attention coefficient. 
     Total number of channels = n_int_node_channels * n_attention_heads"""
+    n_edge_channels: Sequence[int]
+    """Number of edge channels"""
     n_att_heads: Sequence[int]
     """Number of attention heads to use"""
     gcn_act_fn: str | None
@@ -91,6 +95,9 @@ class RunConfig:
 
     rel_results_dir: str
     """Base output directory"""
+
+    dropout_rate: float = 0.0
+    """Dropout rate"""
 
     ### Features
     graph_feature_keys: dict[str, Sequence[str]] = None
@@ -173,15 +180,18 @@ class RunConfig:
             "batch_size": self.batch_size,
             "n_obs_node_channels": list(self.n_obs_node_channels),
             "n_int_node_channels": list(self.n_int_node_channels),
+            "n_edge_channels": list(self.n_edge_channels),
             "n_att_heads": self.n_att_heads,
             "fc_n_units": self.fc_n_units,
             "int_embedding_act_fn": self.int_embedding_act_fn,
             "obs_embedding_act_fn": self.obs_embedding_act_fn,
+            "edge_embedding_act_fn": self.edge_embedding_act_fn,
             "att_act_fn": self.att_act_fn,
             "gcn_act_fn": self.gcn_act_fn,
             "fcc_act_fn": self.fcc_act_fn,
             "att_n_units": list(self.att_n_units),
             "l2_reg": self.l2_reg,
+            "dropout_rate": self.dropout_rate,
             "rel_results_dir": self.rel_results_dir,
         }
 

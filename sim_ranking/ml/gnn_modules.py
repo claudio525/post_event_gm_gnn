@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 def _create_single_mlp(
     n_inputs: int, n_outputs: int, act_fn_str: str | None, bias: bool = True
 ) -> nn.Sequential:
+    """Creates a single-layer perceptron"""
     mlp = nn.Sequential(
         nn.Linear(n_inputs, n_outputs, bias=bias),
     )
@@ -39,6 +40,7 @@ def _create_multi_mlp(
     act_fn_str: str | None,
     bias: bool = True,
 ) -> nn.Sequential:
+    """Creates a multi-layer perceptron"""
     mlp = nn.Sequential()
     for ix, cur_n_units in enumerate(n_units):
         mlp.append(
@@ -76,15 +78,23 @@ class CustomAttentionGNN(torch.nn.Module):
         # Sanity check
         assert len(run_config.n_int_node_channels) == len(
             run_config.n_obs_node_channels
-        ) and len(run_config.n_int_node_channels) == len(run_config.n_att_heads)
+        ) and len(run_config.n_int_node_channels) == len(
+            run_config.n_att_heads
+        ), "Number of layers (SoI and Obs), and attention heads must be equal"
         self.n_convs = len(self.run_config.n_int_node_channels)
 
         self.convs = torch.nn.ModuleList()
-        for ix, (cur_n_att_heads, cur_int_n_channels, cur_obs_n_channels) in enumerate(
+        for ix, (
+            cur_n_att_heads,
+            cur_int_n_channels,
+            cur_obs_n_channels,
+            cur_n_edge_channels,
+        ) in enumerate(
             zip(
                 run_config.n_att_heads,
                 run_config.n_int_node_channels,
                 run_config.n_obs_node_channels,
+                run_config.n_edge_channels,
             )
         ):
             ## Observation node update model
@@ -127,15 +137,26 @@ class CustomAttentionGNN(torch.nn.Module):
                 if ix == 0
                 else run_config.n_int_node_channels[ix - 1] * run_config.n_att_heads[ix]
             )
-            int_transform_model = _create_single_mlp(
-                        n_int_in_channels,
-                        cur_int_n_channels * run_config.n_att_heads[ix],
-                        run_config.int_embedding_act_fn,
-                    )
+            int_update_model = _create_single_mlp(
+                n_int_in_channels,
+                cur_int_n_channels * run_config.n_att_heads[ix],
+                run_config.int_embedding_act_fn,
+            )
+
+            n_edge_in_channels = (
+                run_config.n_edge_features
+                if ix == 0
+                else run_config.n_edge_channels[ix - 1]
+            )
+            edge_update_model = _create_single_mlp(
+                n_edge_in_channels,
+                cur_n_edge_channels,
+                run_config.edge_embedding_act_fn,
+            )
 
             # Attention model
             att_model = _create_multi_mlp(
-                run_config.n_edge_features,
+                cur_n_edge_channels,
                 run_config.att_n_units,
                 cur_n_att_heads,
                 run_config.att_act_fn,
@@ -149,7 +170,8 @@ class CustomAttentionGNN(torch.nn.Module):
                         ),
                         ("site_obs", "informs", "site_int"): IntNodeConv(
                             obs_transform_models=obs_transform_models,
-                            int_transform_model=int_transform_model,
+                            int_update_model=int_update_model,
+                            edge_update_model=edge_update_model,
                             att_model=att_model,
                         ),
                     },
@@ -161,7 +183,8 @@ class CustomAttentionGNN(torch.nn.Module):
         # self.out_fc = nn.Linear(run_config.fc_n_units, run_config.n_outputs)
 
         self.out_fc = nn.Linear(
-            run_config.n_int_node_channels[-1] * run_config.n_att_heads[-1], run_config.n_outputs
+            run_config.n_int_node_channels[-1] * run_config.n_att_heads[-1],
+            run_config.n_outputs,
         )
 
     def get_attention_coeff(self, data: gdata.HeteroData):
@@ -180,22 +203,31 @@ class CustomAttentionGNN(torch.nn.Module):
             sc_id[dest_ix]: data["metadata"]["obs_sites"][dest_ix]
             for dest_ix in np.unique(dest_ind)
         }
+        prev_edge_attrs = rel_data["edge_attr"]
         for ix, cur_conv in enumerate(self.convs):
-            cur_attn_coeffs = (
-                cur_conv.convs[("site_obs", "informs", "site_int")]
-                .compute_attn_coeffs(rel_data["edge_attr"])
-                .numpy(force=True)
+            cur_conv_module = cur_conv.convs[("site_obs", "informs", "site_int")]
+            cur_edge_attrs = cur_conv_module.edge_update(prev_edge_attrs)
+            cur_attn_coeffs = cur_conv_module.compute_attn_coeffs(cur_edge_attrs).numpy(
+                force=True
             )
 
             for dest_ix in np.unique(dest_ind):
                 attn_coeffs[sc_id[dest_ix]].append(cur_attn_coeffs[dest_ind == dest_ix])
 
+            prev_edge_attrs = cur_edge_attrs
+
         result = []
         for ix, (key, value) in enumerate(attn_coeffs.items()):
             cur_df = pd.DataFrame(
                 index=mlt.array_utils.numpy_str_join("_", key, obs_sites[key]),
-                data=einops.rearrange(np.stack(value, axis=2), "obs att conv -> obs (conv att)"),
-                columns=[f"conv_{i}_head_{j}" for i in range(self.n_convs) for j in range(self.run_config.n_att_heads[i])],
+                data=einops.rearrange(
+                    np.stack(value, axis=2), "obs att conv -> obs (conv att)"
+                ),
+                columns=[
+                    f"conv_{i}_head_{j}"
+                    for i in range(self.n_convs)
+                    for j in range(self.run_config.n_att_heads[i])
+                ],
             )
             cur_df["event"] = data["metadata"]["event"][ix]
             cur_df["obs_site"] = obs_sites[key]
@@ -210,25 +242,52 @@ class CustomAttentionGNN(torch.nn.Module):
         return pd.concat(result, axis=0)
 
     def forward(self, data: gdata.HeteroData):
-        for ix, cur_conv in enumerate(self.convs):
-            # Overwrite with result from previous layer if not the first layer
-            x_dict = data.x_dict if ix == 0 else data.x_dict | x_dict
+        node_emb_dict = data.x_dict
+        edge_emb_dict = data.edge_attr_dict
 
+        for ix, cur_conv in enumerate(self.convs):
             # Apply convolution
             x_dict = cur_conv(
-                x_dict,
+                node_emb_dict,
                 data.edge_index_dict,
-                edge_attr_dict=data.edge_attr_dict,
+                edge_attr_dict=edge_emb_dict,
             )
 
-            # Save results
-            x_dict = {
-                # key: F.dropout(mlt.torch.get_act_fn(self.run_config.gcn_act_fn)(x), p=0.5, training=self.training)
-                key: mlt.torch.get_act_fn(self.run_config.gcn_act_fn)(x)
-                for key, x in x_dict.items()
-            }
+            # Get updated embeddings
+            obs_node_embedding = x_dict["site_obs"]
+            int_node_embedding = x_dict["site_int"][0]
+            obs_int_edge_embedding = x_dict["site_int"][1]
 
-        x_site_int = x_dict["site_int"]
+            # Apply activation function
+            node_emb_dict["site_obs"] = mlt.torch.get_act_fn(
+                self.run_config.gcn_act_fn
+            )(obs_node_embedding)
+            node_emb_dict["site_int"] = mlt.torch.get_act_fn(
+                self.run_config.gcn_act_fn
+            )(int_node_embedding)
+            edge_emb_dict[("site_obs", "informs", "site_int")] = mlt.torch.get_act_fn(
+                self.run_config.gcn_act_fn
+            )(obs_int_edge_embedding)
+
+            # Apply dropout
+            if self.run_config.dropout_rate > 0:
+                node_emb_dict["site_obs"] = F.dropout(
+                    node_emb_dict["site_obs"],
+                    p=self.run_config.dropout_rate,
+                    training=self.training,
+                )
+                node_emb_dict["site_int"] = F.dropout(
+                    node_emb_dict["site_int"],
+                    p=self.run_config.dropout_rate,
+                    training=self.training,
+                )
+                edge_emb_dict[("site_obs", "informs", "site_int")] = F.dropout(
+                    edge_emb_dict[("site_obs", "informs", "site_int")],
+                    p=self.run_config.dropout_rate,
+                    training=self.training,
+                )
+
+        x_site_int = node_emb_dict["site_int"]
 
         # x = mlt.torch.get_act_fn(self.run_config.fcc_act_fn)(self.fc1(x_site_int))
         # out = self.out_fc(x)
@@ -267,7 +326,8 @@ class IntNodeConv(MessagePassing):
         # int_transform_model: nn.Module,
         # att_model: nn.Module,
         obs_transform_models: nn.ModuleList,
-        int_transform_model: nn.Module,
+        int_update_model: nn.Module,
+        edge_update_model: nn.Module,
         att_model: nn.Module,
         **kwargs,
     ):
@@ -275,9 +335,11 @@ class IntNodeConv(MessagePassing):
         Parameters
         ----------
         obs_transform_model: torch.nn.Module
-            Transformation model for the source nodes
-        int_transform_model: torch.nn.Module
-            Transformation model for the target nodes
+            Transformation model for the observation nodes
+        int_update_model: torch.nn.Module
+            Update model for the target nodes
+        edge_update_model: torch.nn.Module
+            Update model for the edges
         att_model: torch.nn.Module
             Self-attention model
         kwargs
@@ -287,7 +349,8 @@ class IntNodeConv(MessagePassing):
         self.att_model = att_model
 
         self.obs_transform_models = obs_transform_models
-        self.int_transform_model = int_transform_model
+        self.int_transform_model = int_update_model
+        self.edge_update_model = edge_update_model
 
         self.n_heads = len(self.obs_transform_models)
 
@@ -308,7 +371,9 @@ class IntNodeConv(MessagePassing):
         x: tuple[torch.Tensor, torch.Tensor],
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
-    ) -> torch.Tensor:
+    ):
+        edge_attr = self.edge_update(edge_attr)
+
         # Compute the messages
         m_s = self.propagate(
             edge_index=edge_index,
@@ -318,7 +383,11 @@ class IntNodeConv(MessagePassing):
 
         # Update the nodes
         out = m_s + self.int_transform_model(x[1])
-        return out
+        return out, edge_attr
+
+    def edge_update(self, edge_attr: torch.Tensor) -> Tensor:
+        edge_attr = self.edge_update_model(edge_attr)
+        return edge_attr
 
     def compute_attn_coeffs(self, edge_attr: torch.Tensor) -> torch.Tensor:
         """Compute the attention coefficients"""
@@ -349,147 +418,3 @@ class IntNodeConv(MessagePassing):
             dim=1,
         )
         return m
-
-
-class BasicGNN(torch.nn.Module):
-    """
-    Represents a very basic Graph Neural Network
-    Updates the site of interest nodes based on the observation nodes.
-    IMs are predicted using an MLP on the site of interest node embeddings.
-    """
-
-    def __init__(
-        self,
-        n_obs_node_features: int,
-        n_int_node_features: int,
-        n_edge_features: int,
-        n_int_node_channels: int,
-        n_ims: int,
-    ):
-        super().__init__()
-
-        self.convs = torch.nn.ModuleList()
-        self.convs.append(
-            gnn.HeteroConv(
-                {
-                    ("site_obs", "informs", "site_int"): BasicConv(
-                        in_channels=(n_obs_node_features, n_int_node_features),
-                        out_channels=n_int_node_channels,
-                        nn_model=nn.Sequential(
-                            nn.Linear(n_edge_features, 16),
-                            nn.ReLU(),
-                            nn.Linear(16, n_obs_node_features * n_int_node_channels),
-                        ),
-                        bias=True,
-                        aggr="add",
-                    )
-                },
-                aggr="sum",
-            )
-        )
-
-        self.fc1 = nn.Linear(n_int_node_channels, 16)
-        self.out_fc = nn.Linear(16, n_ims)
-
-    def forward(self, data: gdata.HeteroData):
-        for cur_conv in self.convs:
-            x_dict = cur_conv(
-                data.x_dict, data.edge_index_dict, edge_attr_dict=data.edge_attr_dict
-            )
-            x_dict = {key: x.relu() for key, x in x_dict.items()}
-
-        x_site_int = x_dict["site_int"]
-
-        # x = F.relu(self.fc1(x_site_int))
-        # out = self.out_fc(x)
-
-        out = self.out_fc(x_site_int)
-
-        return out
-
-
-class BasicConv(MessagePassing):
-    """
-    Very simple graph convolutional layer.
-    Updates the site of interest nodes based on the observation nodes.
-    With the weight matrix in the message function coming from an MLP,
-    that uses the edge features as input.
-    """
-
-    def __init__(
-        self,
-        in_channels: tuple[int, int],
-        out_channels: int,
-        nn_model: torch.nn.Module,
-        bias: bool = True,
-        aggr: str = "add",
-        **kwargs,
-    ):
-        """
-        Parameters
-        ----------
-        in_channels: tuple
-            The input channels for the source and target nodes
-        out_channels: int
-            The output channels
-        nn_model: torch.nn.Module
-            The neural network to be used in the message function
-        bias: bool, optional
-            Whether to use bias in the update function
-        aggr: str, optional
-            Aggregation method to use
-        """
-        super().__init__(aggr, **kwargs)
-
-        self.in_channel_target = in_channels[1]
-        self.in_channel_source = in_channels[0]
-        self.out_channels = out_channels
-        self.nn_model = nn_model
-        self.aggr = aggr
-
-        self.source_lin = nn.Linear(
-            self.in_channel_target, self.out_channels, bias=False
-        )
-
-        if bias:
-            self.bias = nn.Parameter(torch.empty(self.out_channels))
-        else:
-            self.register_parameter("bias", None)
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        super().reset_parameters()
-        ginits.reset(self.nn_model)
-        self.source_lin.reset_parameters()
-        ginits.zeros(self.bias)
-
-    def forward(
-        self,
-        x: tuple[torch.Tensor, torch.Tensor],
-        edge_index: torch.Tensor,
-        edge_attr: torch.Tensor,
-    ) -> torch.Tensor:
-        out = self.propagate(edge_index=edge_index, edge_attr=edge_attr, x=x)
-        assert out.shape[0] == x[1].shape[0]
-
-        out = out + self.source_lin(x[1])
-
-        if self.bias is not None:
-            out = out + self.bias
-
-        return out
-
-    def message(
-        self,
-        x_j: torch.Tensor,
-        x_i: torch.Tensor,
-        edge_index: torch.Tensor,
-        edge_attr: torch.Tensor,
-    ) -> torch.Tensor:
-        weights = self.nn_model(edge_attr)
-        weights = weights.view(-1, self.in_channel_source, self.out_channels)
-
-        # Batched matrix multiplication
-        messages = einops.einsum(x_j, weights, "b i, b i j -> b j")
-        return messages
