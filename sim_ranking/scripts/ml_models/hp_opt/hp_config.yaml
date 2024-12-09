@@ -1,0 +1,46 @@
+# Hyperparameters
+batch_size:
+  min: 32
+  max: 2048
+
+n_gcn_layers:
+  min: 1
+  max: 4
+
+n_obs_node_channels:
+  min: 8
+  max: 64
+  step: 8
+
+n_att_heads:
+  min: 1
+  max: 10
+
+n_int_node_channels:
+  min: 2
+  max: 16
+  step: 2
+
+n_edge_channels:
+  min: 2
+  max: 16
+  step: 2
+
+gcn_act_fn: ["tanh", "relu", "elu"]
+
+att_n_units:
+  min: 2
+  max: 16
+  step: 2
+
+att_act_fn: ["tanh", "relu", "elu"]
+
+l2_reg:
+  min: 0.00001
+  max: 0.001
+
+dropout_rate:
+  min: 0.0
+  max: 0.5
+
+

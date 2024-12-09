@@ -1,3 +1,7 @@
+import itertools
+import os
+import shutil
+import random
 import copy
 from pathlib import Path
 
@@ -6,6 +10,7 @@ import torch.multiprocessing as mp
 import pandas as pd
 import numpy as np
 import typer
+import optuna
 
 import ml_tools as mlt
 import sim_ranking as sr
@@ -26,91 +31,12 @@ def run_holdout(
     n_epochs: int = None,
     id_suffix: str = "",
 ):
-    ### Create the configs
-    run_config = sr.ml.gnn_gm.RunConfig.from_config_kwargs(
-        run_config_ffp, n_epochs=n_epochs, ims=sr.constants.PSA_KEYS, device=device
-    )
-    holdout_config = sr.ml.gnn_gm.HoldoutConfig.from_yaml(holdout_config_ffp)
-
-    ### Data loading
-    obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
-    events, all_sites = obs_data.events, obs_data.sites
-    event_sites = obs_data.event_sites
-    print(f"Number of events: {len(events)}")
-
-    ### Data setup
-    # Get the set of valid site-interests per event
-    print(f"Getting valid sites of interest")
-    valid_int_sites, valid_event_int_sites, _ = sr.ml.data.get_valid_site_ints(
-        event_sites, obs_data.record_df.drop(columns=obs_data.ims)
-    )
-    events = np.intersect1d(events, np.asarray(list(valid_event_int_sites.keys())))
-    print(f"Number of valid events: {len(events)}/{len(obs_data.events)}")
-
-    if holdout_config.test_events is not None:
-        events = np.setdiff1d(events, holdout_config.test_events)
-        print(f"Number of events after removing test events: {len(events)}")
-
-    # Set the random seed
-    if run_config.seed is not None:
-        print(f"Using numpy random seed: {run_config.seed}")
-        np.random.seed(run_config.seed)
-
-    # Split into training and validation
-    val_events = np.random.choice(events, holdout_config.n_val_events, replace=False)
-    if holdout_config.val_events is not None:
-        val_events = np.union1d(val_events, holdout_config.val_events)
-    train_events = np.setdiff1d(events, val_events)
-
-    print(f"----------------- Events Summary -----------------")
-    print(f"Number of available events: {len(events)}")
-    print(f"Number of training events: {train_events.size}")
-    print(f"Number of validation events: {val_events.size}")
-
-    if holdout_config.val_sites_ffp is not None:
-        val_int_sites = np.load(holdout_config.val_sites_ffp)
-    else:
-        val_int_sites = np.random.choice(
-            valid_int_sites, holdout_config.n_val_sites, replace=False
-        )
-    train_int_sites = np.setdiff1d(valid_int_sites, val_int_sites)
-    obs_sites = np.setdiff1d(all_sites, val_int_sites)
-
-    print(f"----------------- Sites Summary -----------------")
-    print(f"Number of available sites: {len(all_sites)}")
-    print(f"Number of valid sites of interests: {valid_int_sites.size}")
-    print(f"Number of training sites of interests: {train_int_sites.size}")
-    print(f"Number of validation sites of interests: {val_int_sites.size}")
-    print(f"Number of observation sites: {obs_sites.size}")
-    print(f"------------------------------------------------")
-
-    print(f"Computing distance matrix")
-    dist_matrix = sr.utils.calculate_distance_matrix(all_sites, obs_data.site_df)
-
-    print(f"Getting scalar features")
-    scalar_features = sr.ml.features.get_scalar_features(
-        event_sites, obs_data, run_config, sr.constants.SCALAR_FEATURE_KEYS, dist_matrix
-    )
-
-    id_suffix = f"_{id_suffix}" if len(id_suffix) > 0 else ""
-    cur_out_dir = (
-        run_config.results_dir / f"{mlt.utils.create_run_id(False)}{id_suffix}"
-    )
-
-    sr.ml.gnn_gm.run_model_training(
-        cur_out_dir,
-        event_sites,
-        valid_event_int_sites,
-        train_events,
-        val_events,
-        train_int_sites,
-        val_int_sites,
-        obs_sites,
-        dist_matrix,
-        obs_data,
-        scalar_features,
-        run_config,
-        graph_data_n_procs=1,
+    sr.ml.run_holdout(
+        run_config_ffp,
+        holdout_config_ffp,
+        n_epochs=n_epochs,
+        id_suffix=id_suffix,
+        device=device,
     )
 
 
@@ -123,198 +49,237 @@ def run_cv(
     id_suffix: str = "",
     n_procs: int = mp.cpu_count(),
 ):
-    # Create the configs
-    run_config = sr.ml.gnn_gm.RunConfig.from_config_kwargs(
-        run_config_ffp, n_epochs=n_epochs, ims=sr.constants.PSA_KEYS, device=device
+    mp.set_start_method("spawn")
+
+    sr.ml.run_cv(
+        run_config_ffp,
+        n_event_folds,
+        n_site_folds,
+        n_epochs=n_epochs,
+        id_suffix=id_suffix,
+        n_procs=n_procs,
+        device=device,
     )
 
-    ### Data loading
-    obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
-    if len(run_config.ignore_events) > 0:
-        obs_data = obs_data.drop_events(run_config.ignore_events)
-
-    events, all_sites = obs_data.events, obs_data.sites
-    event_sites = obs_data.event_sites
-    print(f"Number of events: {len(events)}")
-
-    # Get the set of valid site-interests per event
-    print(f"Getting valid sites of interest")
-    int_sites, valid_event_int_sites, _ = sr.ml.data.get_valid_site_ints(
-        event_sites, obs_data.record_df.drop(columns=obs_data.ims)
-    )
-    events = np.intersect1d(events, np.asarray(list(valid_event_int_sites.keys())))
-
-    print(f"Computing distance matrix")
-    dist_matrix = sr.utils.calculate_distance_matrix(all_sites, obs_data.site_df)
-
-    print(f"Getting scalar features")
-    scalar_features = sr.ml.features.get_scalar_features(
-        event_sites, obs_data, run_config, sr.constants.SCALAR_FEATURE_KEYS, dist_matrix
-    )
-
-    # Cross-validation setup
-    np.random.seed(run_config.seed)
-    np.random.shuffle(events)
-    np.random.shuffle(int_sites)
-    event_folds = np.array_split(events, n_event_folds)
-    site_folds = np.array_split(int_sites, n_site_folds)
-
-    fold_combs = [(i, j) for i in range(n_event_folds) for j in range(n_site_folds)]
-
-    id_suffix = f"_{id_suffix}" if len(id_suffix) > 0 else ""
-    out_dir = run_config.results_dir / f"{mlt.utils.create_run_id(False)}_cv{id_suffix}"
-
-    # Run CV
-    if n_procs == 1:
-        out_dirs = []
-        for cv_iter, (train_folds_ind, val_fold_ind) in enumerate(
-            get_cv_iterator(fold_combs)
-        ):
-            out_dirs.append(
-                _run_mp_helper(
-                    event_folds,
-                    site_folds,
-                    val_fold_ind,
-                    train_folds_ind,
-                    all_sites,
-                    event_sites,
-                    valid_event_int_sites,
-                    dist_matrix,
-                    obs_data,
-                    scalar_features,
-                    copy.deepcopy(run_config),
-                    out_dir,
-                    cv_iter,
-                    True,
-                    graph_data_n_procs=mp.cpu_count(),
-                    # graph_data_n_procs=1,
-                )
-            )
-    else:
-        mp.set_start_method("spawn")
-        with mp.Pool(processes=n_procs) as pool:
-            out_dirs = pool.starmap(
-                _run_mp_helper,
-                [
-                    (
-                        event_folds,
-                        site_folds,
-                        val_fold_ind,
-                        train_folds_ind,
-                        all_sites,
-                        event_sites,
-                        valid_event_int_sites,
-                        dist_matrix,
-                        obs_data,
-                        scalar_features,
-                        run_config,
-                        out_dir,
-                        cv_iter,
-                        (cv_iter % n_procs) == 0,
-                    )
-                    for cv_iter, (train_folds_ind, val_fold_ind) in enumerate(
-                        get_cv_iterator(fold_combs)
-                    )
-                ],
-            )
-
-    # Post-processing
-    run_config.to_yaml(out_dir / "run_config.yaml")
-
-    val_results, metrics = [], {}
-    val_attn_coeffs = []
-    for cur_out_dir in out_dirs:
-        cur_val_result = pd.read_parquet(cur_out_dir / "val_results.parquet")
-        cur_val_result["cv_iter"] = cur_out_dir.stem
-        val_results.append(cur_val_result)
-
-        cur_val_attn_coeffs = pd.read_parquet(cur_out_dir / "val_attn_coeffs.parquet")
-        cur_val_attn_coeffs["cv_iter"] = cur_out_dir.stem
-        val_attn_coeffs.append(cur_val_attn_coeffs)
-
-        metrics[cur_out_dir.stem] = pd.read_pickle(cur_out_dir / "metrics.pickle")
-
-    val_results = pd.concat(val_results, axis=0)
-    val_results.to_parquet(out_dir / "val_results.parquet")
-
-    val_attn_coeffs = pd.concat(val_attn_coeffs, axis=0)
-    val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
-
-    pd.to_pickle(metrics, out_dir / "metrics.pickle")
-
-    # Generate report
-    cv_agg_notebook = Path(__file__).parent / "report_notebooks/cv_agg_results.ipynb"
-    mlt.quarto.render_quarto(
-        "mamba activate sim-ranking-pip",
-        cv_agg_notebook,
-        out_dir / "cv_agg_results.html",
-        results_dir=out_dir,
-        wdata=run_config.wdata,
-    )
-
-    ind_notebook = Path(__file__).parent / "report_notebooks/ind_scenarios.ipynb"
-    mlt.quarto.render_quarto(
-        "mamba activate sim-ranking-pip",
-        ind_notebook,
-        out_dir / "ind_scenarios.html",
-        results_dir=out_dir,
-        wdata=run_config.wdata,
-    )
-
-
-def _run_mp_helper(
-    event_folds: list[np.ndarray[str]],
-    site_folds: list[np.ndarray[str]],
-    val_fold_ind: tuple[int, int],
-    train_folds_ind: list[tuple[int, int]],
-    all_sites: np.ndarray[str],
-    event_sites: dict[str, np.ndarray[str]],
-    valid_event_int_sites: dict[str, np.ndarray[str]],
-    dist_matrix: pd.DataFrame,
-    obs_data: sr.ObservedData,
-    scalar_features: sr.ml.data.ScalarFeatures,
-    run_config: sr.ml.gnn_gm.RunConfig,
-    out_dir: Path,
-    cv_iter: int,
-    verbose: bool,
-    graph_data_n_procs: int = 1,
+@app.command("continue-hp-opt")
+def continue_hp_opt(
+    rel_results_dir: str,
+    n_trials: int,
+    n_procs: int = mp.cpu_count(),
 ):
-    cur_val_events = event_folds[val_fold_ind[0]]
-    cur_val_int_sites = site_folds[val_fold_ind[1]]
+    if n_procs > 1:
+        mp.set_start_method("spawn")
 
-    cur_train_events = np.concatenate([event_folds[i] for i, _ in train_folds_ind])
-    cur_train_int_sites = np.concatenate([site_folds[i] for _, i in train_folds_ind])
+    results_dir = Path(os.environ["wdata"]) / rel_results_dir
+    try:
+        objective = HPObjective.from_yaml(results_dir / "hp_objective.yaml")
+        study_storage = f"sqlite:///{results_dir / 'hp_opt.db'}"
+    except FileNotFoundError:
+        print(
+            "Results directory exists but insufficient "
+            "files found for continuation of study."
+        )
+        return
 
-    obs_sites = np.setdiff1d(all_sites, cur_val_int_sites)
+    study = optuna.create_study(
+        direction="minimize",
+        storage=study_storage,
+        study_name=Path(rel_results_dir).stem,
+        load_if_exists=True,
+    )
+    study.optimize(objective, n_trials=n_trials, n_jobs=1)
 
-    cur_out_dir = out_dir / f"cv_{cv_iter}"
 
-    sr.ml.gnn_gm.run_model_training(
-        cur_out_dir,
-        event_sites,
-        valid_event_int_sites,
-        cur_train_events,
-        cur_val_events,
-        cur_train_int_sites,
-        cur_val_int_sites,
-        obs_sites,
-        dist_matrix,
-        obs_data,
-        scalar_features,
-        run_config,
-        graph_data_n_procs=graph_data_n_procs,
-        verbose=verbose,
+@app.command("run-hp-opt")
+def run_hp_opt(
+    base_run_config_ffp: Path,
+    hp_opt_config_ffp: Path,
+    n_event_folds: int,
+    n_site_folds: int,
+    rel_results_dir: str,
+    n_trials: int,
+    n_epochs: int = None,
+    n_procs: int = mp.cpu_count(),
+):
+    if n_procs > 1:
+        mp.set_start_method("spawn")
+
+    objective = HPObjective(
+        mlt.utils.load_yaml(hp_opt_config_ffp),
+        mlt.utils.load_yaml(base_run_config_ffp),
+        n_event_folds,
+        n_site_folds,
+        n_epochs,
+        n_procs,
+        rel_results_dir,
     )
 
-    return cur_out_dir
+    # Write HPObjective
+    results_dir = Path(os.environ["wdata"]) / rel_results_dir
+    objective.to_yaml(results_dir / "hp_objective.yaml")
+
+    # Permanent study storage
+    study_storage = f"sqlite:///{results_dir / 'hp_opt.db'}"
+
+    study = optuna.create_study(
+        direction="minimize",
+        storage=study_storage,
+        study_name=Path(rel_results_dir).stem,
+        load_if_exists=False,
+    )
+    study.optimize(objective, n_trials=n_trials, n_jobs=1)
 
 
-def get_cv_iterator(fold_combs: list[tuple[int, int]]):
-    for val_fold_ind in fold_combs:
-        train_folds_ind = [
-            cur_fold for cur_fold in fold_combs if (cur_fold[0] != val_fold_ind[0]) and (cur_fold[1] != val_fold_ind[1])
-        ]
-        yield train_folds_ind, val_fold_ind
+class HPObjective:
+
+    def __init__(
+        self,
+        hp_opt_config: dict,
+        base_run_config: dict,
+        n_event_folds: int,
+        n_site_folds: int,
+        n_epochs: int,
+        n_procs: int,
+        rel_results_dir: str,
+    ):
+        self.hp_opt_config = hp_opt_config
+        self.base_run_config = base_run_config
+
+        self.n_event_folds = n_event_folds
+        self.n_site_folds = n_site_folds
+        self.n_epochs = n_epochs
+
+        self.rel_results_dir = rel_results_dir
+        self.n_procs = n_procs
+
+    def to_yaml(self, ffp: Path):
+        mlt.utils.write_to_yaml(
+            {
+                "hp_opt_config": self.hp_opt_config,
+                "base_run_config": self.base_run_config,
+                "n_event_folds": self.n_event_folds,
+                "n_site_folds": self.n_site_folds,
+                "n_epochs": self.n_epochs,
+                "n_procs": self.n_procs,
+                "rel_results_dir": self.rel_results_dir,
+            },
+            ffp,
+        )
+
+    @classmethod
+    def from_yaml(cls, ffp: Path):
+        config = mlt.utils.load_yaml(ffp)
+        return cls(
+            config["hp_opt_config"],
+            config["base_run_config"],
+            config["n_event_folds"],
+            config["n_site_folds"],
+            config["n_epochs"],
+            config["n_procs"],
+            config["rel_results_dir"],
+        )
+
+    def __call__(self, trial: optuna.Trial):
+
+        batch_size = trial.suggest_int(
+            "batch_size",
+            self.hp_opt_config["batch_size"]["min"],
+            self.hp_opt_config["batch_size"]["max"],
+        )
+        n_gcn_layers = trial.suggest_int(
+            "n_gcn_layers",
+            self.hp_opt_config["n_gcn_layers"]["min"],
+            self.hp_opt_config["n_gcn_layers"]["max"],
+        )
+
+        n_obs_node_channels = trial.suggest_int(
+            "n_obs_node_channels",
+            self.hp_opt_config["n_obs_node_channels"]["min"],
+            self.hp_opt_config["n_obs_node_channels"]["max"],
+            step=self.hp_opt_config["n_obs_node_channels"]["step"],
+        )
+
+        n_att_heads = trial.suggest_int(
+            "n_att_heads",
+            self.hp_opt_config["n_att_heads"]["min"],
+            self.hp_opt_config["n_att_heads"]["max"],
+        )
+
+        n_int_node_channels = trial.suggest_int(
+            "n_int_node_channels",
+            self.hp_opt_config["n_int_node_channels"]["min"],
+            self.hp_opt_config["n_int_node_channels"]["max"],
+            step=self.hp_opt_config["n_int_node_channels"]["step"],
+        )
+
+        n_edge_channels = trial.suggest_int(
+            "n_edge_channels",
+            self.hp_opt_config["n_edge_channels"]["min"],
+            self.hp_opt_config["n_edge_channels"]["max"],
+            step=self.hp_opt_config["n_edge_channels"]["step"],
+        )
+
+        gcn_act_fn = trial.suggest_categorical(
+            "gcn_act_fn", self.hp_opt_config["gcn_act_fn"]
+        )
+
+        att_n_units = trial.suggest_int(
+            "att_n_units",
+            self.hp_opt_config["att_n_units"]["min"],
+            self.hp_opt_config["att_n_units"]["max"],
+            step=self.hp_opt_config["att_n_units"]["step"],
+        )
+
+        att_act_fn = trial.suggest_categorical(
+            "att_act_fn", self.hp_opt_config["att_act_fn"]
+        )
+
+        l2_reg = trial.suggest_float(
+            "l2_reg",
+            self.hp_opt_config["l2_reg"]["min"],
+            self.hp_opt_config["l2_reg"]["max"],
+        )
+
+        dropout_rate = trial.suggest_float(
+            "dropout_rate",
+            self.hp_opt_config["dropout_rate"]["min"],
+            self.hp_opt_config["dropout_rate"]["max"],
+        )
+
+        run_config_dict = self.base_run_config | {
+            "batch_size": batch_size,
+            "n_att_heads": n_gcn_layers * [n_att_heads],
+            "n_int_node_channels": n_gcn_layers * [n_int_node_channels],
+            "n_obs_node_channels": n_gcn_layers * [n_obs_node_channels],
+            "n_edge_channels": n_gcn_layers * [n_edge_channels],
+            "gcn_act_fn": gcn_act_fn,
+            "att_n_units": n_gcn_layers * [att_n_units],
+            "att_act_fn": att_act_fn,
+            "l2_reg": l2_reg,
+            "dropout_rate": dropout_rate,
+            "rel_results_dir": self.rel_results_dir,
+            "ims": sr.constants.PSA_KEYS,
+            "n_epochs": self.n_epochs,
+            "device": device,
+        }
+        run_config = sr.ml.RunConfig.from_dict(run_config_dict)
+
+        result_dir, agg_metrics = sr.ml.run_cv(
+            run_config,
+            self.n_event_folds,
+            self.n_site_folds,
+            n_epochs=None,
+            id_suffix=f"trial_{trial.number}",
+            n_procs=self.n_procs,
+        )
+
+        # Set the trial user attributes
+        for cur_key, cur_value in agg_metrics.items():
+            trial.set_user_attr(cur_key, cur_value)
+        trial.set_user_attr("result_dir", str(result_dir))
+        trial.set_user_attr("id", result_dir.stem)
+
+        return agg_metrics["mean_min_val_loss"]
 
 
 if __name__ == "__main__":

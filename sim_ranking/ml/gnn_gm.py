@@ -424,6 +424,18 @@ def run_model_training(
         run_config, gnn_model, train_loader, val_loader, verbose=verbose
     )
 
+    metrics_df = pd.DataFrame(metrics)
+    agg_metrics = {
+        "loss_train_best_epoch": metrics_df.loss_hist_train.argmin(),
+        "loss_train_min": metrics_df.loss_hist_train.min(),
+        "loss_val_best_epoch": metrics_df.loss_hist_val.argmin(),
+        "loss_val_min": metrics_df.loss_hist_val.min(),
+        "mse_train_best_epoch": metrics_df.mse_hist_train.argmin(),
+        "mse_train_min": metrics_df.mse_hist_train.min(),
+        "mse_val_best_epoch": metrics_df.mse_hist_val.argmin(),
+        "mse_val_min": metrics_df.mse_hist_val.min(),
+    }
+
     if verbose:
         print(
             f"Best model epoch: {best_model_epoch + 1}, "
@@ -444,8 +456,9 @@ def run_model_training(
     # Save the run config
     run_config.to_yaml(out_dir / "run_config.yaml")
 
-    # Save loss history
-    pd.to_pickle(metrics, out_dir / "metrics.pickle")
+    # Save loss history & aggregate metrics
+    metrics_df.to_parquet(out_dir / "metrics.parquet")
+    pd.to_pickle(agg_metrics, out_dir / "agg_metrics.pickle")
 
     # Save the model
     torch.save(gnn_model, out_dir / "model.pt")
