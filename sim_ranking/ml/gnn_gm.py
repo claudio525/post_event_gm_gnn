@@ -347,6 +347,9 @@ def run_model_training(
         run_config.min_n_obs_sites,
     )
 
+
+
+
     # Sanity check
     assert np.isin(val_int_sites, train_int_sites).sum() == 0
     assert np.isin(val_events, train_events).sum() == 0

@@ -192,9 +192,10 @@ class ObservedData:
                 self._event_sites[cur_event] = cur_group.site_id.unique().astype(str)
         return self._event_sites
 
-    def drop_nan(self, verbose: bool = False):
+    def drop_nan(self, subset: Sequence[str] = None, verbose: bool = False):
         """Drops any rows with NaN values."""
-        nan_mask = self.record_df.isna().any(axis=1)
+        cols = subset if subset else self.record_df.columns
+        nan_mask = self.record_df.loc[:, cols].isna().any(axis=1)
         if np.count_nonzero(nan_mask) > 0:
             if verbose:
                 print(f"Dropping {np.count_nonzero(nan_mask)} records with NaN values")

@@ -319,12 +319,15 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
     assert obs_data.data_source is constants.ObsDataSource.NZGMDB
 
     # Filter out nan values
-    obs_data = obs_data.drop_nan()
+    obs_data = obs_data.drop_nan(subset=ObservedData.SITE_COLS)
 
     # Some basic filtering
     if obs_data.nzgmdb_version is constants.NZGMDBVersion.v3p4:
         obs_data = obs_data.metadata_filter(dict(rrup=(0, 250)))
-    elif obs_data.nzgmdb_version in [constants.NZGMDBVersion.v4p0, constants.NZGMDBVersion.v4p1]:
+    elif obs_data.nzgmdb_version in [
+        constants.NZGMDBVersion.v4p0,
+        constants.NZGMDBVersion.v4p1,
+    ]:
         obs_data = obs_data.metadata_filter(dict(rrup=(0, 250), is_ground_level=True))
     else:
         raise NotImplementedError("Invalid NZGMDB version")
