@@ -5,6 +5,7 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
+from .. import constants
 from .. import data_classes as dc
 
 
@@ -123,7 +124,7 @@ def create_scenario_df(
             if lb_corr_data is not None:
                 cur_result.append(
                     lb_corr_data.corr_data.sel[cur_site_int, :, :]
-                    .loc[cur_obs_sites]
+                    .loc[cur_obs_sites, constants.PSA_KEYS]
                     .sum(axis=0)
                     .mean()
                 )

@@ -319,7 +319,7 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
     assert obs_data.data_source is constants.ObsDataSource.NZGMDB
 
     # Filter out nan values
-    obs_data = obs_data.drop_nan(subset=ObservedData.SITE_COLS)
+    obs_data = obs_data.drop_nan()
 
     # Some basic filtering
     if obs_data.nzgmdb_version is constants.NZGMDBVersion.v3p4:

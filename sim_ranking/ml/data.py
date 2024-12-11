@@ -70,6 +70,14 @@ def compute_site_combinations(
         Maximum number of observation sites to use
     min_n_obs_sites: int
         Minimum number of observation sites required
+
+    Returns
+    -------
+    site_combs: dict
+        Site combinations for each event
+        Indices are into the corresponding used_sites array
+    used_sites: dict
+        All sites used for each event
     """
     assert max_dist >= closest_max_dist
 
@@ -101,13 +109,14 @@ def compute_site_combinations(
         if cur_dist_matrix.shape[1] < 2:
             continue
 
-        # Get observation sites such that minimum number of observations sites is satisfied
-        neigh = NearestNeighbors(
-            metric="precomputed", n_jobs=1
-        )
+        # Get observation sites such that minimum
+        # number of observations sites is satisfied
+        neigh = NearestNeighbors(metric="precomputed", n_jobs=1)
         neigh.fit(cur_dist_matrix)
         dist, n_neigh_ind = neigh.kneighbors(
-            n_neighbors=min(max_n_obs_sites + 1, cur_dist_matrix.shape[1]), X=cur_dist_matrix, return_distance=True
+            n_neighbors=min(max_n_obs_sites + 1, cur_dist_matrix.shape[1]),
+            X=cur_dist_matrix,
+            return_distance=True,
         )
 
         # Apply distance filter
@@ -116,7 +125,9 @@ def compute_site_combinations(
         if closest_max_dist < max_dist:
             dist_mask &= np.any(dist[:, 1:] < closest_max_dist, axis=1)[:, None]
 
-        cur_row_ind = np.repeat(np.arange(0, len(cur_sites)), np.count_nonzero(dist_mask, axis=1))
+        cur_row_ind = np.repeat(
+            np.arange(0, len(cur_sites)), np.count_nonzero(dist_mask, axis=1)
+        )
         cur_col_ind = n_neigh_ind[dist_mask]
 
         # Get the site combinations
@@ -131,7 +142,9 @@ def compute_site_combinations(
 
         # Filter for minimum number of observation sites
         if min_n_obs_sites > 1:
-            cur_int_ind, cur_int_count = np.unique(cur_site_combs[cur_mask, 0], return_counts=True)
+            cur_int_ind, cur_int_count = np.unique(
+                cur_site_combs[cur_mask, 0], return_counts=True
+            )
             cur_valid_int_ind = cur_int_ind[cur_int_count >= min_n_obs_sites]
             cur_mask &= np.isin(cur_site_combs[:, 0], cur_valid_int_ind)
 

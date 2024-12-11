@@ -3,10 +3,11 @@ import itertools
 import pickle
 import warnings
 import multiprocessing as mp
-from typing import NamedTuple, Sequence
+from typing import NamedTuple, Sequence, Callable
 from pathlib import Path
 from dataclasses import dataclass
 
+import einops
 import numpy as np
 import pandas as pd
 import torch
@@ -24,7 +25,7 @@ from . import data as ml_data
 from . import gnn_modules
 from .. import utils
 from .. import constants
-from ..data_classes import ObservedData
+from ..data_classes import ObservedData, LBSiteCorrelationData
 
 
 @dataclass
@@ -46,6 +47,28 @@ class RunConfig:
     """Minimum number of observation sites required"""
     ignore_events: Sequence[str]
     """Events to ignore"""
+
+    ### Scenario Weighting
+    mag_scenario_weighting: bool
+    """Whether to use magnitude scenario weighting"""
+    mag_min_weight: float
+    """Minimum weight for the magnitude"""
+    mag_max_weight: float
+    """Maximum weight for the magnitude"""
+    mag_start: float
+    """Start point for linear weighting of the magnitude"""
+    mag_end: float
+    """End point for linear weighting of the magnitude"""
+    doc_scenario_weighting: bool
+    """Whether to use DoC scenario weighting"""
+    doc_min_weight: float
+    """Minimum weight for the DoC"""
+    doc_max_weight: float
+    """Maximum weight for the DoC"""
+    doc_start: float
+    """Start point for linear weighting of the DoC"""
+    doc_end: float
+    """End point for linear weighting of the DoC"""
 
     device: str
     """Device to use"""
@@ -173,6 +196,16 @@ class RunConfig:
             "max_n_obs_sites": self.max_n_obs_sites,
             "min_n_obs_sites": self.min_n_obs_sites,
             "ignore_events": list(self.ignore_events),
+            "mag_scenario_weighting": self.mag_scenario_weighting,
+            "mag_min_weight": self.mag_min_weight,
+            "mag_max_weight": self.mag_max_weight,
+            "mag_start": self.mag_start,
+            "mag_end": self.mag_end,
+            "doc_scenario_weighting": self.doc_scenario_weighting,
+            "doc_min_weight": self.doc_min_weight,
+            "doc_max_weight": self.doc_max_weight,
+            "doc_start": self.doc_start,
+            "doc_end": self.doc_end,
             "device": self.device,
             "ims": list(self.ims),
             "scale_IMs": self.scale_IMs,
@@ -347,9 +380,6 @@ def run_model_training(
         run_config.min_n_obs_sites,
     )
 
-
-
-
     # Sanity check
     assert np.isin(val_int_sites, train_int_sites).sum() == 0
     assert np.isin(val_events, train_events).sum() == 0
@@ -385,6 +415,7 @@ def run_model_training(
         run_config,
         n_procs=graph_data_n_procs,
         verbose=verbose,
+        dist_matrix=dist_matrix,
     )
 
     val_graph_data = get_graph_data(
@@ -396,6 +427,7 @@ def run_model_training(
         run_config,
         n_procs=graph_data_n_procs,
         verbose=verbose,
+        dist_matrix=dist_matrix,
     )
 
     train_loader = gloader.DataLoader(
@@ -506,10 +538,42 @@ def _get_event_graph_data(
     scalar_feature_values: pd.DataFrame,
     graph_feature_keys: dict[str, Sequence[str]],
     run_config: RunConfig,
+    corr_data: LBSiteCorrelationData = None,
 ):
     """Helper function, see get_graph_data"""
     graph_data = []
     cur_site_int_inds = np.unique(site_combs[:, 0])
+
+    ### Weighting functions
+    # Have to get these here, as they are not picklable
+    # Magnitude weighting function
+    mag_weight_fn = (
+        get_mag_weight_func(
+            run_config.mag_min_weight,
+            run_config.mag_max_weight,
+            run_config.mag_start,
+            run_config.mag_end,
+        )
+        if run_config.mag_scenario_weighting
+        else None
+    )
+    # Degree of Constraint weighting function
+    doc_weight_fn = None
+    if run_config.doc_scenario_weighting:
+        doc_weight_fn = get_doc_weight_func(
+            run_config.doc_min_weight,
+            run_config.doc_max_weight,
+            run_config.doc_start,
+            run_config.doc_end,
+        )
+
+    # Get magnitude weight
+    assert (not run_config.mag_scenario_weighting) or (mag_weight_fn is not None)
+    cur_mag_weight = (
+        mag_weight_fn(obs_data.event_df.loc[event, "mag"])
+        if run_config.mag_scenario_weighting
+        else None
+    )
 
     # Get and normalise the IM data
     cur_im_data = np.log(obs_data.get_event_data(event, sites).loc[:, run_config.ims])
@@ -522,6 +586,16 @@ def _get_event_graph_data(
         cur_site_combs_mask = site_combs[:, 0] == cur_site_int_ix
         cur_site_int = sites[site_combs[cur_site_combs_mask, 0][0]]
         cur_obs_sites = sites[site_combs[cur_site_combs_mask, 1]]
+
+        # DoC scenario weighting
+        doc_weight = doc_weight_fn(
+            corr_data.corr_data.sel[cur_site_int, :, :]
+            .loc[cur_obs_sites, constants.PSA_KEYS]
+            .sum(axis=0)
+            .mean()
+            if run_config.doc_scenario_weighting
+            else None
+        )
 
         # Create the site_int node features
         cur_site_int_features = scalar_feature_values.loc[
@@ -588,6 +662,15 @@ def _get_event_graph_data(
             cur_im_data.loc[cur_site_int, run_config.ims].values, dtype=torch.float32
         )[None, :]
 
+        cur_sc_weight = torch.tensor(1.0)
+        if cur_mag_weight is not None:
+            cur_sc_data["metadata"]["mag_weight"] = cur_mag_weight
+            cur_sc_weight += cur_mag_weight
+        if doc_weight is not None:
+            cur_sc_data["metadata"]["doc_weight"] = doc_weight
+            cur_sc_weight += doc_weight
+        cur_sc_data["sc_weight"] = cur_sc_weight
+
         graph_data.append(cur_sc_data)
 
     return pickle.dumps(graph_data)
@@ -602,6 +685,7 @@ def get_graph_data(
     run_config: RunConfig,
     n_procs: int = 1,
     verbose: bool = True,
+    dist_matrix: pd.DataFrame = None,
 ):
     """
     Get the graph data for the given scenarios
@@ -621,6 +705,9 @@ def get_graph_data(
         Number of processes to use, by default 1
     verbose: bool, optional
         Whether to print progress information, by default True
+    dist_matrix: pd.DataFrame, optional
+        Distance matrix, by default None
+        Required if DoC scenario weighting is used
 
     Returns
     -------
@@ -632,6 +719,13 @@ def get_graph_data(
             event_sites, scalar_features, event_site_combs
         )
     )
+
+    # Site2Site Correlation for DoC weight calculation
+    assert (not run_config.doc_scenario_weighting) or (dist_matrix is not None)
+    if run_config.doc_scenario_weighting:
+        corr_data = LBSiteCorrelationData.from_dist_matrix(
+            dist_matrix, constants.PSA_KEYS
+        )
 
     # Create the graph data objects
     graph_data = []
@@ -648,6 +742,7 @@ def get_graph_data(
                     scalar_event_feature_values[cur_event],
                     graph_feature_keys,
                     run_config,
+                    corr_data=corr_data,
                 )
             )
     else:
@@ -663,6 +758,7 @@ def get_graph_data(
                         scalar_event_feature_values[cur_event],
                         graph_feature_keys,
                         run_config,
+                        corr_data,
                     )
                     for cur_event, cur_site_combs in event_site_combs.items()
                 ],
@@ -677,25 +773,18 @@ def compute_loss(
     pred_ln_im_mean: torch.Tensor,
     target: torch.Tensor,
     pred_ln_im_ln_std: torch.Tensor = None,
-    scale_constant: float = 1.0,
     reduction: str = "mean",
 ):
     """
     Computes either the MSE or the Gaussian NLL loss,
     depending on whether the standard deviation is predicted
     """
-    if pred_ln_im_ln_std is not None:
-        loss = (
-            F.gaussian_nll_loss(
-                pred_ln_im_mean,
-                target,
-                torch.exp(pred_ln_im_ln_std) ** 2,
-                reduction=reduction,
-            )
-            * scale_constant
-        )
-    else:
-        loss = F.mse_loss(pred_ln_im_mean, target, reduction=reduction) * scale_constant
+    loss = F.gaussian_nll_loss(
+        pred_ln_im_mean,
+        target,
+        torch.exp(pred_ln_im_ln_std) ** 2,
+        reduction=reduction,
+    )
 
     return loss
 
@@ -733,7 +822,9 @@ def train(
     # Setup metrics to log
     metrics = {
         "loss_hist_train": np.zeros(run_config.n_epochs),
+        "w_loss_hist_train": np.zeros(run_config.n_epochs),
         "loss_hist_val": np.zeros(run_config.n_epochs),
+        "w_loss_hist_val": np.zeros(run_config.n_epochs),
         "mse_hist_train": np.zeros(run_config.n_epochs),
         "mse_hist_val": np.zeros(run_config.n_epochs),
         "mean_sigma_hist_train": np.zeros(run_config.n_epochs),
@@ -756,7 +847,7 @@ def train(
         for cur_batch in tqdm.tqdm(train_loader, disable=not verbose):
             optimizer.zero_grad()
             cur_bresult = _get_batch_result(cur_batch, gnn_model, run_config)
-            cur_bresult.loss.backward()
+            cur_bresult.w_loss.backward()
             optimizer.step()
 
             metrics = _save_metrics(
@@ -765,6 +856,7 @@ def train(
             n_graphs += cur_batch.num_graphs
 
         metrics["loss_hist_train"][cur_epoch_ix] /= n_graphs
+        metrics["w_loss_hist_train"][cur_epoch_ix] /= n_graphs
         metrics["mse_hist_train"][cur_epoch_ix] /= n_graphs
         metrics["mean_sigma_hist_train"][cur_epoch_ix] /= n_graphs
 
@@ -781,24 +873,29 @@ def train(
                 n_graphs += cur_batch.num_graphs
 
         metrics["loss_hist_val"][cur_epoch_ix] /= n_graphs
+        metrics["w_loss_hist_val"][cur_epoch_ix] /= n_graphs
         metrics["mse_hist_val"][cur_epoch_ix] /= n_graphs
         metrics["mean_sigma_hist_val"][cur_epoch_ix] /= n_graphs
 
         # Keep track of the best model
-        if metrics["loss_hist_val"][cur_epoch_ix] < best_val_loss:
-            best_val_loss = metrics["loss_hist_val"][cur_epoch_ix]
+        if metrics["w_loss_hist_val"][cur_epoch_ix] < best_val_loss:
+            best_val_loss = metrics["w_loss_hist_val"][cur_epoch_ix]
             best_model_state = gnn_model.state_dict()
             best_model_epoch = cur_epoch_ix
 
         if verbose:
             print(f"Epoch {cur_epoch_ix}/{run_config.n_epochs}")
             print(
-                f"\tTraining"
-                f"\t\tLoss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
+                f"\tTraining\t\t"
+                f"Weighted Loss: {metrics['w_loss_hist_train'][cur_epoch_ix]:.4f}, "
+                f"Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
+                f"MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
             )
             print(
-                f"\tValidation"
-                f"\t\tLoss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
+                f"\tValidation\t\t"
+                f"Weighted Loss: {metrics['w_loss_hist_val'][cur_epoch_ix]:.4f}, "
+                f"Loss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, "
+                f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
             )
 
     return metrics, best_model_state, best_model_epoch
@@ -820,9 +917,13 @@ class BatchResult(NamedTuple):
     nan_mask: torch.Tensor
     """Mask for nan values in y"""
     loss: torch.Tensor
-    """The loss to preform backpropagation"""
+    """The batch loss"""
+    w_loss: torch.Tensor
+    """The weighted batch loss"""
     ind_loss: torch.Tensor
     """The individual losses, this includes nan-values"""
+    w_ind_loss: torch.Tensor
+    """The weighted individual losses, this includes nan-values"""
 
 
 def _save_metrics(
@@ -834,12 +935,16 @@ def _save_metrics(
 ):
     """Computes and saves the metrics for a single batch"""
     loss_hist_key = f"loss_hist_{result_type}"
+    w_loss_hist_key = f"w_loss_hist_{result_type}"
     mse_hist_key = f"mse_hist_{result_type}"
     mean_sigma_hist_key = f"mean_sigma_hist_{result_type}"
 
     # Save metrics
     metrics[loss_hist_key][epoch_ix] += (
         batch_result.ind_loss.nanmean(dim=1).sum().item()
+    )
+    metrics[w_loss_hist_key][epoch_ix] += (
+        batch_result.w_ind_loss.nanmean(dim=1).sum().item()
     )
     metrics[mse_hist_key][epoch_ix] += (
         F.mse_loss(
@@ -875,26 +980,32 @@ def _get_batch_result(batch: gdata.Batch, gnn_model: nn.Module, run_config: RunC
     """
     cur_batch = batch.to(run_config.device)
     cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
+    cur_sc_weights = einops.repeat(cur_batch.sc_weight, "i -> i j", j=run_config.n_ims)
 
     pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch)
 
     nan_mask = torch.isnan(cur_y)
-    loss = compute_loss(
+    t = compute_loss(
         pred_ln_im_mean[~nan_mask],
         cur_y[~nan_mask],
-        pred_ln_im_ln_std=(
-            pred_ln_im_ln_std[~nan_mask] if pred_ln_im_ln_std is not None else None
-        ),
+        pred_ln_im_ln_std=(pred_ln_im_ln_std[~nan_mask]),
     )
 
-    ind_loss = compute_loss(
-        pred_ln_im_mean,
-        cur_y,
-        pred_ln_im_ln_std=(
-            pred_ln_im_ln_std if pred_ln_im_ln_std is not None else None
-        ),
+    ind_loss = torch.full_like(cur_y, torch.nan)
+    ind_loss_ravel = compute_loss(
+        pred_ln_im_mean[~nan_mask],
+        cur_y[~nan_mask],
+        pred_ln_im_ln_std=pred_ln_im_ln_std[~nan_mask],
         reduction="none",
     )
+    ind_loss[~nan_mask] = ind_loss_ravel
+    loss = ind_loss_ravel.mean()
+
+    w_ind_loss = ind_loss
+    if run_config.mag_scenario_weighting or run_config.doc_scenario_weighting:
+        w_ind_loss = ind_loss * cur_sc_weights
+
+    w_loss = (cur_sc_weights[~nan_mask] * ind_loss_ravel).mean()
 
     return BatchResult(
         batch=batch,
@@ -906,7 +1017,9 @@ def _get_batch_result(batch: gdata.Batch, gnn_model: nn.Module, run_config: RunC
         ),
         nan_mask=nan_mask,
         loss=loss,
+        w_loss=w_loss,
         ind_loss=ind_loss,
+        w_ind_loss=w_ind_loss,
     )
 
 
@@ -982,6 +1095,7 @@ def get_predictions(
     pred_im_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred")
     pred_im_std_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_std")
     loss_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "loss")
+    w_loss_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "w_loss")
 
     results = []
     attn_coeffs = []
@@ -999,6 +1113,15 @@ def get_predictions(
             ],
             index=["event_id", "site_int", "obs_sites"],
         ).T
+        if run_config.mag_scenario_weighting:
+            cur_result.loc[:, "mag_weight"] = (
+                cur_batch["metadata"]["mag_weight"].cpu().numpy(force=True)
+            )
+        if run_config.doc_scenario_weighting:
+            if __name__ == "__main__":
+                cur_result.loc[:, "doc_weight"] = (
+                    cur_batch["metadata"]["doc_weight"].cpu().numpy(force=True)
+                )
 
         ## Add observed
         obs_ims = cur_batch["y"].cpu().numpy(force=True)
@@ -1022,17 +1145,17 @@ def get_predictions(
         cur_result.loc[:, pred_im_keys] = pred_ln_im_mean
         cur_result.loc[:, pred_im_std_keys] = pred_ln_im_std
 
+        cur_batch_result = _get_batch_result(cur_batch, gnn_model, run_config)
+
         # Loss
-        cur_loss = compute_loss(
-            torch_pred_ln_im_mean,
-            cur_batch.y,
-            pred_ln_im_ln_std=torch_pred_ln_im_ln_std,
-            reduction="none",
-        )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
-            cur_result.loc[:, loss_keys] = cur_loss.cpu().numpy(force=True)
-            cur_result.loc[:, "loss"] = cur_loss.nanmean(dim=1).cpu().numpy(force=True)
+            cur_result.loc[:, loss_keys] = cur_batch_result.ind_loss.cpu().numpy(force=True)
+            cur_result.loc[:, "loss"] = cur_batch_result.loss.cpu().numpy(force=True)
+            cur_result.loc[:, w_loss_keys] = cur_batch_result.w_ind_loss.cpu().numpy(
+                force=True
+            )
+            cur_result.loc[:, "w_loss"] = cur_batch_result.w_loss.cpu().numpy(force=True)
 
         # Index
         cur_result = cur_result.set_index(
@@ -1047,7 +1170,10 @@ def get_predictions(
         cur_result.loc[:, "n_obs_sites"] = cur_result["obs_sites"].apply(len)
 
         # Closest observation site distance
-        cur_result.loc[:, "closest_dist"] = [dist_matrix.loc[cur_row.site_int, cur_row.obs_sites].min() for cur_key, cur_row in cur_result.iterrows()]
+        cur_result.loc[:, "closest_dist"] = [
+            dist_matrix.loc[cur_row.site_int, cur_row.obs_sites].min()
+            for cur_key, cur_row in cur_result.iterrows()
+        ]
 
         attn_coeffs.append(cur_attn_coeffs_df)
         results.append(cur_result)
@@ -1074,3 +1200,108 @@ def get_residuals(
     res_df["site_int"] = gnn_results["site_int"]
     res_df["n_obs_sites"] = gnn_results["n_obs_sites"]
     return res_df
+
+
+def get_sc_weights(
+    obs_data: ObservedData,
+    dist_matrix: pd.DataFrame,
+    run_config: RunConfig,
+    site_combs: dict[str, np.ndarray[float]],
+    event_sites: dict[str, np.ndarray[str]],
+):
+    mag_weight_fn = get_mag_weight_func(
+        run_config.mag_min_weight,
+        run_config.mag_max_weight,
+        run_config.mag_start,
+        run_config.mag_end,
+    )
+
+    print(f"wtf")
+
+
+def get_mag_weight_func(
+    min_weight: float, max_weight: float, mag_start: float, mag_end: float
+):
+    """
+    Creates a magnitude weighting function that is linear
+    between the given magnitude values, and otherwise
+    constant.
+
+    Function is defined as:
+    w(m) = min_weight, m <= mag_start
+    w(m) = max_weight, m >= mag_end
+    w(m) = grad*m + bias, mag_start < m < mag_end
+
+    Parameters
+    ----------
+    min_weight: float
+        Minimum weight
+    max_weight: float
+        Maximum weight
+    mag_start: float
+        Start of the linear weighting
+    mag_end: float
+        End of the linear weighting
+
+    Returns
+    -------
+    mag_weight_func: Callable[float, float]
+        The magnitude weighting function
+    """
+    grad = (max_weight - min_weight) / (mag_end - mag_start)
+    bias = min_weight - grad * mag_start
+
+    # def mag_weight_func(mag_values: np.ndarray[float]):
+    #     weights = np.ones_like(mag_values) * min_weight
+    #     weights[mag_values > mag_end] = max_weight
+    #
+    #     weights = np.where((mag_values > mag_start) & (mag_values <= mag_end), (grad*mag_values + bias), weights)
+    #
+    #     return weights
+
+    def mag_weight_func(mag: float) -> float:
+        if mag <= mag_start:
+            return min_weight
+        elif mag >= mag_end:
+            return max_weight
+        else:
+            return grad * mag + bias
+
+    return mag_weight_func
+
+
+def get_doc_weight_func(
+    min_weight: float, max_weight: float, doc_start: float, doc_end: float
+):
+    """
+    Creates a degree of constraint (DoC) weighting function that is linear
+    between the specified DoC values, and otherwise constant.
+
+    Parameters
+    ----------
+    min_weight: float
+        Minimum weight
+    max_weight: float
+        Maximum weight
+    doc_start: float
+        Start of the linear weighting
+    doc_end: float
+        End of the linear weighting
+
+    Returns
+    -------
+    doc_weight_fn: Callable[float, float]
+        The DoC weighting function
+    """
+    grad = (max_weight - min_weight) / (doc_end - doc_start)
+    bias = max_weight - (grad * doc_end)
+
+    def doc_weight_fn(doc: float) -> float:
+        if doc < doc_start:
+            return min_weight
+        elif doc > doc_end:
+            return max_weight
+        else:
+            return grad * doc + bias
+
+    return doc_weight_fn

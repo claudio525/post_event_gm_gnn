@@ -11,6 +11,21 @@ closest_max_dist: 10
 max_n_obs_sites: 10
 min_n_obs_sites: 2
 
+### Scenario Weighting
+# Magnitude
+mag_scenario_weighting: True
+mag_min_weight: 1
+mag_max_weight: 5
+mag_start: 4.8
+mag_end: 6.0
+# DoC
+doc_scenario_weighting: True
+doc_min_weight: 1
+doc_max_weight: 2
+doc_start: 1
+doc_end: 6
+
+
 ignore_events: ["3468575"]
 
 # Features
@@ -43,7 +58,7 @@ scale_IMs: True
 
 # Hyperparameters
 n_epochs: 100
-batch_size: 512
+batch_size: 650
 
 fc_n_units: null
 fcc_act_fn: null
@@ -51,17 +66,17 @@ fcc_act_fn: null
 int_embedding_act_fn: null
 obs_embedding_act_fn: null
 edge_embedding_act_fn: null
-n_att_heads: [5, 5]
-n_int_node_channels: [8, 8]
-n_obs_node_channels: [32, 32]
-n_edge_channels: [8, 8]
-gcn_act_fn: "elu"
+n_att_heads: [8, 8, 8]
+n_int_node_channels: [4, 4, 4]
+n_obs_node_channels: [48, 48, 48]
+n_edge_channels: [4, 4, 4]
+gcn_act_fn: "relu"
 
 att_n_units: [8]
 att_act_fn: "tanh"
 
-l2_reg: 0.0001
-dropout_rate: 0.1
+l2_reg: 0.0007
+dropout_rate: 0.05
 
 # Output settings
 rel_results_dir: sim_ranking/results/gnn

@@ -93,6 +93,7 @@ def run_cv(
 
     id_suffix = f"_{id_suffix}" if len(id_suffix) > 0 else ""
     out_dir = run_config.results_dir / f"{mlt.utils.create_run_id(False)}_cv{id_suffix}"
+    assert not out_dir.exists(), "Output directory already exists!"
 
     # Run CV
     if n_procs == 1:
@@ -117,7 +118,6 @@ def run_cv(
                     cv_iter,
                     True,
                     graph_data_n_procs=mp.cpu_count(),
-                    # graph_data_n_procs=1,
                 )
             )
     else:
@@ -139,7 +139,7 @@ def run_cv(
                         run_config,
                         out_dir,
                         cv_iter,
-                        (cv_iter % n_procs) == 0,
+                        (cv_iter % n_procs) == 0,   # Only print for the first process
                     )
                     for cv_iter, (train_folds_ind, val_fold_ind) in enumerate(
                         get_cv_iterator(fold_combs)
