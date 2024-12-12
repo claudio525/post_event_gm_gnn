@@ -55,7 +55,7 @@ def run_cv(
     # Create the config
     if isinstance(run_config, Path):
         run_config = gnn_gm.RunConfig.from_config_kwargs(
-            run_config, n_epochs=n_epochs, ims=constants.PSA_KEYS, device=device
+            run_config, n_epochs=n_epochs, device=device
         )
 
     ### Data loading
@@ -118,6 +118,7 @@ def run_cv(
                     cv_iter,
                     True,
                     graph_data_n_procs=mp.cpu_count(),
+                    # graph_data_n_procs=1,
                 )
             )
     else:

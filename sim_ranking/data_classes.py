@@ -450,7 +450,7 @@ class ObservedData:
         )
 
         # Drop any columns not of interest
-        im_cols = [col for col in record_df.columns if col.startswith("pSA")]
+        im_cols = constants.IMs
         cols = record_df.columns[record_df.columns.isin(cls.COLUMNS + im_cols)]
         record_df = record_df[cols]
 

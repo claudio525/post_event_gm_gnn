@@ -3,9 +3,6 @@ from enum import Enum, auto, StrEnum
 
 import numpy as np
 
-import ml_tools as mlt
-
-
 class ObsDataSource(StrEnum):
     NZGMDB = "NZGMDB"
     NGAWest2 = "NGAWest2"

@@ -1,3 +1,4 @@
+import time
 import os
 import itertools
 import pickle
@@ -34,6 +35,9 @@ class RunConfig:
 
     ### General settings
     seed: int
+
+    # IMs to use
+    im_set: str
 
     ### Input settings
     rel_obs_data_ffp: Path
@@ -74,9 +78,6 @@ class RunConfig:
     """Device to use"""
 
     ### Model settings
-    ims: Sequence[str]
-    """IMs to predict"""
-
     scale_IMs: bool
     """Whether to scale the IMs"""
 
@@ -129,6 +130,34 @@ class RunConfig:
         assert self.obs_data_ffp.exists()
 
         self._im_scale_params = None
+
+    @property
+    def ims(self):
+        return constants.IM_SETS[self.im_set]
+
+    @property
+    def pSA_ims(self):
+        return constants.PSA_KEYS
+
+    @property
+    def pSA_periods(self):
+        return constants.PERIODS
+
+    @property
+    def non_pSA_ims(self):
+        return constants.NON_PSA_IMs
+
+    @property
+    def pred_std_keys(self):
+        return [f"{cur_key}_pred_std" for cur_key in self.ims]
+
+    @property
+    def pred_std_keys_pSA(self):
+        return [f"{cur_key}_pred_std" for cur_key in self.pSA_ims]
+
+    @property
+    def pred_std_keys_non_pSA(self):
+        return [f"{cur_key}_pred_std" for cur_key in self.non_pSA_ims]
 
     @property
     def n_ims(self):
@@ -207,7 +236,7 @@ class RunConfig:
             "doc_start": self.doc_start,
             "doc_end": self.doc_end,
             "device": self.device,
-            "ims": list(self.ims),
+            "im_set": self.im_set,
             "scale_IMs": self.scale_IMs,
             "n_epochs": self.n_epochs,
             "batch_size": self.batch_size,
@@ -714,11 +743,13 @@ def get_graph_data(
     graph_data: list[gdata.HeteroData]
     """
     # Create the scalar features tensors
+    start_time = time.time()
     scalar_event_feature_values, scalar_feature_columns = (
         ml_data.create_scalar_feature_tensor(
             event_sites, scalar_features, event_site_combs
         )
     )
+    print(f"Took {time.time() - start_time} to create scalar feature tensor")
 
     # Site2Site Correlation for DoC weight calculation
     assert (not run_config.doc_scenario_weighting) or (dist_matrix is not None)

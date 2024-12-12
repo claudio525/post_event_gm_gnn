@@ -3,6 +3,9 @@
 # General settings
 seed: 42
 
+# IMs
+im_set: "all"
+
 # Input data settings
 #rel_obs_data_ffp: gm_datasets/nz_gmdb/v3.4/Tables/ground_motion_im_table_rotd50_flat.csv
 rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.1/Tables/ground_motion_im_table_rotd50_flat.csv
@@ -66,10 +69,10 @@ fcc_act_fn: null
 int_embedding_act_fn: null
 obs_embedding_act_fn: null
 edge_embedding_act_fn: null
-n_att_heads: [8, 8, 8]
-n_int_node_channels: [4, 4, 4]
-n_obs_node_channels: [48, 48, 48]
-n_edge_channels: [4, 4, 4]
+n_att_heads: [8, 8]
+n_int_node_channels: [4, 4]
+n_obs_node_channels: [48, 48]
+n_edge_channels: [4, 4]
 gcn_act_fn: "relu"
 
 att_n_units: [8]
