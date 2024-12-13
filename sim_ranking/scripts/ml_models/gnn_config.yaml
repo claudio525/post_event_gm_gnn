@@ -63,8 +63,10 @@ scale_IMs: True
 n_epochs: 100
 batch_size: 650
 
-fc_n_units: null
-fcc_act_fn: null
+fc_n_units: 32
+fcc_act_fn: "relu"
+
+batch_norm: True
 
 int_embedding_act_fn: null
 obs_embedding_act_fn: null

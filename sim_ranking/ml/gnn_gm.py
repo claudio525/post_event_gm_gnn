@@ -90,6 +90,8 @@ class RunConfig:
     """Number of FC units for the output model"""
     fcc_act_fn: str | None
     """Activation function for the FC output model"""
+    batch_norm: bool
+    """Whether to use batch normalization"""
 
     int_embedding_act_fn: str | None
     """Activation function for the SoI embedding update/transform model"""
@@ -245,6 +247,7 @@ class RunConfig:
             "n_edge_channels": list(self.n_edge_channels),
             "n_att_heads": self.n_att_heads,
             "fc_n_units": self.fc_n_units,
+            "batch_norm": self.batch_norm,
             "int_embedding_act_fn": self.int_embedding_act_fn,
             "obs_embedding_act_fn": self.obs_embedding_act_fn,
             "edge_embedding_act_fn": self.edge_embedding_act_fn,
@@ -1181,12 +1184,16 @@ def get_predictions(
         # Loss
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
-            cur_result.loc[:, loss_keys] = cur_batch_result.ind_loss.cpu().numpy(force=True)
+            cur_result.loc[:, loss_keys] = cur_batch_result.ind_loss.cpu().numpy(
+                force=True
+            )
             cur_result.loc[:, "loss"] = cur_batch_result.loss.cpu().numpy(force=True)
             cur_result.loc[:, w_loss_keys] = cur_batch_result.w_ind_loss.cpu().numpy(
                 force=True
             )
-            cur_result.loc[:, "w_loss"] = cur_batch_result.w_loss.cpu().numpy(force=True)
+            cur_result.loc[:, "w_loss"] = cur_batch_result.w_loss.cpu().numpy(
+                force=True
+            )
 
         # Index
         cur_result = cur_result.set_index(

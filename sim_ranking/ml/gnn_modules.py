@@ -84,6 +84,9 @@ class CustomAttentionGNN(torch.nn.Module):
         self.n_convs = len(self.run_config.n_int_node_channels)
 
         self.convs = torch.nn.ModuleList()
+        self.int_bns = torch.nn.ModuleList() if run_config.batch_norm else None
+        self.obs_bns = torch.nn.ModuleList() if run_config.batch_norm else None
+        self.edge_bns = torch.nn.ModuleList() if run_config.batch_norm else None
         for ix, (
             cur_n_att_heads,
             cur_int_n_channels,
@@ -137,9 +140,10 @@ class CustomAttentionGNN(torch.nn.Module):
                 if ix == 0
                 else run_config.n_int_node_channels[ix - 1] * run_config.n_att_heads[ix]
             )
+            n_int_out_channels = cur_int_n_channels * run_config.n_att_heads[ix]
             int_update_model = _create_single_mlp(
                 n_int_in_channels,
-                cur_int_n_channels * run_config.n_att_heads[ix],
+                n_int_out_channels,
                 run_config.int_embedding_act_fn,
             )
 
@@ -179,13 +183,22 @@ class CustomAttentionGNN(torch.nn.Module):
                 )
             )
 
-        # self.fc1 = nn.Linear(run_config.n_int_node_channels[-1], run_config.fc_n_units)
-        # self.out_fc = nn.Linear(run_config.fc_n_units, run_config.n_outputs)
+            self.int_bns.append(nn.BatchNorm1d(n_int_out_channels))
+            self.obs_bns.append(nn.BatchNorm1d(cur_obs_n_channels))
+            self.edge_bns.append(nn.BatchNorm1d(cur_n_edge_channels))
 
-        self.out_fc = nn.Linear(
-            run_config.n_int_node_channels[-1] * run_config.n_att_heads[-1],
-            run_config.n_outputs,
-        )
+        if run_config.fc_n_units is None:
+            self.fc1 = None
+            self.out_fc = nn.Linear(
+                run_config.n_int_node_channels[-1] * run_config.n_att_heads[-1],
+                run_config.n_outputs,
+            )
+        else:
+            self.fc1 = nn.Linear(
+                run_config.n_int_node_channels[-1] * run_config.n_att_heads[-1],
+                run_config.fc_n_units,
+            )
+            self.out_fc = nn.Linear(run_config.fc_n_units, run_config.n_outputs)
 
     def get_attention_coeff(self, data: gdata.HeteroData):
         """
@@ -269,6 +282,14 @@ class CustomAttentionGNN(torch.nn.Module):
                 self.run_config.gcn_act_fn
             )(obs_int_edge_embedding)
 
+            # Apply batch normalization
+            if self.run_config.batch_norm:
+                node_emb_dict["site_obs"] = self.obs_bns[ix](node_emb_dict["site_obs"])
+                node_emb_dict["site_int"] = self.int_bns[ix](node_emb_dict["site_int"])
+                edge_emb_dict[("site_obs", "informs", "site_int")] = self.edge_bns[ix](
+                    edge_emb_dict[("site_obs", "informs", "site_int")]
+                )
+
             # Apply dropout
             if self.run_config.dropout_rate > 0:
                 node_emb_dict["site_obs"] = F.dropout(
@@ -289,8 +310,8 @@ class CustomAttentionGNN(torch.nn.Module):
 
         x_site_int = node_emb_dict["site_int"]
 
-        # x = mlt.torch.get_act_fn(self.run_config.fcc_act_fn)(self.fc1(x_site_int))
-        # out = self.out_fc(x)
+        if self.fc1 is not None:
+            x_site_int = mlt.torch.get_act_fn(self.run_config.fcc_act_fn)(self.fc1(x_site_int))
 
         out = self.out_fc(x_site_int)
         ln_im_mean, ln_im_std = out.chunk(2, dim=1)
