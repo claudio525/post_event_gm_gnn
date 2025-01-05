@@ -64,7 +64,7 @@ n_epochs: 100
 batch_size: 650
 
 fc_n_units: 32
-fcc_act_fn: "relu"
+fc_act_fn: "relu"
 
 batch_norm: True
 

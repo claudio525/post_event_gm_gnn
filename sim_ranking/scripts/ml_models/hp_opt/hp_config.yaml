@@ -1,16 +1,11 @@
 # Hyperparameters
-batch_size:
-  min: 32
-  max: 2048
+batch_size: [32, 64, 128, 256, 512, 1024, 2048]
 
 n_gcn_layers:
   min: 1
   max: 4
 
-n_obs_node_channels:
-  min: 8
-  max: 64
-  step: 8
+n_obs_node_channels: [8, 16, 32, 64]
 
 n_att_heads:
   min: 1
@@ -26,21 +21,21 @@ n_edge_channels:
   max: 16
   step: 2
 
-gcn_act_fn: ["tanh", "relu", "elu"]
+gcn_act_fn: ["tanh", "relu", "elu", "leaky_relu"]
 
 att_n_units:
   min: 2
   max: 16
   step: 2
+att_act_fn: ["tanh", "relu", "elu", "leaky_relu"]
 
-att_act_fn: ["tanh", "relu", "elu"]
+fc_n_units: [8, 16, 32, 64]
+fc_act_fn: ["tanh", "relu", "elu", "leaky_relu"]
 
-l2_reg:
-  min: 0.00001
-  max: 0.001
+batch_norm: [True, False]
 
-dropout_rate:
-  min: 0.0
-  max: 0.5
+l2_reg: [0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5]
+
+dropout_rate: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
 
 

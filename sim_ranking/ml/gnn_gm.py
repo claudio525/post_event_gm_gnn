@@ -88,7 +88,7 @@ class RunConfig:
     """Batch size"""
     fc_n_units: int
     """Number of FC units for the output model"""
-    fcc_act_fn: str | None
+    fc_act_fn: str | None
     """Activation function for the FC output model"""
     batch_norm: bool
     """Whether to use batch normalization"""
@@ -253,7 +253,7 @@ class RunConfig:
             "edge_embedding_act_fn": self.edge_embedding_act_fn,
             "att_act_fn": self.att_act_fn,
             "gcn_act_fn": self.gcn_act_fn,
-            "fcc_act_fn": self.fcc_act_fn,
+            "fc_act_fn": self.fc_act_fn,
             "att_n_units": list(self.att_n_units),
             "l2_reg": self.l2_reg,
             "dropout_rate": self.dropout_rate,
@@ -746,13 +746,11 @@ def get_graph_data(
     graph_data: list[gdata.HeteroData]
     """
     # Create the scalar features tensors
-    start_time = time.time()
     scalar_event_feature_values, scalar_feature_columns = (
         ml_data.create_scalar_feature_tensor(
             event_sites, scalar_features, event_site_combs
         )
     )
-    print(f"Took {time.time() - start_time} to create scalar feature tensor")
 
     # Site2Site Correlation for DoC weight calculation
     assert (not run_config.doc_scenario_weighting) or (dist_matrix is not None)

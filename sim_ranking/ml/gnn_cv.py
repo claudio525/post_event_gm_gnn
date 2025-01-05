@@ -202,6 +202,15 @@ def run_cv(
         "std_min_val_loss": float(metrics_lda.sel[:, :, "loss_hist_val"].min(axis=0).std().item()),
         "mean_best_val_loss_epoch": float(metrics_lda.sel[:, :, "loss_hist_val"].values.argmin(axis=0).mean().item()),
         "std_best_val_loss_epoch": float(metrics_lda.sel[:, :, "loss_hist_val"].values.argmin(axis=0).std().item()),
+        # Weighted Loss
+        "mean_min_train_w_loss": float(metrics_lda.sel[:, :, "w_loss_hist_train"].min(axis=0).mean().item()),
+        "std_min_train_w_loss": float(metrics_lda.sel[:, :, "w_loss_hist_train"].min(axis=0).std().item()),
+        "mean_best_train_w_loss_epoch": float(metrics_lda.sel[:, :, "w_loss_hist_train"].values.argmin(axis=0).mean().item()),
+        "std_best_train_w_loss_epoch": float(metrics_lda.sel[:, :, "w_loss_hist_train"].values.argmin(axis=0).std().item()),
+        "mean_min_val_w_loss": float(metrics_lda.sel[:, :, "w_loss_hist_val"].min(axis=0).mean().item()),
+        "std_min_val_w_loss": float(metrics_lda.sel[:, :, "w_loss_hist_val"].min(axis=0).std().item()),
+        "mean_best_val_w_loss_epoch": float(metrics_lda.sel[:, :, "w_loss_hist_val"].values.argmin(axis=0).mean().item()),
+        "std_best_val_w_loss_epoch": float(metrics_lda.sel[:, :, "w_loss_hist_val"].values.argmin(axis=0).std().item()),
         # MSE
         "mean_min_train_mse": float(metrics_lda.sel[:, :, "mse_hist_train"].min(axis=0).mean().item()),
         "std_min_train_mse": float(metrics_lda.sel[:, :, "mse_hist_train"].min(axis=0).std().item()),

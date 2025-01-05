@@ -183,9 +183,10 @@ class CustomAttentionGNN(torch.nn.Module):
                 )
             )
 
-            self.int_bns.append(nn.BatchNorm1d(n_int_out_channels))
-            self.obs_bns.append(nn.BatchNorm1d(cur_obs_n_channels))
-            self.edge_bns.append(nn.BatchNorm1d(cur_n_edge_channels))
+            if run_config.batch_norm:
+                self.int_bns.append(nn.BatchNorm1d(n_int_out_channels))
+                self.obs_bns.append(nn.BatchNorm1d(cur_obs_n_channels))
+                self.edge_bns.append(nn.BatchNorm1d(cur_n_edge_channels))
 
         if run_config.fc_n_units is None:
             self.fc1 = None
@@ -311,7 +312,7 @@ class CustomAttentionGNN(torch.nn.Module):
         x_site_int = node_emb_dict["site_int"]
 
         if self.fc1 is not None:
-            x_site_int = mlt.torch.get_act_fn(self.run_config.fcc_act_fn)(self.fc1(x_site_int))
+            x_site_int = mlt.torch.get_act_fn(self.run_config.fc_act_fn)(self.fc1(x_site_int))
 
         out = self.out_fc(x_site_int)
         ln_im_mean, ln_im_std = out.chunk(2, dim=1)

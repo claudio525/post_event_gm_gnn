@@ -17,14 +17,14 @@ class GNNRunResults(NamedTuple):
     val_results: pd.DataFrame
     val_int_sites: np.ndarray[str]
     train_int_sites: np.ndarray[str]
-    metrics: dict
+    metrics: pd.DataFrame
     metadata: dict
 
 
 @st.cache_data
 def get_gnn_result(result_dir: Path):
     run_config = sr.ml.gnn_gm.RunConfig.from_yaml(result_dir / "run_config.yaml")
-    metrics = pd.read_pickle(result_dir / "metrics.pickle")
+    metrics = pd.read_parquet(result_dir / "metrics.parquet")
     train_results = pd.read_parquet(result_dir / "train_results.parquet")
     train_int_sites = np.load(result_dir / "train_int_sites.npy")
     val_results = pd.read_parquet(result_dir / "val_results.parquet")

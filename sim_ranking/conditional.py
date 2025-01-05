@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
+
 import labelled_data_array as lda
 from tqdm import tqdm
 
@@ -13,6 +14,7 @@ from .data_classes import ObservedData, LBSiteCorrelationData
 from . import ml
 from . import data
 from . import utils
+from . import constants
 
 
 def run_cim_for_CV_GNN(
@@ -125,7 +127,7 @@ def run_cim_for_GNN(
 
     # Get the correlation data
     dist_matrix = utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
-    corr_data = LBSiteCorrelationData.from_dist_matrix(dist_matrix, run_config.ims)
+    corr_data = LBSiteCorrelationData.from_dist_matrix(dist_matrix, constants.PSA_KEYS)
 
     # Get the sites of interest for each event
     event_int_sites = gnn_results.groupby("event_id").site_int.unique().to_dict()
@@ -142,7 +144,7 @@ def run_cim_for_GNN(
                 ),
                 corr_data,
                 dist_matrix,
-                run_config.ims,
+                constants.PSA_KEYS,
                 20,
                 True if on_train else False,
             )
@@ -161,7 +163,7 @@ def run_cim_for_GNN(
                         ),
                         corr_data,
                         dist_matrix,
-                        run_config.ims,
+                        constants.PSA_KEYS,
                         20,
                         True if on_train else False,
                     )

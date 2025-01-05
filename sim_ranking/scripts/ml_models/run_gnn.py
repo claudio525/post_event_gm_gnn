@@ -181,10 +181,9 @@ class HPObjective:
 
     def __call__(self, trial: optuna.Trial):
 
-        batch_size = trial.suggest_int(
+        batch_size = trial.suggest_categorical(
             "batch_size",
-            self.hp_opt_config["batch_size"]["min"],
-            self.hp_opt_config["batch_size"]["max"],
+            self.hp_opt_config["batch_size"]
         )
         n_gcn_layers = trial.suggest_int(
             "n_gcn_layers",
@@ -192,11 +191,9 @@ class HPObjective:
             self.hp_opt_config["n_gcn_layers"]["max"],
         )
 
-        n_obs_node_channels = trial.suggest_int(
+        n_obs_node_channels = trial.suggest_categorical(
             "n_obs_node_channels",
-            self.hp_opt_config["n_obs_node_channels"]["min"],
-            self.hp_opt_config["n_obs_node_channels"]["max"],
-            step=self.hp_opt_config["n_obs_node_channels"]["step"],
+            self.hp_opt_config["n_obs_node_channels"],
         )
 
         n_att_heads = trial.suggest_int(
@@ -234,16 +231,22 @@ class HPObjective:
             "att_act_fn", self.hp_opt_config["att_act_fn"]
         )
 
-        l2_reg = trial.suggest_float(
+        fc_n_units = trial.suggest_categorical("fc_n_units", self.hp_opt_config["fc_n_units"])
+        fc_act_fn = trial.suggest_categorical("fc_act_fn", self.hp_opt_config["fc_act_fn"])
+
+        l2_reg = trial.suggest_categorical(
             "l2_reg",
-            self.hp_opt_config["l2_reg"]["min"],
-            self.hp_opt_config["l2_reg"]["max"],
+            self.hp_opt_config["l2_reg"],
         )
 
-        dropout_rate = trial.suggest_float(
+        batch_norm = trial.suggest_categorical(
+            "batch_norm",
+            self.hp_opt_config["batch_norm"],
+        )
+
+        dropout_rate = trial.suggest_categorical(
             "dropout_rate",
-            self.hp_opt_config["dropout_rate"]["min"],
-            self.hp_opt_config["dropout_rate"]["max"],
+            self.hp_opt_config["dropout_rate"],
         )
 
         run_config_dict = self.base_run_config | {
@@ -255,10 +258,12 @@ class HPObjective:
             "gcn_act_fn": gcn_act_fn,
             "att_n_units": n_gcn_layers * [att_n_units],
             "att_act_fn": att_act_fn,
+            "fc_n_units": fc_n_units,
+            "fc_act_fn": fc_act_fn,
+            "batch_norm": batch_norm,
             "l2_reg": l2_reg,
             "dropout_rate": dropout_rate,
             "rel_results_dir": self.rel_results_dir,
-            "ims": sr.constants.PSA_KEYS,
             "n_epochs": self.n_epochs,
             "device": device,
         }
@@ -269,7 +274,7 @@ class HPObjective:
             self.n_event_folds,
             self.n_site_folds,
             n_epochs=None,
-            id_suffix=f"trial_{trial.number}",
+            id_suffix=f"trial_{trial._trial_id}",
             n_procs=self.n_procs,
         )
 
@@ -279,7 +284,7 @@ class HPObjective:
         trial.set_user_attr("result_dir", str(result_dir))
         trial.set_user_attr("id", result_dir.stem)
 
-        return agg_metrics["mean_min_val_loss"]
+        return agg_metrics["mean_min_val_w_loss"]
 
 
 if __name__ == "__main__":

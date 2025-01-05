@@ -3,6 +3,9 @@
 # General settings
 seed: 42
 
+# IMs
+im_set: "all"
+
 # Input data settings
 #rel_obs_data_ffp: gm_datasets/nz_gmdb/v3.4/Tables/ground_motion_im_table_rotd50_flat.csv
 rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.1/Tables/ground_motion_im_table_rotd50_flat.csv
@@ -38,6 +41,22 @@ graph_feature_keys:
 #    - "tsite_site_obs"
 #    - "rrup_site_obs"
 
+### Scenario Weighting
+# Magnitude
+mag_scenario_weighting: True
+mag_min_weight: 1
+mag_max_weight: 5
+mag_start: 4.8
+mag_end: 6.0
+# DoC
+doc_scenario_weighting: True
+doc_min_weight: 1
+doc_max_weight: 2
+doc_start: 1
+doc_end: 6
+
+
+
 # Model settings
 scale_IMs: True
 
@@ -46,7 +65,7 @@ n_epochs: 100
 batch_size: 512
 
 fc_n_units: null
-fcc_act_fn: null
+fc_act_fn: null
 
 int_embedding_act_fn: null
 obs_embedding_act_fn: null
