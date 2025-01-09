@@ -71,9 +71,9 @@ def calculate_distance_matrix(
     return pd.DataFrame(index=stations, data=distance_matrix, columns=stations)
 
 
-def compute_constraintness(
-    result_df: pd.DataFrame, corr_data: LBSiteCorrelationData, ims: Sequence[str]
-):
+def compute_degree_of_constraint(
+    result_df: pd.DataFrame, corr_data: LBSiteCorrelationData
+) -> pd.DataFrame:
     """
     Computes the constraintness for each scenario.
     Constraintness is defined as the sum of the
@@ -90,8 +90,6 @@ def compute_constraintness(
     corr_data: LBSiteCorrelationData
         Correlation data object. Must contain the
         correlations for all relevant sites and IMs.
-    ims: Sequence[str]
-        List of IMs across which to compute the constraintness.
 
     Returns
     -------
@@ -104,7 +102,7 @@ def compute_constraintness(
         cur_obs_sites = result_df.loc[cur_key, "obs_sites"]
         cur_site_int = result_df.loc[cur_key, "site_int"]
 
-        result_df.loc[cur_key, "constraintness"] = (
+        result_df.loc[cur_key, "doc"] = (
             corr_data.corr_data.sel[cur_site_int, :, :]
             .loc[cur_obs_sites]
             .sum(axis=0)

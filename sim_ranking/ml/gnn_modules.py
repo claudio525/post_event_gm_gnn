@@ -67,9 +67,6 @@ class CustomAttentionGNN(torch.nn.Module):
 
     def __init__(
         self,
-        # n_obs_node_features: int,
-        # n_int_node_features: int,
-        # n_edge_features: int,
         run_config: "gnn_gm.RunConfig",
     ):
         super().__init__()
@@ -200,6 +197,10 @@ class CustomAttentionGNN(torch.nn.Module):
                 run_config.fc_n_units,
             )
             self.out_fc = nn.Linear(run_config.fc_n_units, run_config.n_outputs)
+
+    @property
+    def n_train_params(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def get_attention_coeff(self, data: gdata.HeteroData):
         """
@@ -371,7 +372,7 @@ class IntNodeConv(MessagePassing):
         self.att_model = att_model
 
         self.obs_transform_models = obs_transform_models
-        self.int_transform_model = int_update_model
+        self.int_update_model = int_update_model
         self.edge_update_model = edge_update_model
 
         self.n_heads = len(self.obs_transform_models)
@@ -386,7 +387,7 @@ class IntNodeConv(MessagePassing):
         super().reset_parameters()
         ginits.reset(self.att_model)
         ginits.reset(self.obs_transform_models)
-        ginits.reset(self.int_transform_model)
+        ginits.reset(self.int_update_model)
 
     def forward(
         self,
@@ -404,7 +405,7 @@ class IntNodeConv(MessagePassing):
         )
 
         # Update the nodes
-        out = m_s + self.int_transform_model(x[1])
+        out = m_s + self.int_update_model(x[1])
         return out, edge_attr
 
     def edge_update(self, edge_attr: torch.Tensor) -> Tensor:

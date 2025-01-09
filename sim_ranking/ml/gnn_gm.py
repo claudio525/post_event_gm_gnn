@@ -18,6 +18,7 @@ import torch_geometric.data as gdata
 import torch_geometric.loader as gloader
 import torch_geometric.data.batch as gbatch
 import torch_geometric.utils as gutils
+import torch.optim.lr_scheduler as lr_scheduler
 import tqdm
 
 import ml_tools as mlt
@@ -86,12 +87,14 @@ class RunConfig:
     """Number of training epochs"""
     batch_size: int
     """Batch size"""
+
+    batch_norm: bool
+    """Whether to use batch normalization"""
+
     fc_n_units: int
     """Number of FC units for the output model"""
     fc_act_fn: str | None
     """Activation function for the FC output model"""
-    batch_norm: bool
-    """Whether to use batch normalization"""
 
     int_embedding_act_fn: str | None
     """Activation function for the SoI embedding update/transform model"""
@@ -124,6 +127,13 @@ class RunConfig:
 
     dropout_rate: float = 0.0
     """Dropout rate"""
+
+    use_lr_scheduler: bool = False
+    """Whether to use a learning rate scheduler"""
+    lr_patience: int = 5
+    """Number of epochs to wait before reducing the learning rate"""
+    lr_factor: float = 0.5
+    """Factor to reduce the learning rate by"""
 
     ### Features
     graph_feature_keys: dict[str, Sequence[str]] = None
@@ -258,6 +268,10 @@ class RunConfig:
             "l2_reg": self.l2_reg,
             "dropout_rate": self.dropout_rate,
             "rel_results_dir": self.rel_results_dir,
+            "use_lr_scheduler": self.use_lr_scheduler,
+            "lr_patience": self.lr_patience,
+            "lr_factor": self.lr_factor,
+            "graph_feature_keys": self.graph_feature_keys,
         }
 
     def to_yaml(self, ffp: Path):
@@ -463,21 +477,13 @@ def run_model_training(
     )
 
     train_loader = gloader.DataLoader(
-        train_graph_data, batch_size=run_config.batch_size, shuffle=True
+        train_graph_data, batch_size=run_config.batch_size, shuffle=True, drop_last=True
     )
     val_loader = gloader.DataLoader(
         val_graph_data, batch_size=run_config.batch_size, shuffle=True
     )
 
     gnn_model = gnn_modules.CustomAttentionGNN(
-        # len(run_config.graph_feature_keys["site_obs"]) + len(run_config.ims),
-        # run_config.site_obs_n_features,
-        # len(run_config.graph_feature_keys["site_obs"]),
-        # run_config.site_obs_n_scalar_features,
-        # len(run_config.graph_feature_keys["site_int"]),
-        # run_config.site_int_n_features,
-        # len(run_config.graph_feature_keys["edge"]),
-        # run_config.n_edge_features,
         run_config,
     )
     gnn_model.to(run_config.device)
@@ -558,6 +564,7 @@ def run_model_training(
         "best_model_loss": float(metrics["loss_hist_val"][best_model_epoch]),
         "n_train_scenarios": len(train_graph_data),
         "n_val_scenarios": len(val_graph_data),
+        "n_model_parameters": int(gnn_model.n_train_params),
     }
     mlt.utils.write_to_yaml(metadata, out_dir / "metadata.yaml")
 
@@ -869,16 +876,28 @@ def train(
     optimizer = torch.optim.Adam(
         gnn_model.parameters(), lr=0.001, weight_decay=run_config.l2_reg
     )
+    scheduler = (
+        lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=run_config.lr_factor,
+            patience=run_config.lr_patience,
+        )
+        if run_config.use_lr_scheduler
+        else None
+    )
     for cur_epoch_ix in range(run_config.n_epochs):
         if verbose:
-            print(f"Epoch: {cur_epoch_ix}")
+            print(f"Epoch: {cur_epoch_ix + 1}/{run_config.n_epochs}")
 
         ### Training
         n_graphs = 0
         gnn_model.train()
         for cur_batch in tqdm.tqdm(train_loader, disable=not verbose):
             optimizer.zero_grad()
+
             cur_bresult = _get_batch_result(cur_batch, gnn_model, run_config)
+
             cur_bresult.w_loss.backward()
             optimizer.step()
 
@@ -909,6 +928,9 @@ def train(
         metrics["mse_hist_val"][cur_epoch_ix] /= n_graphs
         metrics["mean_sigma_hist_val"][cur_epoch_ix] /= n_graphs
 
+        if scheduler is not None:
+            scheduler.step(metrics["w_loss_hist_val"][cur_epoch_ix])
+
         # Keep track of the best model
         if metrics["w_loss_hist_val"][cur_epoch_ix] < best_val_loss:
             best_val_loss = metrics["w_loss_hist_val"][cur_epoch_ix]
@@ -916,7 +938,7 @@ def train(
             best_model_epoch = cur_epoch_ix
 
         if verbose:
-            print(f"Epoch {cur_epoch_ix}/{run_config.n_epochs}")
+            # print(f"Epoch {cur_epoch_ix}/{run_config.n_epochs}")
             print(
                 f"\tTraining\t\t"
                 f"Weighted Loss: {metrics['w_loss_hist_train'][cur_epoch_ix]:.4f}, "
@@ -1017,11 +1039,6 @@ def _get_batch_result(batch: gdata.Batch, gnn_model: nn.Module, run_config: RunC
     pred_ln_im_mean, pred_ln_im_ln_std = gnn_model(cur_batch)
 
     nan_mask = torch.isnan(cur_y)
-    t = compute_loss(
-        pred_ln_im_mean[~nan_mask],
-        cur_y[~nan_mask],
-        pred_ln_im_ln_std=(pred_ln_im_ln_std[~nan_mask]),
-    )
 
     ind_loss = torch.full_like(cur_y, torch.nan)
     ind_loss_ravel = compute_loss(
@@ -1220,39 +1237,22 @@ def get_predictions(
 
 
 def get_residuals(
-    gnn_results: pd.DataFrame,
+    results: pd.DataFrame,
     ims: Sequence[str] = constants.PSA_KEYS,
     pred_suffix: str = "pred",
 ):
     """Computes the residual between the observed and predicted IMs for each scenario"""
     pred_im_keys = mlt.array_utils.numpy_str_join("_", ims, pred_suffix)
     res_df = pd.DataFrame(
-        data=gnn_results.loc[:, ims].values - gnn_results.loc[:, pred_im_keys].values,
+        data=results.loc[:, ims].values - results.loc[:, pred_im_keys].values,
         columns=ims,
     )
 
-    res_df.index = gnn_results.index
-    res_df["event_id"] = gnn_results["event_id"]
-    res_df["site_int"] = gnn_results["site_int"]
-    res_df["n_obs_sites"] = gnn_results["n_obs_sites"]
+    res_df.index = results.index
+    res_df["event_id"] = results["event_id"]
+    res_df["site_int"] = results["site_int"]
+    res_df["n_obs_sites"] = results["n_obs_sites"]
     return res_df
-
-
-def get_sc_weights(
-    obs_data: ObservedData,
-    dist_matrix: pd.DataFrame,
-    run_config: RunConfig,
-    site_combs: dict[str, np.ndarray[float]],
-    event_sites: dict[str, np.ndarray[str]],
-):
-    mag_weight_fn = get_mag_weight_func(
-        run_config.mag_min_weight,
-        run_config.mag_max_weight,
-        run_config.mag_start,
-        run_config.mag_end,
-    )
-
-    print(f"wtf")
 
 
 def get_mag_weight_func(

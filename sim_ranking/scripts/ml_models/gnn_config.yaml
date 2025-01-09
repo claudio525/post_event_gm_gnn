@@ -19,7 +19,7 @@ min_n_obs_sites: 2
 mag_scenario_weighting: True
 mag_min_weight: 1
 mag_max_weight: 5
-mag_start: 4.8
+mag_start: 4.5
 mag_end: 6.0
 # DoC
 doc_scenario_weighting: True
@@ -38,14 +38,19 @@ graph_feature_keys:
     - "angular_dist"
     - "vs30_site_int"
     - "vs30_diff"
+    - "z1p0_site_int"
+    - "z1p0_diff"
+    - "z2p5_site_int"
+    - "z2p5_diff"
     - "tsite_site_int"
     - "tsite_diff"
     - "rrup_site_int"
     - "rrup_diff"
+#    - "mag"
   site_int:
     - "vs30_site_int"
-#    - "z1p0_site_int"
-#    - "z2p5_site_int"
+    - "z1p0_site_int"
+    - "z2p5_site_int"
     - "tsite_site_int"
     - "rrup_site_int"
     - "mag"
@@ -61,9 +66,14 @@ scale_IMs: True
 
 # Hyperparameters
 n_epochs: 100
-batch_size: 650
+batch_size: 32
 
-fc_n_units: 32
+use_lr_scheduler: True
+lr_patience: 25
+lr_factor: 0.5
+
+
+fc_n_units: 64
 fc_act_fn: "relu"
 
 batch_norm: True
@@ -71,17 +81,17 @@ batch_norm: True
 int_embedding_act_fn: null
 obs_embedding_act_fn: null
 edge_embedding_act_fn: null
-n_att_heads: [8, 8]
 n_int_node_channels: [4, 4]
-n_obs_node_channels: [48, 48]
+n_obs_node_channels: [64, 64]
 n_edge_channels: [4, 4]
 gcn_act_fn: "relu"
 
-att_n_units: [8]
-att_act_fn: "tanh"
+n_att_heads: [6, 6]
+att_n_units: [6, 6]
+att_act_fn: "leaky_relu"
 
-l2_reg: 0.0007
-dropout_rate: 0.05
+l2_reg: 0.005
+dropout_rate: 0.25
 
 # Output settings
 rel_results_dir: sim_ranking/results/gnn

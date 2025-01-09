@@ -21,7 +21,7 @@ if torch.cuda.is_available():
 
 print(f"Using device: {device.upper()}")
 
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_show_locals=False)
 
 
 @app.command("run-holdout")
