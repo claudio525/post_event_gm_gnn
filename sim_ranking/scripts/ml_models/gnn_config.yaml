@@ -1,7 +1,7 @@
 ### All paths specified are relative to the environment variable $wdata
 
 # General settings
-seed: 42
+seed: 52
 
 # IMs
 im_set: "all"
@@ -46,7 +46,7 @@ graph_feature_keys:
     - "tsite_diff"
     - "rrup_site_int"
     - "rrup_diff"
-#    - "mag"
+    - "mag"
   site_int:
     - "vs30_site_int"
     - "z1p0_site_int"
@@ -66,9 +66,9 @@ scale_IMs: True
 
 # Hyperparameters
 n_epochs: 100
-batch_size: 32
+batch_size: 64
 
-use_lr_scheduler: True
+use_lr_scheduler: False
 lr_patience: 25
 lr_factor: 0.5
 
@@ -82,7 +82,7 @@ int_embedding_act_fn: null
 obs_embedding_act_fn: null
 edge_embedding_act_fn: null
 n_int_node_channels: [4, 4]
-n_obs_node_channels: [64, 64]
+n_obs_node_channels: [32, 32]
 n_edge_channels: [4, 4]
 gcn_act_fn: "relu"
 
@@ -91,7 +91,7 @@ att_n_units: [6, 6]
 att_act_fn: "leaky_relu"
 
 l2_reg: 0.005
-dropout_rate: 0.25
+dropout_rate: 0.1
 
 # Output settings
 rel_results_dir: sim_ranking/results/gnn

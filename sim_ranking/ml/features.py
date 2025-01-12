@@ -8,12 +8,14 @@ from pyproj import Transformer
 from . import data as ml_data
 from . import gnn_gm
 from .. import constants
-from ..data_classes import ObservedData
 
 
 def get_scalar_features(
     event_sites: dict[str, np.ndarray],
-    obs_data: ObservedData,
+    # obs_data: ObservedData,
+    event_df: pd.DataFrame,
+    site_df: pd.DataFrame,
+    event_site_df: pd.DataFrame,
     run_config: gnn_gm.RunConfig,
     scalar_feature_keys: dict[str, Sequence[str]],
     dist_matrix: pd.DataFrame,
@@ -21,9 +23,9 @@ def get_scalar_features(
     """Performs pre-processing of the data"""
     events = np.asarray(list(event_sites.keys()))
 
-    event_df = obs_data.event_df.copy()
-    record_df = obs_data.record_df.copy()
-    site_df = obs_data.site_df.copy()
+    event_df = event_df.copy(True)
+    site_df = site_df.copy(True)
+    event_site_df = event_site_df.copy(True)
 
     ### Event features
     event_features_df = _pre_process_event_features(event_df, scalar_feature_keys["event"])
@@ -33,7 +35,7 @@ def get_scalar_features(
 
     ### Event-site features
     event_site_features_df = _pre_process_event_site_features(
-        record_df.copy(), scalar_feature_keys["event_site"]
+        event_site_df.copy(), scalar_feature_keys["event_site"]
     )
     event_groups = event_site_features_df.groupby("event_id")
     event_site_features = {
@@ -48,7 +50,7 @@ def get_scalar_features(
 
     ### Event site-to-site features
     event_site_to_site_features = _compute_event_site_to_site_features(
-        events, event_sites, event_df, site_df, record_df, run_config.max_dist
+        events, event_sites, event_df, site_df, event_site_df, run_config.max_dist
     )
 
     scalar_features = ml_data.ScalarFeatures(
@@ -139,7 +141,7 @@ def _compute_event_site_to_site_features(
     rrup_diff = {}
     for cur_event in events:
         cur_sites = event_sites[cur_event]
-        cur_record_df = record_df.loc[record_df.event_id == cur_event]
+        cur_record_df = record_df.loc[record_df.event_id == cur_event].set_index("site_id").loc[cur_sites]
 
         cur_rrup_diff = cur_record_df.rrup.values[:, None] - cur_record_df.rrup.values[None, :]
         cur_rrup_diff = (2 * (cur_rrup_diff - (-max_dist)) / (max_dist - (-max_dist))) - 1

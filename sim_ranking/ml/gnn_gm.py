@@ -135,13 +135,23 @@ class RunConfig:
     lr_factor: float = 0.5
     """Factor to reduce the learning rate by"""
 
+    _im_scale_params: dict[str, pd.Series] | None = None
+
     ### Features
     graph_feature_keys: dict[str, Sequence[str]] = None
 
     def __post_init__(self):
         assert self.obs_data_ffp.exists()
 
-        self._im_scale_params = None
+        # Handle loading IM scale parameters from a dict
+        if self._im_scale_params is not None:
+            tmp = {
+                cur_key: pd.Series(cur_dict) for cur_key, cur_dict in
+                self._im_scale_params.items()
+            }
+            self._im_scale_params = tmp
+        else:
+            self.im_scale_params = None
 
     @property
     def ims(self):
@@ -229,7 +239,7 @@ class RunConfig:
         return Path(self.wdata) / self.rel_obs_data_ffp
 
     def to_dict(self):
-        return {
+        result = {
             "seed": self.seed,
             "rel_obs_data_ffp": self.rel_obs_data_ffp,
             "max_dist": self.max_dist,
@@ -273,6 +283,12 @@ class RunConfig:
             "lr_factor": self.lr_factor,
             "graph_feature_keys": self.graph_feature_keys,
         }
+        if self.im_scale_params is not None:
+            result["_im_scale_params"] = {
+                cur_key: cur_df.to_dict()
+                for cur_key, cur_df in self.im_scale_params.items()
+            }
+        return result
 
     def to_yaml(self, ffp: Path):
         mlt.utils.write_to_yaml(self.to_dict(), ffp)
@@ -346,7 +362,7 @@ class HoldoutConfig:
 
     @classmethod
     def from_dict(cls, d: dict):
-        return cls(**d)
+        return  cls(**d)
 
     @classmethod
     def from_yaml(cls, ffp: Path):
@@ -574,7 +590,7 @@ def _get_event_graph_data(
     sites: np.ndarray,
     site_combs: np.ndarray,
     obs_data: ObservedData,
-    scalar_feature_values: pd.DataFrame,
+    scalar_feature_df: pd.DataFrame,
     graph_feature_keys: dict[str, Sequence[str]],
     run_config: RunConfig,
     corr_data: LBSiteCorrelationData = None,
@@ -637,7 +653,7 @@ def _get_event_graph_data(
         )
 
         # Create the site_int node features
-        cur_site_int_features = scalar_feature_values.loc[
+        cur_site_int_features = scalar_feature_df.loc[
             cur_site_combs_mask, graph_feature_keys["site_int"]
         ].values[0]
 
@@ -650,7 +666,7 @@ def _get_event_graph_data(
             and len(graph_feature_keys["site_obs"]) > 0
         ):
             # Create the site_obs node features
-            cur_obs_sites_features = scalar_feature_values.loc[
+            cur_obs_sites_features = scalar_feature_df.loc[
                 cur_site_combs_mask,
                 graph_feature_keys["site_obs"],
             ].values
@@ -666,7 +682,7 @@ def _get_event_graph_data(
             cur_obs_sites_features = cur_obs_sites_im_values
 
         # Create the edge features
-        cur_edge_features = scalar_feature_values.loc[
+        cur_edge_features = scalar_feature_df.loc[
             cur_site_combs_mask, graph_feature_keys["edge"]
         ].values
 
@@ -754,7 +770,7 @@ def get_graph_data(
     """
     # Create the scalar features tensors
     scalar_event_feature_values, scalar_feature_columns = (
-        ml_data.create_scalar_feature_tensor(
+        ml_data.create_event_scalar_feature_dfs(
             event_sites, scalar_features, event_site_combs
         )
     )

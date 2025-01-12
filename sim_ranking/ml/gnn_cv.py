@@ -79,7 +79,7 @@ def run_cv(
 
     print(f"Getting scalar features")
     scalar_features = features.get_scalar_features(
-        event_sites, obs_data, run_config, constants.SCALAR_FEATURE_KEYS, dist_matrix
+        event_sites, obs_data.event_df, obs_data.site_df, obs_data.record_df, run_config, constants.SCALAR_FEATURE_KEYS, dist_matrix
     )
 
     # Cross-validation setup
@@ -137,7 +137,7 @@ def run_cv(
                         dist_matrix,
                         obs_data,
                         scalar_features,
-                        run_config,
+                        copy.deepcopy(run_config),
                         out_dir,
                         cv_iter,
                         (cv_iter % n_procs) == 0,   # Only print for the first process

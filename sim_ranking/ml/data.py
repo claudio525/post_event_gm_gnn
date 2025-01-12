@@ -157,11 +157,11 @@ def compute_site_combinations(
     return site_combs, used_sites
 
 
-def create_scalar_feature_tensor(
+def create_event_scalar_feature_dfs(
     event_sites: Dict[str, np.ndarray],
     scalar_features: ScalarFeatures,
     event_site_combs: Dict[str, np.ndarray],
-):
+) -> tuple[dict[str,pd.DataFrame], np.ndarray]:
     """
     Create feature matrix for all site combinations
     of shape [n_event_site_combinations, n_features]
@@ -195,7 +195,7 @@ def create_scalar_feature_tensor(
         ]
     )
 
-    scalar_features_values = {}
+    event_scalar_features_dfs = {}
     for cur_event in events:
         cur_sites = event_sites[cur_event]
         cur_site_combs = event_site_combs[cur_event]
@@ -266,13 +266,13 @@ def create_scalar_feature_tensor(
                 cur_feature_df.columns.get_indexer_for(cur_site_obs),
             ]
 
-        scalar_features_values[cur_event] = pd.DataFrame(
+        event_scalar_features_dfs[cur_event] = pd.DataFrame(
             data=cur_tensor, columns=scalar_feature_columns
         )
         # scalar_features_values.append(cur_tensor)
 
     # scalar_features_values = np.concatenate(scalar_features_values, axis=0)
-    return scalar_features_values, scalar_feature_columns
+    return event_scalar_features_dfs, scalar_feature_columns
 
 
 def get_valid_site_ints(

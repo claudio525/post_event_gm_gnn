@@ -84,7 +84,7 @@ def run_holdout(
 
     print(f"Getting scalar features")
     scalar_features = features.get_scalar_features(
-        event_sites, obs_data, run_config, constants.SCALAR_FEATURE_KEYS, dist_matrix
+        event_sites, obs_data.event_df, obs_data.site_df, obs_data.record_df, run_config, constants.SCALAR_FEATURE_KEYS, dist_matrix
     )
 
     id_suffix = f"_{id_suffix}" if len(id_suffix) > 0 else ""
