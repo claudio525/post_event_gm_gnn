@@ -1183,10 +1183,9 @@ def get_predictions(
                 cur_batch["metadata"]["mag_weight"].cpu().numpy(force=True)
             )
         if run_config.doc_scenario_weighting:
-            if __name__ == "__main__":
-                cur_result.loc[:, "doc_weight"] = (
-                    cur_batch["metadata"]["doc_weight"].cpu().numpy(force=True)
-                )
+            cur_result.loc[:, "doc_weight"] = (
+                cur_batch["metadata"]["doc_weight"].cpu().numpy(force=True)
+            )
 
         ## Add observed
         obs_ims = cur_batch["y"].cpu().numpy(force=True)

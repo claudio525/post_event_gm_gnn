@@ -1,13 +1,12 @@
 ### All paths specified are relative to the environment variable $wdata
 
 # General settings
-seed: 52
+seed: 42
 
 # IMs
 im_set: "all"
 
 # Input data settings
-#rel_obs_data_ffp: gm_datasets/nz_gmdb/v3.4/Tables/ground_motion_im_table_rotd50_flat.csv
 rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.1/Tables/ground_motion_im_table_rotd50_flat.csv
 max_dist: 30
 closest_max_dist: 10
@@ -27,7 +26,6 @@ doc_min_weight: 1
 doc_max_weight: 2
 doc_start: 1
 doc_end: 6
-
 
 ignore_events: ["3468575"]
 
@@ -62,35 +60,34 @@ graph_feature_keys:
 #    - "rrup_site_obs"
 
 # Model settings
-scale_IMs: True
+scale_IMs: true
 
 # Hyperparameters
-n_epochs: 100
-batch_size: 64
+n_epochs: 250
+batch_size: 1024
 
-use_lr_scheduler: False
-lr_patience: 25
+use_lr_scheduler: True
+lr_patience: 50
 lr_factor: 0.5
-
 
 fc_n_units: 64
 fc_act_fn: "relu"
 
-batch_norm: True
+batch_norm: true
 
 int_embedding_act_fn: null
 obs_embedding_act_fn: null
 edge_embedding_act_fn: null
-n_int_node_channels: [4, 4]
+n_int_node_channels: [2, 2]
 n_obs_node_channels: [32, 32]
 n_edge_channels: [4, 4]
 gcn_act_fn: "relu"
 
-n_att_heads: [6, 6]
-att_n_units: [6, 6]
-att_act_fn: "leaky_relu"
+n_att_heads: [4, 4]
+att_n_units: [8, 8]
+att_act_fn: "tanh"
 
-l2_reg: 0.005
+l2_reg: 0.0005
 dropout_rate: 0.1
 
 # Output settings

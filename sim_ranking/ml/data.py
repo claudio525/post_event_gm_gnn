@@ -30,6 +30,17 @@ class ScalarFeatures:
             + len(self.event_site_feature_keys) * 2
             + len(self.event_site_to_site_feature_keys)
         )
+    
+    def __repr__(self):
+        return (
+            f"ScalarFeatures(\n"
+            f"  event_feature_keys: {self.event_feature_keys},\n"
+            f"  site_feature_keys: {self.site_feature_keys},\n"
+            f"  site_to_site_feature_keys: {self.site_to_site_feature_keys},\n"
+            f"  event_site_feature_keys: {self.event_site_feature_keys},\n"
+            f"  event_site_to_site_feature_keys: {self.event_site_to_site_feature_keys}\n"
+            f")"
+        )
 
 
 def compute_site_combinations(

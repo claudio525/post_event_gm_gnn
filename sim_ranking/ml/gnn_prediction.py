@@ -3,38 +3,23 @@ Module for performing predictions using an already trained GNN
 for post-event GM estimation
 """
 
-import time
-import os
-import itertools
-import pickle
-import warnings
-import multiprocessing as mp
-from typing import NamedTuple, Sequence, Callable
 from pathlib import Path
-from dataclasses import dataclass
 
-import einops
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch_geometric.data as gdata
 import torch_geometric.loader as gloader
-import torch_geometric.data.batch as gbatch
-import torch_geometric.utils as gutils
-import torch.optim.lr_scheduler as lr_scheduler
-import tqdm
+from tqdm import tqdm
 
 import ml_tools as mlt
 
+
 from . import data as ml_data
-from . import gnn_modules
 from . import features
 from . import gnn_gm
 from .. import utils
 from .. import constants
-from ..data_classes import ObservedData, LBSiteCorrelationData
 
 
 def predict_single(
@@ -53,7 +38,7 @@ def predict_single(
     # Scale the IM data
     im_data = im_data[run_config.ims + ["event_id", "site_id"]].copy()
     im_data[run_config.ims] = (
-        im_data[run_config.ims] - run_config.im_scale_params["mean"][run_config.ims]
+        np.log(im_data[run_config.ims]) - run_config.im_scale_params["mean"][run_config.ims]
     ) / run_config.im_scale_params["std"][run_config.ims]
 
     # Get the events and relevant event site pairs
@@ -67,10 +52,10 @@ def predict_single(
         for cur_event, cur_sites in event_sites.items()
     }
 
-    print(f"Computing distance matrix")
+    print("Computing distance matrix")
     dist_matrix = utils.calculate_distance_matrix(site_df.index, site_df)
 
-    print(f"Getting scalar features")
+    print("Getting scalar features")
     scalar_features = features.get_scalar_features(
         event_sites,
         event_df,
@@ -102,7 +87,7 @@ def predict_single(
     )
 
     graph_data = []
-    for cur_event, cur_site_int, cur_obs_sites in scenario_defs:
+    for cur_event, cur_site_int, cur_obs_sites in tqdm(scenario_defs, desc="Creating graph data"):
         cur_scalar_feature_df = event_scalar_feature_dfs[cur_event]
 
         cur_im_data = im_data.loc[im_data.event_id == cur_event].set_index("site_id")
@@ -177,9 +162,41 @@ def predict_single(
 
         graph_data.append(cur_sc_data)
 
-    # loader = gloader.DataLoader(graph_data, batch_size=512)
-    results = model(graph_data[0].to("cuda"))
+    std_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "std")
+    results = []
+    loader = gloader.DataLoader(graph_data, batch_size=1024, shuffle=False)    
+    for cur_batch in tqdm(loader, desc="Running predictions"):
+        cur_batch = cur_batch.to(run_config.device)
 
-    return results
+        # Get predictions
+        cur_out = model(cur_batch)
+        torch_pred_ln_im_mean, torch_pred_ln_im_ln_std = cur_out
+        pred_ln_im_std = torch.exp(torch_pred_ln_im_ln_std).cpu().numpy(force=True)
+        pred_ln_im_mean = torch_pred_ln_im_mean.cpu().numpy(force=True)
+
+        # Revert the IM scaling
+        if run_config.scale_IMs:
+            pred_ln_im_mean, pred_ln_im_std = gnn_gm.revert_im_scaling(
+                pred_ln_im_mean, run_config, pred_ln_im_std
+            )
+
+        cur_result_df = pd.DataFrame(
+            {
+                "event_id": cur_batch["metadata"]["event"],
+                "site_int": cur_batch["metadata"]["site_int"],
+                "obs_sites": cur_batch["metadata"]["obs_sites"],
+            }
+        )
+        cur_result_df[run_config.ims] = pred_ln_im_mean
+        cur_result_df[std_cols] = pred_ln_im_std
+
+
+        results.append(cur_result_df)
+
+
+    result_df = pd.concat(results, axis=0)
+    result_df.index = mlt.array_utils.numpy_str_join("_", result_df["event_id"].values.astype(str), result_df["site_int"].values.astype(str))
+
+    return result_df    
 
 

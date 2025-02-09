@@ -162,7 +162,7 @@ def run_emp_gmms(
     rupture_df = rupture_df.loc[rupture_df.rjb <= rjb_max]
 
     ### GM prediction
-    print(f"Running predictions")
+    print("Running predictions")
     dfs = []
     sites = np.unique(rupture_df[ObservedData.SiteColEnums.SITE_ID])
     for cur_site in tqdm.tqdm(sites):
