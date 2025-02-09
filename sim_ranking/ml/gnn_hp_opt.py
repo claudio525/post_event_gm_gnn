@@ -6,7 +6,7 @@ import optuna
 import ml_tools as mlt
 
 from . import gnn_gm
-from . import gnn_cv
+from . import gnn_train_cv
 
 
 def run_hp_opt(
@@ -215,7 +215,7 @@ class HPObjective:
         }
         run_config = gnn_gm.RunConfig.from_dict(run_config_dict)
 
-        result_dir, agg_metrics = gnn_cv.run_cv(
+        result_dir, agg_metrics = gnn_train_cv.run_cv(
             run_config,
             self.n_event_folds,
             self.n_site_folds,

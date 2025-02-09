@@ -35,7 +35,7 @@ def run_holdout(
 
     ### Data setup
     # Get the set of valid site-interests per event
-    print(f"Getting valid sites of interest")
+    print("Getting valid sites of interest")
     valid_int_sites, valid_event_int_sites, _ = ml_data.get_valid_site_ints(
         event_sites, obs_data.record_df.drop(columns=obs_data.ims)
     )
@@ -57,7 +57,7 @@ def run_holdout(
         val_events = np.union1d(val_events, holdout_config.val_events)
     train_events = np.setdiff1d(events, val_events)
 
-    print(f"----------------- Events Summary -----------------")
+    print("----------------- Events Summary -----------------")
     print(f"Number of available events: {len(events)}")
     print(f"Number of training events: {train_events.size}")
     print(f"Number of validation events: {val_events.size}")
@@ -71,18 +71,18 @@ def run_holdout(
     train_int_sites = np.setdiff1d(valid_int_sites, val_int_sites)
     obs_sites = np.setdiff1d(all_sites, val_int_sites)
 
-    print(f"----------------- Sites Summary -----------------")
+    print("----------------- Sites Summary -----------------")
     print(f"Number of available sites: {len(all_sites)}")
     print(f"Number of valid sites of interests: {valid_int_sites.size}")
     print(f"Number of training sites of interests: {train_int_sites.size}")
     print(f"Number of validation sites of interests: {val_int_sites.size}")
     print(f"Number of observation sites: {obs_sites.size}")
-    print(f"------------------------------------------------")
+    print("------------------------------------------------")
 
-    print(f"Computing distance matrix")
+    print("Computing distance matrix")
     dist_matrix = utils.calculate_distance_matrix(all_sites, obs_data.site_df)
 
-    print(f"Getting scalar features")
+    print("Getting scalar features")
     scalar_features = features.get_scalar_features(
         event_sites, obs_data.event_df, obs_data.site_df, obs_data.record_df, run_config, constants.SCALAR_FEATURE_KEYS, dist_matrix
     )

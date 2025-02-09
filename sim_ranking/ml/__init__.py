@@ -6,10 +6,10 @@ from . import gnn_modules
 from . import utils
 
 from .gnn_gm import RunConfig
-from .gnn_cv import run_cv
-from .gnn_holdout import run_holdout
+from .gnn_train_cv import run_cv
+from .gnn_train_holdout import run_holdout
 from .gnn_prediction import predict_single
-from .gnn_hp import run_hp_opt, HPObjective
+from .gnn_hp_opt import run_hp_opt, HPObjective
 
 
 __all__ = [
