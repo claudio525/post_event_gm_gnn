@@ -73,6 +73,7 @@ def run_emp_gmms(
     nzgmdb_flat_ffp: Path,
     rjb_max: float,
     events: Sequence[str] = None,
+    periods: Sequence[float] = constants.PERIODS,
 ):
     """
     Computes the empirical GMM parameters for all
@@ -135,7 +136,7 @@ def run_emp_gmms(
     }
 
     ### Data loading
-    obs_data = load_obs_nzgmdb(nzgmdb_flat_ffp)
+    # obs_data = load_obs_nzgmdb(nzgmdb_flat_ffp)
 
     # Create rupture dataframe
     columns = [
@@ -145,7 +146,8 @@ def run_emp_gmms(
         ObservedData.SiteColEnums.SITE_LAT,
         ObservedData.EventColEnums.TECT_TYPE,
     ] + list(OBS_DATA_COLS_MAPPING.keys())
-    rupture_df = obs_data.record_df[columns].copy(True)
+    rupture_df = pd.read_csv(nzgmdb_flat_ffp, index_col=0)[columns]
+    # rupture_df = obs_data.record_df[columns].copy(True)
 
     # Filter events
     if events is not None:
@@ -192,7 +194,7 @@ def run_emp_gmms(
                 cur_tect_type,
                 rupture_df.loc[cur_tect_mask, OQ_INPUT_COLUMNS],
                 "pSA",
-                constants.PERIODS,
+                periods,
             )
 
             cur_df = pd.concat((pga_result, psa_result), axis=1)

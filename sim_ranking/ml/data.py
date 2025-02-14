@@ -30,22 +30,11 @@ class ScalarFeatures:
             + len(self.event_site_feature_keys) * 2
             + len(self.event_site_to_site_feature_keys)
         )
-    
-    def __repr__(self):
-        return (
-            f"ScalarFeatures(\n"
-            f"  event_feature_keys: {self.event_feature_keys},\n"
-            f"  site_feature_keys: {self.site_feature_keys},\n"
-            f"  site_to_site_feature_keys: {self.site_to_site_feature_keys},\n"
-            f"  event_site_feature_keys: {self.event_site_feature_keys},\n"
-            f"  event_site_to_site_feature_keys: {self.event_site_to_site_feature_keys}\n"
-            f")"
-        )
 
 
 def compute_site_combinations(
     event_sites: Dict[str, np.ndarray],
-    valid_event_int_sites: Dict[str, np.ndarray],
+    event_int_sites: Dict[str, np.ndarray],
     events: Sequence[str],
     dist_matrix: pd.DataFrame,
     site_obs: np.ndarray,
@@ -63,9 +52,9 @@ def compute_site_combinations(
 
     Parameters
     ----------
-    event_sites: dict
-        Sites available for each event
-    valid_event_int_sites: dict
+    event_obs_sites: dict
+        All relevant sites for each event
+    event_int_sites: dict
         Valid sites of interest for each event
     site_obs: np.ndarray
         Sites that are allowed to be used as observation sites
@@ -95,7 +84,7 @@ def compute_site_combinations(
     site_combs, used_sites = {}, {}
     for cur_event in events:
         # Current sites of interest
-        cur_int_sites = valid_event_int_sites[cur_event]
+        cur_int_sites = event_int_sites[cur_event]
         cur_int_sites = cur_int_sites[np.isin(cur_int_sites, site_int)]
 
         # Current observation sites
@@ -104,11 +93,6 @@ def compute_site_combinations(
 
         # All sites for the current event
         cur_sites = np.union1d(cur_int_sites, cur_obs_sites)
-
-        # cur_sites = event_sites[cur_event]
-        # cur_sites = cur_sites[
-        #     np.isin(cur_sites, site_int) | np.isin(cur_sites, site_obs)
-        # ]
 
         # Need at least one site of interest and one observation site
         if len(cur_int_sites) < 1 or len(cur_obs_sites) < 1:
@@ -120,34 +104,44 @@ def compute_site_combinations(
         if cur_dist_matrix.shape[1] < 2:
             continue
 
-        # Get observation sites such that minimum
-        # number of observations sites is satisfied
-        neigh = NearestNeighbors(metric="precomputed", n_jobs=1)
-        neigh.fit(cur_dist_matrix)
-        dist, n_neigh_ind = neigh.kneighbors(
-            n_neighbors=min(max_n_obs_sites + 1, cur_dist_matrix.shape[1]),
-            X=cur_dist_matrix,
-            return_distance=True,
-        )
+        # Get the observation site indices into cur_sites
+        # Needed, as all indices need to be wrt. cur_sites
+        obs_site_ind = np.arange(0, len(cur_sites))[np.isin(cur_sites, cur_obs_sites)]
+        assert np.all(cur_sites[obs_site_ind] == cur_obs_sites)
 
-        # Apply distance filter
+        # Sort each row (site of interest) by distance
+        sort_ind = np.argsort(cur_dist_matrix.values, axis=1)
+        dist = np.take_along_axis(cur_dist_matrix.values, sort_ind, axis=1)
+
+        # Filtering
+        # Maximum distance filter 
         dist_mask = dist < max_dist
+        # Ignore first column as it is the site itself, i.e. distance = 0
         dist_mask[:, 0] = False
+        # Ignore non-observation sites
+        dist_mask &= np.isin(sort_ind, obs_site_ind)
+        # Ensure that the closest observation site is within the closest_max_dist
         if closest_max_dist < max_dist:
-            dist_mask &= np.any(dist[:, 1:] < closest_max_dist, axis=1)[:, None]
+            # Note: The fact that cur_dist_matrix is not sorted (per row) does not matter,
+            # as its an any check and the result is broadcasted (along the rows)
+            closest_max_dist_mask = cur_dist_matrix.loc[:, cur_obs_sites].values < closest_max_dist
+            np.fill_diagonal(closest_max_dist_mask, False) # Ignore the site itself
+            dist_mask &= np.any(closest_max_dist_mask, axis=1)[:, None]
+
+        # Enforce maximum number of observation sites
+        dist_mask &= np.cumsum(dist_mask, axis=1) <= max_n_obs_sites
 
         cur_row_ind = np.repeat(
             np.arange(0, len(cur_sites)), np.count_nonzero(dist_mask, axis=1)
         )
-        cur_col_ind = n_neigh_ind[dist_mask]
-
+        cur_col_ind = sort_ind[dist_mask]
         # Get the site combinations
         # First is the site of interest, second is the observation site
         # Indices into the sites to use for the current event
         cur_site_combs = np.stack((cur_row_ind, cur_col_ind), axis=1)
 
-        # Filter based on allowed observation sites and sites of interest
-        cur_mask = np.isin(cur_sites[cur_site_combs[:, 1]], cur_obs_sites) & np.isin(
+        # Only allow specified sites of interest
+        cur_mask = np.isin(
             cur_sites[cur_site_combs[:, 0]], cur_int_sites
         )
 
@@ -172,7 +166,7 @@ def create_event_scalar_feature_dfs(
     event_sites: Dict[str, np.ndarray],
     scalar_features: ScalarFeatures,
     event_site_combs: Dict[str, np.ndarray],
-) -> tuple[dict[str,pd.DataFrame], np.ndarray]:
+) -> tuple[dict[str, pd.DataFrame], np.ndarray]:
     """
     Create feature matrix for all site combinations
     of shape [n_event_site_combinations, n_features]

@@ -1,10 +1,9 @@
-import time
 import os
 import itertools
 import pickle
 import warnings
 import multiprocessing as mp
-from typing import NamedTuple, Sequence, Callable
+from typing import NamedTuple, Sequence
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -16,8 +15,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.data as gdata
 import torch_geometric.loader as gloader
-import torch_geometric.data.batch as gbatch
-import torch_geometric.utils as gutils
 import torch.optim.lr_scheduler as lr_scheduler
 import tqdm
 
@@ -416,7 +413,7 @@ def run_model_training(
         Whether to print progress information, by default True
     """
     if verbose:
-        print(f"Creating site combinations")
+        print("Creating site combinations")
     train_site_combs, train_event_sites = ml_data.compute_site_combinations(
         event_sites,
         valid_event_int_sites,
@@ -429,18 +426,21 @@ def run_model_training(
         run_config.max_n_obs_sites,
         run_config.min_n_obs_sites,
     )
-    val_site_combs, val_event_sites = ml_data.compute_site_combinations(
-        event_sites,
-        valid_event_int_sites,
-        val_events,
-        dist_matrix,
-        obs_sites,
-        val_int_sites,
-        run_config.max_dist,
-        run_config.closest_max_dist,
-        run_config.max_n_obs_sites,
-        run_config.min_n_obs_sites,
-    )
+
+    val_site_combs, val_event_sites = None, None
+    if val_int_sites is not None:
+        val_site_combs, val_event_sites = ml_data.compute_site_combinations(
+            event_sites,
+            valid_event_int_sites,
+            val_events,
+            dist_matrix,
+            obs_sites,
+            val_int_sites,
+            run_config.max_dist,
+            run_config.closest_max_dist,
+            run_config.max_n_obs_sites,
+            run_config.min_n_obs_sites,
+        )
 
     # Sanity check
     assert np.isin(val_int_sites, train_int_sites).sum() == 0
@@ -467,7 +467,7 @@ def run_model_training(
         }
 
     if verbose:
-        print(f"Getting graph data")
+        print("Getting graph data")
     train_graph_data = get_graph_data(
         obs_data,
         train_event_sites,
@@ -479,25 +479,27 @@ def run_model_training(
         verbose=verbose,
         dist_matrix=dist_matrix,
     )
-
-    val_graph_data = get_graph_data(
-        obs_data,
-        val_event_sites,
-        val_site_combs,
-        scalar_features,
-        run_config.graph_feature_keys,
-        run_config,
-        n_procs=graph_data_n_procs,
-        verbose=verbose,
-        dist_matrix=dist_matrix,
-    )
-
     train_loader = gloader.DataLoader(
         train_graph_data, batch_size=run_config.batch_size, shuffle=True, drop_last=True
     )
-    val_loader = gloader.DataLoader(
-        val_graph_data, batch_size=run_config.batch_size, shuffle=True
-    )
+
+    val_graph_data, val_loader = None, None
+    if val_int_sites is not None:
+        val_graph_data = get_graph_data(
+            obs_data,
+            val_event_sites,
+            val_site_combs,
+            scalar_features,
+            run_config.graph_feature_keys,
+            run_config,
+            n_procs=graph_data_n_procs,
+            verbose=verbose,
+            dist_matrix=dist_matrix,
+        )
+        val_loader = gloader.DataLoader(
+            val_graph_data, batch_size=run_config.batch_size, shuffle=True
+        )
+
 
     gnn_model = gnn_modules.CustomAttentionGNN(
         run_config,
@@ -505,9 +507,10 @@ def run_model_training(
     gnn_model.to(run_config.device)
 
     if verbose:
-        print(f"----------------- Training -----------------")
+        print("----------------- Training -----------------")
         print(f"Number of training graphs: {len(train_graph_data)}")
-        print(f"Number of validation graphs: {len(val_graph_data)}")
+        if val_int_sites is not None:
+            print(f"Number of validation graphs: {len(val_graph_data)}")
 
     metrics, best_model_state, best_model_epoch = train(
         run_config, gnn_model, train_loader, val_loader, verbose=verbose
@@ -526,16 +529,22 @@ def run_model_training(
     }
 
     if verbose:
-        print(
-            f"Best model epoch: {best_model_epoch + 1}, "
-            f"Validation: \tLoss: {metrics['loss_hist_val'][best_model_epoch]:.4f}\n"
-        )
+        if val_int_sites is not None:
+            print(
+                f"Best model epoch: {best_model_epoch + 1}, "
+                f"Validation: \tWeighted Loss: {metrics['w_loss_hist_val'][best_model_epoch]:.4f}\n"
+            )
+        else:
+            print(f"Final Model Epoch Weighted Loss: {metrics['w_loss_hist_train'][-1]:.4f}")
 
     # Load the best model
     gnn_model.load_state_dict(best_model_state)
 
     # Create output directory
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # TMP
+    pd.to_pickle(train_graph_data, out_dir / "train_graph_data.pickle")
 
     # Save the training sites and validation sites
     np.save(out_dir / "val_int_sites.npy", val_int_sites)
@@ -564,22 +573,26 @@ def run_model_training(
     train_results_df.to_parquet(out_dir / "train_results.parquet")
     train_attn_coeffs_df.to_parquet(out_dir / "train_attn_coeffs.parquet")
 
-    val_results_df, val_attn_coeffs = get_predictions(
-        run_config, gnn_model, val_graph_data, dist_matrix=dist_matrix, verbose=verbose
-    )
-    val_results_df.to_parquet(out_dir / "val_results.parquet")
-    val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
+    if val_int_sites is not None:
+        val_results_df, val_attn_coeffs = get_predictions(
+            run_config, gnn_model, val_graph_data, dist_matrix=dist_matrix, verbose=verbose
+        )
+        val_results_df.to_parquet(out_dir / "val_results.parquet")
+        val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
 
-    # Sanity checks
-    assert ~np.any(val_results_df.event_id.isin(train_results_df.event_id))
-    assert ~np.any(val_results_df.site_int.isin(train_results_df.site_int))
+        # Sanity checks
+        assert ~np.any(val_results_df.event_id.isin(train_results_df.event_id))
+        assert ~np.any(val_results_df.site_int.isin(train_results_df.site_int))
 
     # Write the metadata
     metadata = {
-        "best_model_epoch": int(best_model_epoch),
-        "best_model_loss": float(metrics["loss_hist_val"][best_model_epoch]),
+        "best_model_epoch": int(best_model_epoch) if best_model_epoch is not None else None,
+        "best_model_val_loss": float(metrics["loss_hist_val"][best_model_epoch]) if val_int_sites is not None else None,
+        "best_model_val_w_loss": float(metrics["w_loss_hist_val"][best_model_epoch]) if val_int_sites is not None else None,
+        "best_model_train_loss": float(metrics["loss_hist_train"][best_model_epoch]) if val_int_sites is not None else float(metrics["loss_hist_train"][-1]),
+        "best_model_train_w_loss": float(metrics["w_loss_hist_train"][best_model_epoch]) if val_int_sites is not None else float(metrics["w_loss_hist_train"][-1]),
         "n_train_scenarios": len(train_graph_data),
-        "n_val_scenarios": len(val_graph_data),
+        "n_val_scenarios": len(val_graph_data) if val_int_sites is not None else None,
         "n_model_parameters": int(gnn_model.n_train_params),
     }
     mlt.utils.write_to_yaml(metadata, out_dir / "metadata.yaml")
@@ -848,7 +861,7 @@ def train(
     run_config: RunConfig,
     gnn_model: torch.nn.Module,
     train_loader: gdata.DataLoader,
-    val_loader: gdata.DataLoader,
+    val_loader: gdata.DataLoader = None,
     verbose: bool = True,
 ):
     """
@@ -860,8 +873,9 @@ def train(
     gnn_model: torch.nn.Module
     train_loader: gloader.DataLoader
         Training graph data loader
-    val_loader: gloader.DataLoader
-        Validation graph data loader
+    val_loader: gloader.DataLoader, optional
+        Validation graph data loader.
+        If None, then no validation is performed.
     verbose: bool, optional
         Whether to print progress information, by default True
 
@@ -928,45 +942,49 @@ def train(
         metrics["mean_sigma_hist_train"][cur_epoch_ix] /= n_graphs
 
         ### Validation
-        gnn_model.eval()
-        n_graphs = 0
-        with torch.no_grad():
-            for cur_batch in val_loader:
-                cur_bresult = _get_batch_result(cur_batch, gnn_model, run_config)
+        if val_loader is not None:
+            gnn_model.eval()
+            n_graphs = 0
+            with torch.no_grad():
+                for cur_batch in val_loader:
+                    cur_bresult = _get_batch_result(cur_batch, gnn_model, run_config)
 
-                metrics = _save_metrics(
-                    cur_bresult, metrics, run_config, cur_epoch_ix, "val"
-                )
-                n_graphs += cur_batch.num_graphs
+                    metrics = _save_metrics(
+                        cur_bresult, metrics, run_config, cur_epoch_ix, "val"
+                    )
+                    n_graphs += cur_batch.num_graphs
 
-        metrics["loss_hist_val"][cur_epoch_ix] /= n_graphs
-        metrics["w_loss_hist_val"][cur_epoch_ix] /= n_graphs
-        metrics["mse_hist_val"][cur_epoch_ix] /= n_graphs
-        metrics["mean_sigma_hist_val"][cur_epoch_ix] /= n_graphs
+            metrics["loss_hist_val"][cur_epoch_ix] /= n_graphs
+            metrics["w_loss_hist_val"][cur_epoch_ix] /= n_graphs
+            metrics["mse_hist_val"][cur_epoch_ix] /= n_graphs
+            metrics["mean_sigma_hist_val"][cur_epoch_ix] /= n_graphs
 
-        if scheduler is not None:
-            scheduler.step(metrics["w_loss_hist_val"][cur_epoch_ix])
+            if scheduler is not None:
+                scheduler.step(metrics["w_loss_hist_val"][cur_epoch_ix])
 
-        # Keep track of the best model
-        if metrics["w_loss_hist_val"][cur_epoch_ix] < best_val_loss:
-            best_val_loss = metrics["w_loss_hist_val"][cur_epoch_ix]
-            best_model_state = gnn_model.state_dict()
-            best_model_epoch = cur_epoch_ix
+            # Keep track of the best model
+            if metrics["w_loss_hist_val"][cur_epoch_ix] < best_val_loss:
+                best_val_loss = metrics["w_loss_hist_val"][cur_epoch_ix]
+                best_model_state = gnn_model.state_dict()
+                best_model_epoch = cur_epoch_ix
 
         if verbose:
-            # print(f"Epoch {cur_epoch_ix}/{run_config.n_epochs}")
             print(
                 f"\tTraining\t\t"
                 f"Weighted Loss: {metrics['w_loss_hist_train'][cur_epoch_ix]:.4f}, "
                 f"Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
                 f"MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
             )
-            print(
-                f"\tValidation\t\t"
-                f"Weighted Loss: {metrics['w_loss_hist_val'][cur_epoch_ix]:.4f}, "
-                f"Loss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, "
-                f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
-            )
+            if val_loader is not None:
+                print(
+                    f"\tValidation\t\t"
+                    f"Weighted Loss: {metrics['w_loss_hist_val'][cur_epoch_ix]:.4f}, "
+                    f"Loss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, "
+                    f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
+                )
+
+    if best_model_state is None:
+        best_model_state = gnn_model.state_dict()
 
     return metrics, best_model_state, best_model_epoch
 

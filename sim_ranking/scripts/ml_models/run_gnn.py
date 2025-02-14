@@ -1,18 +1,9 @@
-import itertools
-import os
-import shutil
-import random
-import copy
 from pathlib import Path
 
 import torch
 import torch.multiprocessing as mp
-import pandas as pd
-import numpy as np
 import typer
-import optuna
 
-import ml_tools as mlt
 import sim_ranking as sr
 
 device = "cpu"
@@ -24,7 +15,7 @@ print(f"Using device: {device.upper()}")
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
 
-@app.command("run-holdout")
+@app.command("train-holdout")
 def run_holdout(
     run_config_ffp: Path,
     holdout_config_ffp: Path,
@@ -40,7 +31,7 @@ def run_holdout(
     )
 
 
-@app.command("run-cv")
+@app.command("train-cv")
 def run_cv(
     run_config_ffp: Path,
     n_event_folds: int,
@@ -58,6 +49,22 @@ def run_cv(
         n_epochs=n_epochs,
         id_suffix=id_suffix,
         n_procs=n_procs,
+        device=device,
+    )
+
+@app.command("train-full")
+def run_full(
+    output_dir: Path,
+    run_config_ffp: Path,
+    n_epochs: int,
+    id_suffix: str = "",
+):
+    mp.set_start_method("spawn")
+
+    sr.ml.run_full(
+        output_dir,
+        run_config_ffp,
+        n_epochs,
         device=device,
     )
 

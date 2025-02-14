@@ -68,16 +68,16 @@ def run_cv(
     print(f"Number of events: {len(events)}")
 
     # Get the set of valid site-interests per event
-    print(f"Getting valid sites of interest")
+    print("Getting valid sites of interest")
     int_sites, valid_event_int_sites, _ = ml_data.get_valid_site_ints(
         event_sites, obs_data.record_df.drop(columns=obs_data.ims)
     )
     events = np.intersect1d(events, np.asarray(list(valid_event_int_sites.keys())))
 
-    print(f"Computing distance matrix")
+    print("Computing distance matrix")
     dist_matrix = utils.calculate_distance_matrix(all_sites, obs_data.site_df)
 
-    print(f"Getting scalar features")
+    print("Getting scalar features")
     scalar_features = features.get_scalar_features(
         event_sites, obs_data.event_df, obs_data.site_df, obs_data.record_df, run_config, constants.SCALAR_FEATURE_KEYS, dist_matrix
     )

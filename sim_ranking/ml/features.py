@@ -57,9 +57,9 @@ def get_scalar_features(
         event_features_df,
         scalar_feature_keys["event"],
         site_features_df,
-        scalar_feature_keys["site"],
+        list(site_features_df.columns.values.astype(str)),
         site_to_site_features,
-        scalar_feature_keys["site_to_site"],
+        list(site_to_site_features.keys()),
         event_site_features,
         scalar_feature_keys["event_site"],
         event_site_to_site_features,
@@ -86,21 +86,32 @@ def _compute_site_to_site_features(site_df: pd.DataFrame, dist_matrix: pd.DataFr
     z1p0_diff_min, z1p0_diff_max = constants.PRE_PROCESS_CONFIG["z1p0_diff"]
     site_to_site_features["z1p0_diff"] = (2 * (z1p0_diff - z1p0_diff_min) / (z1p0_diff_max - z1p0_diff_min)) - 1
 
-    z2p5_diff = pd.DataFrame(data=site_df.z2p5.values[:, None] - site_df.z2p5.values[None, :], index=site_df.index, columns=site_df.index)
-    z2p5_diff_min, z2p5_diff_max = constants.PRE_PROCESS_CONFIG["z2p5_diff"]
-    site_to_site_features["z2p5_diff"] = (2 * (z2p5_diff - z2p5_diff_min) / (z2p5_diff_max - z2p5_diff_min)) - 1
+    if "z2p5" in site_df.columns:
+        z2p5_diff = pd.DataFrame(data=site_df.z2p5.values[:, None] - site_df.z2p5.values[None, :], index=site_df.index, columns=site_df.index)
+        z2p5_diff_min, z2p5_diff_max = constants.PRE_PROCESS_CONFIG["z2p5_diff"]
+        site_to_site_features["z2p5_diff"] = (2 * (z2p5_diff - z2p5_diff_min) / (z2p5_diff_max - z2p5_diff_min)) - 1
+    else:
+        print("Unable to compute z2p5_diff as z2p5 is not in the site_df")
 
-    tsite_diff = pd.DataFrame(data=site_df.tsite.values[:, None] - site_df.tsite.values[None, :], index=site_df.index, columns=site_df.index)
-    tsite_diff_min, tsite_diff_max = constants.PRE_PROCESS_CONFIG["tsite_diff"]
-    site_to_site_features["tsite_diff"] = (2 * (tsite_diff - tsite_diff_min) / (tsite_diff_max - tsite_diff_min)) - 1
+    if "tsite" in site_df.columns:
+        tsite_diff = pd.DataFrame(data=site_df.tsite.values[:, None] - site_df.tsite.values[None, :], index=site_df.index, columns=site_df.index)
+        tsite_diff_min, tsite_diff_max = constants.PRE_PROCESS_CONFIG["tsite_diff"]
+        site_to_site_features["tsite_diff"] = (2 * (tsite_diff - tsite_diff_min) / (tsite_diff_max - tsite_diff_min)) - 1
+    else:
+        print("Unable to compute tsite_diff as tsite is not in the site_df")
 
     return site_to_site_features
 
 
 def _pre_process_site_features(site_df: pd.DataFrame, site_feature_keys: Sequence[str]):
     """Scales the site features to be between -1 and 1"""
-    site_df = site_df.loc[:, site_feature_keys]
-    for cur_key in site_feature_keys:
+    avail_site_features_keys = site_df.columns[np.isin(site_df.columns, site_feature_keys)]
+    missing_site_features_keys = set(site_feature_keys) - set(avail_site_features_keys)
+    if len(missing_site_features_keys) > 0:
+        print(f"Missing site features: {missing_site_features_keys}")
+
+    site_df = site_df.loc[:, avail_site_features_keys]
+    for cur_key in avail_site_features_keys:
         cur_min, cur_max = constants.PRE_PROCESS_CONFIG[cur_key]
         site_df[cur_key] = 2 * (site_df[cur_key] - cur_min) / (cur_max - cur_min) - 1
 

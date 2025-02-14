@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 
-def get_bias_residual_fig(figsize: tuple[float, float] = (16, 6), top: float = 1.0):
+def get_bias_residual_fig(figsize: tuple[float, float] = (16, 6), left: float = 0.05, right: float = 0.98, top: float = 0.98, bottom: float = 0.1):
     fig = plt.figure(figsize=figsize)
 
     main_grid = gridspec.GridSpec(1, 2, figure=fig, wspace=0.1)
@@ -44,7 +44,7 @@ def get_bias_residual_fig(figsize: tuple[float, float] = (16, 6), top: float = 1
     ax4.set_ylim(0.0, 1.0)
 
     # Remove general figure padding
-    fig.subplots_adjust(left=0, right=1, top=top, bottom=0)
+    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom)
 
     return fig, ax1, ax2, ax3, ax4
 
