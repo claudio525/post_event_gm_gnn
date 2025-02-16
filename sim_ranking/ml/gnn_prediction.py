@@ -32,6 +32,33 @@ def predict_event(
     obs_event_site_df: pd.DataFrame,
     obs_im_data: pd.DataFrame,
 ):
+    """
+    Perform predictions using a trained GNN model for a specific event.
+
+    Parameters
+    ----------
+    model_dir : Path
+        Directory containing the trained model and configuration files.
+    event_id : str
+        Identifier for the event.
+    event_info : pd.Series
+        Series containing information about the event.
+    pred_site_df : pd.DataFrame
+        DataFrame containing prediction site information.
+        Also needs to include the required event-site information, such as rrup
+    obs_site_df : pd.DataFrame
+        DataFrame containing observation site information.
+    obs_event_site_df : pd.DataFrame
+        DataFrame containing event-site information for observation sites.
+    obs_im_data : pd.DataFrame
+        DataFrame containing intensity measure (IM) data for observation sites.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the prediction results with columns for event_id, site_int, 
+        obs_sites, predicted IMs, and their standard deviations.
+    """
     run_config = gnn_gm.RunConfig.from_yaml(model_dir / "run_config.yaml")
 
     model = torch.load(model_dir / "model.pt")

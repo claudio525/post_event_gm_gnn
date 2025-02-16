@@ -1,0 +1,17 @@
+# Note: This has to be a fully trained model, not a set of CV models!
+benchmark_model_dir: "sim_ranking/results/gnn/0214_1412_test_full_noTsite"
+
+nzgmdb_ffp: "gm_datasets/nz_gmdb/v4.1/Tables/ground_motion_im_table_rotd50_flat.csv"
+
+events: 
+  - "3528839"
+  - "2016p859616"
+  - "2019p088069"
+  - "2014p715167"
+  - "2018p249209"
+  - "2016p831374"
+  - "2012p812341"
+  - "3531495"
+  - "2021p246745"
+  - "2016p858526"
+  - "2023p187094"
