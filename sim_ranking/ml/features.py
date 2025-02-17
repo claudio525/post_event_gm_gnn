@@ -192,10 +192,10 @@ def compute_angular_distance(
     event_angular_distances = {}
     transformer = Transformer.from_crs(4326, 2193, always_xy=True)
     station_df["nztm_x"], station_df["nztm_y"] = transformer.transform(
-        station_df.lon, station_df.lat
+        station_df.lon.values, station_df.lat.values
     )
     event_df["nztm_x"], event_df["nztm_y"] = transformer.transform(
-        event_df.lon, event_df.lat
+        event_df.lon.values, event_df.lat.values
     )
     for cur_event in events:
         cur_epi = event_df.loc[cur_event, ["nztm_x", "nztm_y"]].values.astype(float)

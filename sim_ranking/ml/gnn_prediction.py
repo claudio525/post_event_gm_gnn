@@ -166,6 +166,10 @@ def predict_event(
         graph_data.append(cur_graph_data)
 
     result_df = _run_prediction(model, graph_data, run_config)
+    result_df = result_df.set_index("site_int")
+
+    # Add site information
+    result_df = pd.concat((result_df, comb_site_df.loc[result_df.index]), axis=1)
     return result_df
 
 

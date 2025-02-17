@@ -1,10 +1,14 @@
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import torch
 import torch.multiprocessing as mp
 import typer
 
 import sim_ranking as sr
+from source_modelling.srf import read_srf
+from qcore import src_site_dist
 
 device = "cpu"
 if torch.cuda.is_available():
@@ -52,12 +56,12 @@ def run_cv(
         device=device,
     )
 
+
 @app.command("train-full")
 def run_full(
     output_dir: Path,
     run_config_ffp: Path,
     n_epochs: int,
-    id_suffix: str = "",
 ):
     mp.set_start_method("spawn")
 
@@ -67,6 +71,79 @@ def run_full(
         n_epochs,
         device=device,
     )
+
+
+@app.command("predict-event-3468575")
+def predict_event_3468575(
+    model_dir: Path,
+    non_uniform_grid_dir: Path,
+    srf_ffp: Path,
+    out_ffp: Path,
+):
+    region = sr.constants.CANTERBURY_REGION
+    event_id = "3468575"
+
+    # Prediction site data
+    ll_df = pd.read_csv(
+        non_uniform_grid_dir
+        / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.ll",
+        sep=" ",
+        header=None,
+        index_col="site_id",
+        names=["lon", "lat", "site_id"],
+    )
+    vs30_df = pd.read_csv(
+        non_uniform_grid_dir
+        / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.vs30",
+        header=None,
+        sep=" ",
+        index_col="site_id",
+        names=["site_id", "vs30"],
+    )
+    z_df = pd.read_csv(
+        non_uniform_grid_dir
+        / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.z",
+        index_col="Station_Name",
+    )
+
+    pred_site_df = ll_df.copy(deep=True)
+    region_mask = (
+        (pred_site_df["lon"] >= region[0])
+        & (pred_site_df["lon"] <= region[1])
+        & (pred_site_df["lat"] >= region[2])
+        & (pred_site_df["lat"] <= region[3])
+    )
+    pred_site_df = pred_site_df.loc[region_mask]
+
+    pred_site_df["vs30"] = vs30_df.loc[ll_df.index, "vs30"]
+    pred_site_df["z1p0"] = z_df.loc[ll_df.index, "Z_1.0(km)"] * 1000
+    pred_site_df["z2p5"] = z_df.loc[ll_df.index, "Z_2.5(km)"]
+
+    # Compute rrup
+    srf = read_srf(srf_ffp)
+    loc_values = pred_site_df[["lon", "lat"]].values
+    loc_values = np.hstack((loc_values, np.zeros((loc_values.shape[0], 1))))
+    srf_points = srf.points[["lon", "lat", "dep"]].values
+    rrup, _ = src_site_dist.calc_rrup_rjb(srf_points, loc_values)
+    pred_site_df["rrup"] = rrup
+
+    # Observation data
+    run_config = sr.ml.RunConfig.from_yaml(model_dir / "run_config.yaml")
+    obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
+
+    # Run prediction
+    result_df = sr.ml.predict_event(
+        model_dir,
+        event_id,
+        obs_data.event_df.loc[event_id],
+        pred_site_df,
+        obs_data.site_df.loc[obs_data.event_sites[event_id]],
+        obs_data.record_df[["event_id", "site_id", "rrup"]],
+        obs_data.record_df[sr.constants.IMs + ["event_id", "site_id"]],
+    )
+
+    result_df.to_parquet(out_ffp)
+
 
 @app.command("continue-hp-opt")
 def continue_hp_opt(
@@ -79,6 +156,7 @@ def continue_hp_opt(
         rel_results_dir,
         n_trials,
     )
+
 
 @app.command("run-hp-opt")
 def run_hp_opt(
@@ -102,7 +180,7 @@ def run_hp_opt(
         n_trials,
         n_epochs,
         n_procs,
-        device
+        device,
     )
 
 
