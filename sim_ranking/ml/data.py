@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sklearn.neighbors import NearestNeighbors
 from labelled_data_array import LabelledDataArray
 
 
@@ -43,6 +42,7 @@ def compute_site_combinations(
     closest_max_dist: float,
     max_n_obs_sites: int,
     min_n_obs_sites: int,
+    allow_self: bool = False,
 ):
     """
     Compute the site combinations for each event
@@ -70,6 +70,8 @@ def compute_site_combinations(
         Maximum number of observation sites to use
     min_n_obs_sites: int
         Minimum number of observation sites required
+    allow_self: bool
+        Allow the site of interest to be used as observation site
 
     Returns
     -------
@@ -117,7 +119,10 @@ def compute_site_combinations(
         # Maximum distance filter 
         dist_mask = dist < max_dist
         # Ignore first column as it is the site itself, i.e. distance = 0
-        dist_mask[:, 0] = False
+        if allow_self:
+            print("WARNING: Allowing site of interest to be used as observation site, ensure this is on purpose!!")
+        else:
+            dist_mask[:, 0] = False
         # Ignore non-observation sites
         dist_mask &= np.isin(sort_ind, obs_site_ind)
         # Ensure that the closest observation site is within the closest_max_dist

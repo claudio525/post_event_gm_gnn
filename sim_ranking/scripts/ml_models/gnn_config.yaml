@@ -7,7 +7,7 @@ seed: 42
 im_set: "all"
 
 # Input data settings
-rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.1/Tables/ground_motion_im_table_rotd50_flat.csv
+rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.2/custom/mod_ground_motion_im_table_rotd50_flat.csv
 max_dist: 30
 closest_max_dist: 10
 max_n_obs_sites: 10

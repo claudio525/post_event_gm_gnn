@@ -31,6 +31,7 @@ def predict_event(
     obs_site_df: pd.DataFrame,
     obs_event_site_df: pd.DataFrame,
     obs_im_data: pd.DataFrame,
+    allow_self: bool = True,
 ):
     """
     Perform predictions using a trained GNN model for a specific event.
@@ -52,6 +53,8 @@ def predict_event(
         DataFrame containing event-site information for observation sites.
     obs_im_data : pd.DataFrame
         DataFrame containing intensity measure (IM) data for observation sites.
+    allow_self : bool
+        Whether to allow the prediction site to be one of the observation sites.
 
     Returns
     -------
@@ -141,6 +144,7 @@ def predict_event(
         run_config.closest_max_dist,
         run_config.max_n_obs_sites,
         run_config.min_n_obs_sites,
+        allow_self=allow_self,
     )
     site_combs, used_sites = event_site_combs[event_id], event_used_sites[event_id]
 
@@ -384,7 +388,9 @@ def _create_graph_data(
 def _run_prediction(
     model: nn.Module, graph_data: list[gdata.HeteroData], run_config: gnn_gm.RunConfig
 ):
-    std_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "std")
+    pred_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred")
+    pred_std_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_std")
+
     results = []
     loader = gloader.DataLoader(graph_data, batch_size=1024, shuffle=False)
     for cur_batch in tqdm(loader, desc="Running predictions"):
@@ -409,8 +415,8 @@ def _run_prediction(
                 "obs_sites": cur_batch["metadata"]["obs_sites"],
             }
         )
-        cur_result_df[run_config.ims] = pred_ln_im_mean
-        cur_result_df[std_cols] = pred_ln_im_std
+        cur_result_df[pred_cols] = pred_ln_im_mean
+        cur_result_df[pred_std_cols] = pred_ln_im_std
 
         results.append(cur_result_df)
 

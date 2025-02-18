@@ -14,6 +14,7 @@ class NZGMDBVersion(StrEnum):
     v3p4 = "v3.4"
     v4p0 = "v4.0"
     v4p1 = "v4.1"
+    v4p2 = "v4.2"
 
 
 class TectonicType(StrEnum):
@@ -35,6 +36,20 @@ class RankingMethod(Enum):
 
     ml_prob = 4
     ml_prob_per_im = 5
+
+OQ_INPUT_COLUMNS = [
+    "vs30",
+    "rrup",
+    "rjb",
+    "z1pt0",
+    "mag",
+    "rake",
+    "dip",
+    "vs30measured",
+    "ztor",
+    "rx",
+    "hypo_depth",
+]
 
 
 PERIODS = [

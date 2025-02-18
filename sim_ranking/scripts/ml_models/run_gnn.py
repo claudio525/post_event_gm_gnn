@@ -76,7 +76,7 @@ def run_full(
 @app.command("predict-event-3468575")
 def predict_event_3468575(
     model_dir: Path,
-    non_uniform_grid_dir: Path,
+    non_uniform_site_dir: Path,
     srf_ffp: Path,
     out_ffp: Path,
 ):
@@ -84,29 +84,9 @@ def predict_event_3468575(
     event_id = "3468575"
 
     # Prediction site data
-    ll_df = pd.read_csv(
-        non_uniform_grid_dir
-        / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.ll",
-        sep=" ",
-        header=None,
-        index_col="site_id",
-        names=["lon", "lat", "site_id"],
+    pred_site_df = sr.data.load_non_uniform_grid(
+        non_uniform_site_dir
     )
-    vs30_df = pd.read_csv(
-        non_uniform_grid_dir
-        / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.vs30",
-        header=None,
-        sep=" ",
-        index_col="site_id",
-        names=["site_id", "vs30"],
-    )
-    z_df = pd.read_csv(
-        non_uniform_grid_dir
-        / "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land.z",
-        index_col="Station_Name",
-    )
-
-    pred_site_df = ll_df.copy(deep=True)
     region_mask = (
         (pred_site_df["lon"] >= region[0])
         & (pred_site_df["lon"] <= region[1])
@@ -114,10 +94,6 @@ def predict_event_3468575(
         & (pred_site_df["lat"] <= region[3])
     )
     pred_site_df = pred_site_df.loc[region_mask]
-
-    pred_site_df["vs30"] = vs30_df.loc[ll_df.index, "vs30"]
-    pred_site_df["z1p0"] = z_df.loc[ll_df.index, "Z_1.0(km)"] * 1000
-    pred_site_df["z2p5"] = z_df.loc[ll_df.index, "Z_2.5(km)"]
 
     # Compute rrup
     srf = read_srf(srf_ffp)

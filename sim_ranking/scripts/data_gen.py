@@ -28,8 +28,8 @@ COLUMN_MAPPING = {
 
 
 
-@app.command("get-emp-gm-params")
-def get_emp_gmm_params(
+@app.command("get-nzgmdb-emp-gm-params")
+def get_nzgmdb_emp_gmm_params(
     output_ffp: Path,
     nzgmdb_flatfile_ffp: Path,
     rjb_max: float,
@@ -38,46 +38,26 @@ def get_emp_gmm_params(
     """Computes the GM parameters using empirical GMMs"""
     events = mlt.utils.load_txt(events_ffp) if events_ffp is not None else None
 
-    sr.data.run_emp_gmms(
+    sr.data.compute_nzgmdb_emp_gm_params(
         output_ffp,
         nzgmdb_flatfile_ffp,
         rjb_max,
         events=events,
     )
 
-
-@app.command("gen-emp-synthetic-realisations")
-def gen_emp_synthetic_realisations(
-    emp_gm_params_ffp: Path, nzgmdb_site_ffp: Path, output_dir: Path, n_rels: int = 25
+@app.command("get-event-non-uniform-gm-params")
+def get_event_non_uniform_sites_gm_params(
+    event_id: str,
+    non_uniform_sites_dir: Path,
+    nzgmdb_ffp: Path,
+    srf_ffp: Path,
+    max_rjb: float,
+    output_ffp: Path,
 ):
-    """
-    Generates synthetic realisations using empirical models
-    """
-    gm_params = pd.read_csv(emp_gm_params_ffp, index_col=0)
-    site_df = pd.read_csv(nzgmdb_site_ffp, index_col="sta")
-
-    results = sr.data.gen_emp_synthethic_realisations(gm_params, site_df, n_rels=n_rels)
-
-    pd.to_pickle(results, output_dir / "emp_realisations.pickle", compression=None)
-
-
-@app.command("gen-emp-synthetic-observed")
-def gen_emp_synthetic_observed(
-    emp_gm_params_ffp: Path,
-    nzgmdb_site_ffp: Path,
-    nzgmdb_flat_file: Path,
-    syn_obs_ffp: Path,
-    syn_gm_params_ffp: Path,
-):
-    """
-    Generates synthetic observed data using empirical models
-    """
-    syn_obs_df, mod_gm_params_df = sr.data.gen_emp_synthetic_observed(
-        emp_gm_params_ffp, nzgmdb_site_ffp, nzgmdb_flat_file
+    sr.data.compute_event_non_uniform_sites_emp_gm_params(
+        event_id, non_uniform_sites_dir, nzgmdb_ffp, srf_ffp, max_rjb, output_ffp
     )
 
-    syn_obs_df.to_csv(syn_obs_ffp)
-    mod_gm_params_df.to_csv(syn_gm_params_ffp)
 
 
 if __name__ == "__main__":

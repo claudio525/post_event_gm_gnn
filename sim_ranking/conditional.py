@@ -178,6 +178,12 @@ def run_cim_for_GNN(
     prefix = "train" if on_train else "val"
     result_df.to_parquet(out_dir / f"{prefix}_results.parquet")
 
+# def predict_event_cIM(
+#     event_id: str,
+#     obs_data: ObservedData,
+#     dist_matrx: pd.DataFrame,
+#     gm_params_df
+
 
 def _get_im_name_mapping_dict(im: str):
     """Helper function"""
@@ -268,7 +274,6 @@ def run_event_cim(
     )
     result_df = pd.DataFrame(index=int_sites, columns=result_cols, dtype=float)
     result_df["n_obs_sites"] = -1
-    # result_df["obs_sites"] = None
     result_df["obs_sites"] = [
         obs_site_mask.sel[cur_site, :, :]
         .index[np.any(obs_site_mask.sel[cur_site, :, :], axis=1)]
