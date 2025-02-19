@@ -54,10 +54,10 @@ def get_event_non_uniform_sites_gm_params(
     max_rjb: float,
     output_ffp: Path,
 ):
+    """Computes the GM parameters for a single event for non-uniform grid sites"""
     sr.data.compute_event_non_uniform_sites_emp_gm_params(
         event_id, non_uniform_sites_dir, nzgmdb_ffp, srf_ffp, max_rjb, output_ffp
     )
-
 
 
 if __name__ == "__main__":

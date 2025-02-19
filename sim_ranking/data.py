@@ -168,7 +168,8 @@ def _compute_emp_gm_params(
             dfs.append(cur_df)
 
     result_df = pd.concat(dfs, axis=0)
-    result_df.to_parquet(output_ffp)
+    return result_df
+    
 
 
 def compute_event_non_uniform_sites_emp_gm_params(
@@ -262,7 +263,10 @@ def compute_event_non_uniform_sites_emp_gm_params(
     rupture_df.index = mlt.array_utils.numpy_str_join("_", event_id, rupture_df.site_id.values.astype(str))
 
     # Compute the empirical GM parameters
-    _compute_emp_gm_params(rupture_df, constants.PERIODS, output_ffp)
+    result_df = _compute_emp_gm_params(rupture_df, constants.PERIODS, output_ffp)
+
+    result_df[["lon", "lat"]] = site_df.loc[result_df.site_id, ["lon", "lat"]].values
+    result_df.to_parquet(output_ffp)
 
 
 def compute_nzgmdb_emp_gm_params(
@@ -322,7 +326,8 @@ def compute_nzgmdb_emp_gm_params(
     rupture_df = rupture_df.rename(columns=OBS_DATA_OQ_COLS_MAPPING)
     rupture_df["vs30measured"] = False
 
-    _compute_emp_gm_params(rupture_df, periods, output_ffp)
+    result_df = _compute_emp_gm_params(rupture_df, periods, output_ffp)
+    result_df.to_parquet(output_ffp)
 
 
 def load_obs_nzgmdb(nzgmdb_ffp: Path):
@@ -403,8 +408,8 @@ def load_non_uniform_grid(non_uniform_site_dir: Path):
         header=None,
         index_col="site_id",
         names=[
-            ObservedData.SiteColEnums.SITE_LON,
-            ObservedData.SiteColEnums.SITE_LAT,
+            "lon",
+            "lat",
             ObservedData.SiteColEnums.SITE_ID,
         ],
     )
@@ -458,6 +463,7 @@ def add_srf_site_to_source_distances(
     record_df = site_df.copy(True)
     record_df[ObservedData.SiteColEnums.SITE_ID] = record_df.index.values.astype(str)
     record_df[ObservedData.EventColEnums.EVENT_ID] = event_id
+    record_df = record_df.rename(columns={"lon": ObservedData.SiteColEnums.SITE_LON, "lat": ObservedData.SiteColEnums.SITE_LAT})
 
     srf_model = srf.read_srf(srf_ffp)
 

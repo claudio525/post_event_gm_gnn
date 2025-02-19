@@ -4,6 +4,7 @@ from enum import StrEnum, Enum, auto
 
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 
 import ml_tools as mlt
 import sha_calc as sha
@@ -640,10 +641,10 @@ class LBSiteCorrelationData:
         self.corr_data = corr_data
 
     @classmethod
-    def from_dist_matrix(cls, dist_matrix: pd.DataFrame, ims: Sequence[str]):
+    def from_dist_matrix(cls, dist_matrix: pd.DataFrame, ims: Sequence[str], verbose: bool = False):
         sites = dist_matrix.index
         corr_values = []
-        for cur_im in ims:
+        for cur_im in tqdm(ims, disable=not verbose):
             r = sha.loth_baker_corr_model.get_correlations(
                 cur_im, cur_im, dist_matrix.values.ravel()
             )

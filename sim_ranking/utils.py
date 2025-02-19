@@ -2,6 +2,7 @@ from typing import Sequence, NamedTuple, Tuple
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from qcore.src_site_dist import calc_rrup_rjb
 
@@ -19,6 +20,10 @@ def reverse_im_filename(im: str):
         return im[::-1].replace("p", ".", 1)[::-1]
     return im
 
+def get_im_filename(im: str):
+    if im.startswith("pSA"):
+        return im.replace(".", "p", 1)
+    return im
 
 def get_nice_im_name(im: str):
     if im.startswith("pSA"):
@@ -31,6 +36,7 @@ def calculate_distance_matrix(
     locations_df: pd.DataFrame,
     site_lon_col: str = "lon",
     site_lat_col: str = "lat",
+    verbose: bool = False,
 ):
     """
     Given a set of stations and their locations (in lat, lon format),
@@ -47,7 +53,7 @@ def calculate_distance_matrix(
     site_lon_col: str
     """
     distance_matrix = -1 * np.ones((len(stations), len(stations)))
-    for i, station in enumerate(stations):
+    for i, station in tqdm(enumerate(stations), disable=not verbose, total=len(stations)):
         cur_dist, _ = calc_rrup_rjb(
             np.asarray(
                 [

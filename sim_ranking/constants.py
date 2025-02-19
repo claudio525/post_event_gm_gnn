@@ -94,6 +94,8 @@ GNN_PRED_STD_PSA_KEYS = [f"{cur_key}_pred_std" for cur_key in PSA_KEYS]
 CIM_PRED_PSA_KEYS = [f"{cur_key}_cond_mean" for cur_key in PSA_KEYS]
 CIM_PRED_STD_PSA_KEYS = [f"{cur_key}_cond_std" for cur_key in PSA_KEYS]
 
+GMM_PRED_PSA_KEYS = [f"{cur_key}_mean" for cur_key in PSA_KEYS]
+
 NON_PSA_IMs = ["PGV", "AI", "CAV", "Ds575", "Ds595", "PGA"]
 IMs = NON_PSA_IMs + PSA_KEYS
 

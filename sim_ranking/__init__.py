@@ -5,7 +5,8 @@ from . import ml
 from .data_classes import ObservedData, LBSiteCorrelationData
 from . import conditional
 from . import plot_utils
-from . import plot_scenarios
+from . import plot_ind_scenarios
+from . import plot_spatial
 
 __all__ = [
     'data',
@@ -16,7 +17,8 @@ __all__ = [
     'LBSiteCorrelationData',
     'conditional',
     'plot_utils',
-    'plot_scenarios'
+    'plot_ind_scenarios',
+    'plot_spatial',
 ]
 
 
