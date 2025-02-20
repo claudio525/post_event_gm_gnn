@@ -1284,7 +1284,8 @@ def get_residuals(
     res_df.index = results.index
     res_df["event_id"] = results["event_id"]
     res_df["site_int"] = results["site_int"]
-    res_df["n_obs_sites"] = results["n_obs_sites"]
+    if "n_obs_sites" in results.columns:
+        res_df["n_obs_sites"] = results["n_obs_sites"]
     return res_df
 
 

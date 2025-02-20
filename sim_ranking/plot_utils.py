@@ -8,6 +8,7 @@ def get_bias_residual_fig(
     right: float = 0.98,
     top: float = 0.98,
     bottom: float = 0.1,
+    bias_y_axis_limits: tuple[float, float] = (-1.0, 1.0),
 ):
     """
     Create a figure a bias and residual plots for
@@ -53,13 +54,13 @@ def get_bias_residual_fig(
     ax1.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax1.set_xscale("log")
     ax1.axhline(0, color="black")
-    ax1.set_ylim(-1.0, 1.0)
+    ax1.set_ylim(*bias_y_axis_limits)
     ax1.set_xlim(0.01, 10.0)
 
     ax2 = fig.add_subplot(grid_bias[1])
     ax2.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax2.set_yticklabels([])
-    ax2.set_ylim(-1.0, 1.0)
+    ax2.set_ylim(*bias_y_axis_limits)
     ax2.axhline(0, color="black")
 
     grid_residual = gridspec.GridSpecFromSubplotSpec(

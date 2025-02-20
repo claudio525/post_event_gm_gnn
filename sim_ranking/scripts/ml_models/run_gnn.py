@@ -79,6 +79,7 @@ def predict_event_3468575(
     non_uniform_site_dir: Path,
     srf_ffp: Path,
     out_ffp: Path,
+    allow_self: bool = True,
 ):
     region = sr.constants.CANTERBURY_REGION
     event_id = "3468575"
@@ -116,6 +117,7 @@ def predict_event_3468575(
         obs_data.site_df.loc[obs_data.event_sites[event_id]],
         obs_data.record_df[["event_id", "site_id", "rrup"]],
         obs_data.record_df[sr.constants.IMs + ["event_id", "site_id"]],
+        allow_self=allow_self,
     )
 
     result_df.to_parquet(out_ffp)

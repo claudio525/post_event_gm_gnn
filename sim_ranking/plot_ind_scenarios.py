@@ -301,6 +301,7 @@ def create_2plot_log(
     ax2.set_ylim(np.log(min_y), np.log(max_y))
 
     fig.tight_layout()
+    return fig
 
 
 def get_site_info_df(
