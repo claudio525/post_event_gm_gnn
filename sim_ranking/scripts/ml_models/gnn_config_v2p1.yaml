@@ -1,10 +1,14 @@
+### Config for GNN model that seems to work well for 
+### post-event GM prediction for well constraint events.
+### Does not use empirical GMM as a base model.
+
 ### All paths specified are relative to the environment variable $wdata
 
 # General settings
 seed: 42
 
 # IMs
-im_set: "pSA"
+im_set: "all"
 
 # Input data settings
 rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.2/custom/mod_ground_motion_im_table_rotd50_flat.csv
@@ -12,11 +16,6 @@ max_dist: 30
 closest_max_dist: 10
 max_n_obs_sites: 10
 min_n_obs_sites: 2
-
-rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p2/emp_gm_params_400MaxRjb.parquet
-use_emp_gm_model: True
-
-ignore_events: ["3468575"]
 
 ### Scenario Weighting
 # Magnitude
@@ -32,6 +31,7 @@ doc_max_weight: 2
 doc_start: 1
 doc_end: 6
 
+ignore_events: ["3468575"]
 
 # Features
 graph_feature_keys:

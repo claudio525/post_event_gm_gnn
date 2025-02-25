@@ -30,6 +30,9 @@ class ScalarFeatures:
             + len(self.event_site_to_site_feature_keys)
         )
 
+    def __repr__(self):
+        return "ScalarFeatures Instance"
+
 
 def compute_site_combinations(
     event_sites: Dict[str, np.ndarray],

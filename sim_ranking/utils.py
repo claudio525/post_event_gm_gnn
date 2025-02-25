@@ -30,6 +30,8 @@ def get_nice_im_name(im: str):
         return f"pSA({im.split('_')[-1]}s)"
     return im
 
+def get_emp_gm_mean_im_keys(ims: Sequence[str]):
+    return [f"{im}_mean" for im in ims]
 
 def calculate_distance_matrix(
     stations: Sequence[str],

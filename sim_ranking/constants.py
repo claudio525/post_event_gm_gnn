@@ -25,6 +25,10 @@ class TectonicType(StrEnum):
     MANTLE = "mantle"
     UNKNOWN = "unknown"
 
+class IMSet(StrEnum):
+    pSA = "pSA"
+    all = "all"
+
 
 class RankingMethod(Enum):
     emp_cMVN = 1
@@ -99,7 +103,7 @@ GMM_PRED_PSA_KEYS = [f"{cur_key}_mean" for cur_key in PSA_KEYS]
 NON_PSA_IMs = ["PGV", "AI", "CAV", "Ds575", "Ds595", "PGA"]
 IMs = NON_PSA_IMs + PSA_KEYS
 
-IM_SETS = {"pSA": PSA_KEYS, "all": IMs}
+IM_SETS = {IMSet.pSA: PSA_KEYS, IMSet.all: IMs}
 
 IM_WEIGTHS_SETS = {
     # 1/3 of weights for other IMs and 2/3 for pSA (inc. PGA)

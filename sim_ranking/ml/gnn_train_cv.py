@@ -63,6 +63,26 @@ def run_cv(
     if len(run_config.ignore_events) > 0:
         obs_data = obs_data.drop_events(run_config.ignore_events)
 
+    # Load empirical GMM data & compute empirical residuals
+    if run_config.use_emp_gm_model:
+        assert run_config.im_set == "pSA", "Only pSA supported when using empirical GMM model"
+        emp_gm_params = pd.read_parquet(run_config.emp_gm_params_ffp)
+        assert obs_data.record_df.index.isin(
+            emp_gm_params.index
+        ).all(), "Missing empirical data"
+        emp_gm_params = emp_gm_params.loc[obs_data.record_df.index]
+
+        emp_res_df = pd.DataFrame(
+            data=np.log(obs_data.record_df[constants.PSA_KEYS].values)
+            - emp_gm_params.loc[
+                obs_data.record_df.index, constants.GMM_PRED_PSA_KEYS
+            ].values,
+            index=obs_data.record_df.index,
+            columns=constants.PSA_KEYS,
+        )
+        emp_res_df["event_id"] = emp_gm_params.loc[emp_res_df.index, "event_id"]
+        emp_res_df["site_id"] = emp_gm_params.loc[emp_res_df.index, "site_id"]
+
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites
     print(f"Number of events: {len(events)}")
@@ -79,7 +99,13 @@ def run_cv(
 
     print("Getting scalar features")
     scalar_features = features.get_scalar_features(
-        event_sites, obs_data.event_df, obs_data.site_df, obs_data.record_df, run_config, constants.SCALAR_FEATURE_KEYS, dist_matrix
+        event_sites,
+        obs_data.event_df,
+        obs_data.site_df,
+        obs_data.record_df,
+        run_config,
+        constants.SCALAR_FEATURE_KEYS,
+        dist_matrix,
     )
 
     # Cross-validation setup
@@ -112,6 +138,8 @@ def run_cv(
                     valid_event_int_sites,
                     dist_matrix,
                     obs_data,
+                    emp_gm_params if run_config.use_emp_gm_model else None,
+                    emp_res_df if run_config.use_emp_gm_model else None,
                     scalar_features,
                     copy.deepcopy(run_config),
                     out_dir,
@@ -136,11 +164,13 @@ def run_cv(
                         valid_event_int_sites,
                         dist_matrix,
                         obs_data,
+                        emp_gm_params if run_config.use_emp_gm_model else None,
+                        emp_res_df if run_config.use_emp_gm_model else None,
                         scalar_features,
                         copy.deepcopy(run_config),
                         out_dir,
                         cv_iter,
-                        (cv_iter % n_procs) == 0,   # Only print for the first process
+                        (cv_iter % n_procs) == 0,  # Only print for the first process
                     )
                     for cv_iter, (train_folds_ind, val_fold_ind) in enumerate(
                         get_cv_iterator(fold_combs)
@@ -152,15 +182,15 @@ def run_cv(
     run_config.to_yaml(out_dir / "run_config.yaml")
 
     val_results, metrics = [], {}
-    val_attn_coeffs = []
+    # val_attn_coeffs = []
     for cur_out_dir in out_dirs:
         cur_val_result = pd.read_parquet(cur_out_dir / "val_results.parquet")
         cur_val_result["cv_iter"] = cur_out_dir.stem
         val_results.append(cur_val_result)
 
-        cur_val_attn_coeffs = pd.read_parquet(cur_out_dir / "val_attn_coeffs.parquet")
-        cur_val_attn_coeffs["cv_iter"] = cur_out_dir.stem
-        val_attn_coeffs.append(cur_val_attn_coeffs)
+        # cur_val_attn_coeffs = pd.read_parquet(cur_out_dir / "val_attn_coeffs.parquet")
+        # cur_val_attn_coeffs["cv_iter"] = cur_out_dir.stem
+        # val_attn_coeffs.append(cur_val_attn_coeffs)
 
         # metrics[cur_out_dir.stem] = pd.read_pickle(cur_out_dir / "metrics.pickle")
         metrics[cur_out_dir.stem] = pd.read_parquet(cur_out_dir / "metrics.parquet")
@@ -168,8 +198,8 @@ def run_cv(
     val_results = pd.concat(val_results, axis=0)
     val_results.to_parquet(out_dir / "val_results.parquet")
 
-    val_attn_coeffs = pd.concat(val_attn_coeffs, axis=0)
-    val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
+    # val_attn_coeffs = pd.concat(val_attn_coeffs, axis=0)
+    # val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
 
     # Sanity check
     assert np.all(
@@ -194,28 +224,74 @@ def run_cv(
     # Compute aggregate metrics
     agg_metrics = {
         # Loss
-        "mean_min_train_loss": float(metrics_lda.sel[:, :, "loss_hist_train"].min(axis=0).mean().item()),
-        "std_min_train_loss": float(metrics_lda.sel[:, :, "loss_hist_train"].min(axis=0).std().item()),
-        "mean_best_train_loss_epoch": float(metrics_lda.sel[:, :, "loss_hist_train"].values.argmin(axis=0).mean().item()),
-        "std_best_train_loss_epoch": float(metrics_lda.sel[:, :, "loss_hist_train"].values.argmin(axis=0).std().item()),
-        "mean_min_val_loss": float(metrics_lda.sel[:, :, "loss_hist_val"].min(axis=0).mean().item()),
-        "std_min_val_loss": float(metrics_lda.sel[:, :, "loss_hist_val"].min(axis=0).std().item()),
-        "mean_best_val_loss_epoch": float(metrics_lda.sel[:, :, "loss_hist_val"].values.argmin(axis=0).mean().item()),
-        "std_best_val_loss_epoch": float(metrics_lda.sel[:, :, "loss_hist_val"].values.argmin(axis=0).std().item()),
+        "mean_min_train_loss": float(
+            metrics_lda.sel[:, :, "loss_hist_train"].min(axis=0).mean().item()
+        ),
+        "std_min_train_loss": float(
+            metrics_lda.sel[:, :, "loss_hist_train"].min(axis=0).std().item()
+        ),
+        "mean_best_train_loss_epoch": float(
+            metrics_lda.sel[:, :, "loss_hist_train"].values.argmin(axis=0).mean().item()
+        ),
+        "std_best_train_loss_epoch": float(
+            metrics_lda.sel[:, :, "loss_hist_train"].values.argmin(axis=0).std().item()
+        ),
+        "mean_min_val_loss": float(
+            metrics_lda.sel[:, :, "loss_hist_val"].min(axis=0).mean().item()
+        ),
+        "std_min_val_loss": float(
+            metrics_lda.sel[:, :, "loss_hist_val"].min(axis=0).std().item()
+        ),
+        "mean_best_val_loss_epoch": float(
+            metrics_lda.sel[:, :, "loss_hist_val"].values.argmin(axis=0).mean().item()
+        ),
+        "std_best_val_loss_epoch": float(
+            metrics_lda.sel[:, :, "loss_hist_val"].values.argmin(axis=0).std().item()
+        ),
         # Weighted Loss
-        "mean_min_train_w_loss": float(metrics_lda.sel[:, :, "w_loss_hist_train"].min(axis=0).mean().item()),
-        "std_min_train_w_loss": float(metrics_lda.sel[:, :, "w_loss_hist_train"].min(axis=0).std().item()),
-        "mean_best_train_w_loss_epoch": float(metrics_lda.sel[:, :, "w_loss_hist_train"].values.argmin(axis=0).mean().item()),
-        "std_best_train_w_loss_epoch": float(metrics_lda.sel[:, :, "w_loss_hist_train"].values.argmin(axis=0).std().item()),
-        "mean_min_val_w_loss": float(metrics_lda.sel[:, :, "w_loss_hist_val"].min(axis=0).mean().item()),
-        "std_min_val_w_loss": float(metrics_lda.sel[:, :, "w_loss_hist_val"].min(axis=0).std().item()),
-        "mean_best_val_w_loss_epoch": float(metrics_lda.sel[:, :, "w_loss_hist_val"].values.argmin(axis=0).mean().item()),
-        "std_best_val_w_loss_epoch": float(metrics_lda.sel[:, :, "w_loss_hist_val"].values.argmin(axis=0).std().item()),
+        "mean_min_train_w_loss": float(
+            metrics_lda.sel[:, :, "w_loss_hist_train"].min(axis=0).mean().item()
+        ),
+        "std_min_train_w_loss": float(
+            metrics_lda.sel[:, :, "w_loss_hist_train"].min(axis=0).std().item()
+        ),
+        "mean_best_train_w_loss_epoch": float(
+            metrics_lda.sel[:, :, "w_loss_hist_train"]
+            .values.argmin(axis=0)
+            .mean()
+            .item()
+        ),
+        "std_best_train_w_loss_epoch": float(
+            metrics_lda.sel[:, :, "w_loss_hist_train"]
+            .values.argmin(axis=0)
+            .std()
+            .item()
+        ),
+        "mean_min_val_w_loss": float(
+            metrics_lda.sel[:, :, "w_loss_hist_val"].min(axis=0).mean().item()
+        ),
+        "std_min_val_w_loss": float(
+            metrics_lda.sel[:, :, "w_loss_hist_val"].min(axis=0).std().item()
+        ),
+        "mean_best_val_w_loss_epoch": float(
+            metrics_lda.sel[:, :, "w_loss_hist_val"].values.argmin(axis=0).mean().item()
+        ),
+        "std_best_val_w_loss_epoch": float(
+            metrics_lda.sel[:, :, "w_loss_hist_val"].values.argmin(axis=0).std().item()
+        ),
         # MSE
-        "mean_min_train_mse": float(metrics_lda.sel[:, :, "mse_hist_train"].min(axis=0).mean().item()),
-        "std_min_train_mse": float(metrics_lda.sel[:, :, "mse_hist_train"].min(axis=0).std().item()),
-        "mean_min_val_mse": float(metrics_lda.sel[:, :, "mse_hist_val"].min(axis=0).mean().item()),
-        "std_min_val_mse": float(metrics_lda.sel[:, :, "mse_hist_val"].min(axis=0).std().item()),
+        "mean_min_train_mse": float(
+            metrics_lda.sel[:, :, "mse_hist_train"].min(axis=0).mean().item()
+        ),
+        "std_min_train_mse": float(
+            metrics_lda.sel[:, :, "mse_hist_train"].min(axis=0).std().item()
+        ),
+        "mean_min_val_mse": float(
+            metrics_lda.sel[:, :, "mse_hist_val"].min(axis=0).mean().item()
+        ),
+        "std_min_val_mse": float(
+            metrics_lda.sel[:, :, "mse_hist_val"].min(axis=0).std().item()
+        ),
     }
     mlt.utils.write_to_yaml(agg_metrics, out_dir / "agg_metrics.yaml")
 
@@ -257,6 +333,8 @@ def _run_mp_helper(
     valid_event_int_sites: dict[str, np.ndarray[str]],
     dist_matrix: pd.DataFrame,
     obs_data: data.ObservedData,
+    emp_gm_params: pd.DataFrame,
+    emp_res_df: pd.DataFrame,
     scalar_features: ml_data.ScalarFeatures,
     run_config: gnn_gm.RunConfig,
     out_dir: Path,
@@ -287,6 +365,8 @@ def _run_mp_helper(
         obs_data,
         scalar_features,
         run_config,
+        emp_gm_params=emp_gm_params,
+        emp_res_df=emp_res_df,
         graph_data_n_procs=graph_data_n_procs,
         verbose=verbose,
     )
