@@ -59,6 +59,23 @@ def get_event_non_uniform_sites_gm_params(
         event_id, non_uniform_sites_dir, nzgmdb_ffp, srf_ffp, max_rjb, output_ffp
     )
 
+@app.command("gen-uniform-site-grid")
+def gen_uniform_site_grid(
+    region_key: str,
+    resolution: float,
+    output_ffp: Path,
+):
+    """
+    Generates a uniform grid of sites for the given region. 
+    Resolution is in metres.
+    """
+    region = sr.constants.REGION_MAPPINGS[region_key]
+
+    sr.data.gen_uniform_site_grid(region, resolution, output_ffp)
+
+    
+    
+
 
 if __name__ == "__main__":
     app()

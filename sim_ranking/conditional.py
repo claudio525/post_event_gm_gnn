@@ -146,6 +146,7 @@ def run_cim_for_GNN(
                 dist_matrix,
                 constants.PSA_KEYS,
                 20,
+                None,
                 True if on_train else False,
             )
             results.append(cur_result)
@@ -165,6 +166,7 @@ def run_cim_for_GNN(
                         dist_matrix,
                         constants.PSA_KEYS,
                         20,
+                        None,
                         True if on_train else False,
                     )
                     for cur_event in events
@@ -388,7 +390,7 @@ def run_event_cim(
         ].size
 
     # Add the actual observed IMs at the site of interests
-    int_sites_with_obs = int_sites[np.isin(int_sites, obs_sites)]
+    int_sites_with_obs = int_sites[np.isin(int_sites, obs_data.event_sites[event_id])]
     result_df.loc[int_sites_with_obs, ims] = np.log(
         obs_data.get_event_data(event_id, int_sites_with_obs).loc[int_sites_with_obs, ims]
     )

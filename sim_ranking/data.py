@@ -553,6 +553,52 @@ def load_emp_gmm_params(emp_gmm_ffp: Path):
     return pd.read_parquet(emp_gmm_ffp)
 
 
+def gen_uniform_site_grid(
+        region: tuple[float, float, float, float],
+        resolution: float,
+        output_ffp: Path,
+):
+    """
+    Generates a uniform site grid within a specified region and resolution,
+     and saves it to a Parquet file.
+    Excludes water bodies.
+
+    Parameters:
+    -----------
+    region : tuple[float, float, float, float]
+        A tuple specifying the region of interest in the format (min_lon, max_lon, min_lat, max_lat).
+    resolution : float
+        The resolution of the grid in metres.
+    output_ffp : Path
+        The file path where the output Parquet file will be saved.
+    Returns:
+    --------
+    None
+    """
+    import pygmt
+
+    # Create the land/water mask
+    land_mask = pygmt.grdlandmask(
+        region=region, spacing=f"{int(resolution)}e/{int(resolution)}e", maskvalues=[0, 1, 1, 1, 1], resolution="f"
+    )
+
+    # Use land/water mask to create meshgrid
+    x1, x2 = np.meshgrid(land_mask.lon.values, land_mask.lat.values)
+
+    # Drop water values
+    x1 = x1[land_mask.values.astype(bool)]
+    x2 = x2[land_mask.values.astype(bool)]
+
+    # Create dataframe and save
+    grid_df = pd.DataFrame(
+        {
+            "lon": x1,
+            "lat": x2,
+        }
+    )
+    grid_df.to_parquet(output_ffp)
+
+
 # def load_obs_waveform(obs_waveform_dir: Path, site: str):
 #     """
 #     Loads the observation waveform data from the
