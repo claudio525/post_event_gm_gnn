@@ -2,6 +2,8 @@ import warnings
 from pathlib import Path
 from typing import Dict, Sequence
 from dataclasses import dataclass
+import shutil
+
 
 import numpy as np
 import pandas as pd
@@ -119,11 +121,13 @@ def compute_site_combinations(
         dist = np.take_along_axis(cur_dist_matrix.values, sort_ind, axis=1)
 
         # Filtering
-        # Maximum distance filter 
+        # Maximum distance filter
         dist_mask = dist < max_dist
         # Ignore first column as it is the site itself, i.e. distance = 0
         if allow_self:
-            print("WARNING: Allowing site of interest to be used as observation site, ensure this is on purpose!!")
+            print(
+                "WARNING: Allowing site of interest to be used as observation site, ensure this is on purpose!!"
+            )
         else:
             dist_mask[:, 0] = False
         # Ignore non-observation sites
@@ -132,8 +136,10 @@ def compute_site_combinations(
         if closest_max_dist < max_dist:
             # Note: The fact that cur_dist_matrix is not sorted (per row) does not matter,
             # as its an any check and the result is broadcasted (along the rows)
-            closest_max_dist_mask = cur_dist_matrix.loc[:, cur_obs_sites].values < closest_max_dist
-            np.fill_diagonal(closest_max_dist_mask, False) # Ignore the site itself
+            closest_max_dist_mask = (
+                cur_dist_matrix.loc[:, cur_obs_sites].values < closest_max_dist
+            )
+            np.fill_diagonal(closest_max_dist_mask, False)  # Ignore the site itself
             dist_mask &= np.any(closest_max_dist_mask, axis=1)[:, None]
 
         # Enforce maximum number of observation sites
@@ -149,9 +155,7 @@ def compute_site_combinations(
         cur_site_combs = np.stack((cur_row_ind, cur_col_ind), axis=1)
 
         # Only allow specified sites of interest
-        cur_mask = np.isin(
-            cur_sites[cur_site_combs[:, 0]], cur_int_sites
-        )
+        cur_mask = np.isin(cur_sites[cur_site_combs[:, 0]], cur_int_sites)
 
         # Filter for minimum number of observation sites
         if min_n_obs_sites > 1:
@@ -404,3 +408,80 @@ def load_cv_metrics(results_dir: Path):
     )
 
     return lda
+
+
+def copy_cim_cv_results(src_dir: Path, dest_dir: Path):
+    """
+    Copy conditional intensity measure (cIM) cross-validation 
+    results from source to destination directory.
+
+    This function copies cIM results between directories while 
+    verifying that the validation and training scenarios align 
+    between source and destination directories.
+
+    Parameters
+    ----------
+    src_dir : Path
+        The source directory containing the CV results to be copied.
+    dest_dir : Path
+        The destination directory where the CV results will be copied to.
+
+    Raises
+    ------
+    AssertionError
+        If the validation scenarios, number of CV directories, 
+        or training/validation scenarios don't align.
+    ValueError
+        If cIM results already exist in 
+        the destination directory for any CV directory.
+    """
+    # Check that scenarios align
+    src_val_df = pd.read_parquet(src_dir / "val_results.parquet").sort_index()
+    dest_val_df = pd.read_parquet(dest_dir / "val_results.parquet").sort_index()
+    assert src_val_df.index.equals(
+        dest_val_df.index
+    ), "Validation scenarios don't align"
+
+    # Iterate over the CV results
+    src_cv_dirs = np.sort(
+        [cur_dir.name for cur_dir in src_dir.glob("cv_*") if cur_dir.is_dir()]
+    )
+    dst_cv_dirs = np.sort(
+        [cur_dir.name for cur_dir in dest_dir.glob("cv_*") if cur_dir.is_dir()]
+    )
+    assert len(src_cv_dirs) == len(dst_cv_dirs), "Number of CV directories don't match"
+    assert np.all(src_cv_dirs == dst_cv_dirs), "CV directories don't match"
+    for cur_cv_dir in src_cv_dirs:
+        src_cv_dir = src_dir / cur_cv_dir
+        dest_cv_dir = dest_dir / cur_cv_dir
+
+        # Check that the results align
+        src_train_results = pd.read_parquet(
+            src_cv_dir / "train_results.parquet"
+        ).sort_index()
+        dest_train_results = pd.read_parquet(
+            dest_cv_dir / "train_results.parquet"
+        ).sort_index()
+        assert src_train_results.index.equals(
+            dest_train_results.index
+        ), f"Training scenarios don't align for {cur_cv_dir}"
+
+        src_val_results = pd.read_parquet(
+            src_cv_dir / "val_results.parquet"
+        ).sort_index()
+        dest_val_results = pd.read_parquet(
+            dest_cv_dir / "val_results.parquet"
+        ).sort_index()
+        assert src_val_results.index.equals(
+            dest_val_results.index
+        ), f"Validation scenarios don't align for {cur_cv_dir}"
+
+        # Check that cIM results don't already exist
+        if (dest_cv_dir / "cim_results").exists():
+            raise ValueError(f"cIM results already exist for {cur_cv_dir}")
+
+        # Copy the results
+        shutil.copytree(src_cv_dir / "cim_results", dest_cv_dir / "cim_results")
+
+    # Copy aggregated cIM results
+    shutil.copytree(src_dir / "cim_results", dest_dir / "cim_results")

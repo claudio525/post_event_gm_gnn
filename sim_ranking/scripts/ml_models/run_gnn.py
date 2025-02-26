@@ -161,6 +161,13 @@ def run_hp_opt(
         device,
     )
 
+@app.command("copy-cim-cv-results")
+def copy_cim_cv_results(
+    src_dir: Path,
+    dest_dir: Path,
+):
+    sr.ml.data.copy_cim_cv_results(src_dir, dest_dir)
+
 
 if __name__ == "__main__":
     app()

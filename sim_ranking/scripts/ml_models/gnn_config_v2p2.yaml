@@ -1,3 +1,5 @@
+### Same as v2p1, except uses an empirical model as a base model, and only considers pSA.
+
 ### All paths specified are relative to the environment variable $wdata
 
 # General settings

@@ -418,14 +418,20 @@ def get_observation_sites_mask(
 
     Parameters
     ----------
-    n_obs_sites
-    int_sites
-    obs_sites
-    distance_matrix
+    n_obs_sites: int
+        Number of observation sites to use.
+    int_sites: np.ndarray
+        Array of sites of interest.
+    obs_sites: np.ndarray
+        Array of observation sites.
+    distance_matrix: pd.DataFrame
+        DataFrame containing the distance matrix between sites.
 
     Returns
     -------
-
+    pd.DataFrame
+        DataFrame with boolean values indicating the 
+        selected observation sites for each site of interest.
     """
     # Less observation sites than required
     # i.e. use all available
