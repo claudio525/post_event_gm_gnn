@@ -140,6 +140,12 @@ class RunConfig:
     lr_factor: float = 0.5
     """Factor to reduce the learning rate by"""
 
+    ### Data perturbations
+    soi_with_obs_pert: bool = False
+    """Whether to perturb scenarios, and add observation site for SoI"""
+    soi_with_obs_pert_prob: float = 0.0
+    """Probability of perturbing scenarios, and adding observation site for SoI"""
+
     _im_scale_params: dict[str, pd.Series] | None = None
 
     ### Features
@@ -293,6 +299,8 @@ class RunConfig:
             "graph_feature_keys": self.graph_feature_keys,
             "use_emp_gm_model": self.use_emp_gm_model,
             "rel_emp_gm_params_fp": self.rel_emp_gm_params_fp,
+            "soi_with_obs_pert": self.soi_with_obs_pert,
+            "soi_with_obs_pert_prob": self.soi_with_obs_pert_prob,
         }
         if self.im_scale_params is not None:
             result["_im_scale_params"] = {
@@ -436,7 +444,7 @@ def run_model_training(
     """
     if verbose:
         print("Creating site combinations")
-    train_site_combs, train_event_sites = ml_data.compute_site_combinations(
+    train_event_site_combs, train_event_sites = ml_data.compute_site_combinations(
         event_sites,
         valid_event_int_sites,
         train_events,
@@ -449,9 +457,9 @@ def run_model_training(
         run_config.min_n_obs_sites,
     )
 
-    val_site_combs, val_event_sites = None, None
+    val_event_site_combs, val_event_sites = None, None
     if val_int_sites is not None:
-        val_site_combs, val_event_sites = ml_data.compute_site_combinations(
+        val_event_site_combs, val_event_sites = ml_data.compute_site_combinations(
             event_sites,
             valid_event_int_sites,
             val_events,
@@ -492,13 +500,19 @@ def run_model_training(
         not run_config.use_emp_gm_model or emp_res_df is not None
     ), "Empirical GM parameters are required when run_config.use_emp_gm_model is True"
 
+    train_event_scalar_feature_dfs, _ = (
+        ml_data.create_event_scalar_feature_dfs(
+            train_event_sites, scalar_features, train_event_site_combs
+        )
+    )
+
     if verbose:
         print("Getting graph data")
     train_graph_data = get_graph_data(
         obs_data,
         train_event_sites,
-        train_site_combs,
-        scalar_features,
+        train_event_site_combs,
+        train_event_scalar_feature_dfs,
         run_config.graph_feature_keys,
         run_config,
         emp_res_df,
@@ -506,8 +520,18 @@ def run_model_training(
         verbose=verbose,
         dist_matrix=dist_matrix,
     )
+
+
+    train_transform = gnn_modules.AddSoIObsIMsTransform(train_event_scalar_feature_dfs, run_config) if run_config.soi_with_obs_pert else None
+    train_dataset = gnn_modules.CustomGraphDataset(train_graph_data, transform=train_transform)
     train_loader = gloader.DataLoader(
-        train_graph_data, batch_size=run_config.batch_size, shuffle=True, drop_last=True
+        train_dataset, batch_size=run_config.batch_size, shuffle=True, drop_last=True
+    )
+
+    val_event_scalar_feature_dfs, _ = (
+        ml_data.create_event_scalar_feature_dfs(
+            val_event_sites, scalar_features, val_event_site_combs
+        )
     )
 
     val_graph_data, val_loader = None, None
@@ -515,8 +539,8 @@ def run_model_training(
         val_graph_data = get_graph_data(
             obs_data,
             val_event_sites,
-            val_site_combs,
-            scalar_features,
+            val_event_site_combs,
+            val_event_scalar_feature_dfs,
             run_config.graph_feature_keys,
             run_config,
             emp_res_df,
@@ -524,8 +548,11 @@ def run_model_training(
             verbose=verbose,
             dist_matrix=dist_matrix,
         )
+
+        val_transform = gnn_modules.AddSoIObsIMsTransform(val_event_scalar_feature_dfs, run_config) if run_config.soi_with_obs_pert else None
+        val_dataset = gnn_modules.CustomGraphDataset(val_graph_data, transform=val_transform)
         val_loader = gloader.DataLoader(
-            val_graph_data, batch_size=run_config.batch_size, shuffle=True
+            val_dataset, batch_size=run_config.batch_size, shuffle=True
         )
 
     gnn_model = gnn_modules.CustomAttentionGNN(
@@ -540,7 +567,7 @@ def run_model_training(
             print(f"Number of validation graphs: {len(val_graph_data)}")
 
     metrics, best_model_state, best_model_epoch = train(
-        run_config, gnn_model, train_loader, val_loader, verbose=verbose
+        run_config, gnn_model, train_loader, val_loader=val_loader, verbose=verbose
     )
 
     metrics_df = pd.DataFrame(metrics)
@@ -663,7 +690,6 @@ def _get_event_graph_data(
 ):
     """Helper function, see get_graph_data"""
     graph_data = []
-    cur_site_int_inds = np.unique(site_combs[:, 0])
 
     ### Weighting functions
     # Have to get these here, as they are not picklable
@@ -711,10 +737,16 @@ def _get_event_graph_data(
                 cur_im_data - run_config.im_scale_params["mean"][run_config.ims]
             ) / run_config.im_scale_params["std"][run_config.ims]
 
+    cur_site_int_inds = np.unique(site_combs[:, 0])
     for cur_site_int_ix in cur_site_int_inds:
-        cur_site_combs_mask = site_combs[:, 0] == cur_site_int_ix
-        cur_site_int = sites[site_combs[cur_site_combs_mask, 0][0]]
-        cur_obs_sites = sites[site_combs[cur_site_combs_mask, 1]]
+        cur_site_int = sites[cur_site_int_ix]
+        cur_obs_sites = sites[site_combs[site_combs[:, 0] == cur_site_int_ix, 1]]
+        cur_site_comb_keys = mlt.array_utils.numpy_str_join(
+            "_", cur_site_int, cur_obs_sites
+        )
+
+
+        # cur_site_combs_mask = site_combs[:, 0] == cur_site_int_ix
 
         # DoC scenario weighting
         doc_weight = doc_weight_fn(
@@ -728,7 +760,7 @@ def _get_event_graph_data(
 
         # Create the site_int node features
         cur_site_int_features = scalar_feature_df.loc[
-            cur_site_combs_mask, graph_feature_keys["site_int"]
+            cur_site_comb_keys, graph_feature_keys["site_int"]
         ].values[0]
 
         # Get observation site IM values and deal with nan values
@@ -741,7 +773,7 @@ def _get_event_graph_data(
         ):
             # Create the site_obs node features
             cur_obs_sites_features = scalar_feature_df.loc[
-                cur_site_combs_mask,
+                cur_site_comb_keys,
                 graph_feature_keys["site_obs"],
             ].values
             # Add the IM values
@@ -757,7 +789,7 @@ def _get_event_graph_data(
 
         # Create the edge features
         cur_edge_features = scalar_feature_df.loc[
-            cur_site_combs_mask, graph_feature_keys["edge"]
+            cur_site_comb_keys, graph_feature_keys["edge"]
         ].values
 
         cur_sc_data = gdata.HeteroData()
@@ -769,7 +801,7 @@ def _get_event_graph_data(
         )
 
         cur_sc_data["site_obs", "informs", "site_int"].edge_index = torch.tensor(
-            [[ix, 0] for ix, cur_obs_site in enumerate(cur_obs_sites)],
+            [[ix, 0] for ix, _ in enumerate(cur_obs_sites)],
             dtype=torch.long,
         ).T
         cur_sc_data["site_obs", "informs", "site_int"].edge_attr = torch.tensor(
@@ -809,7 +841,8 @@ def get_graph_data(
     obs_data: ObservedData,
     event_sites: dict[str, np.ndarray],
     event_site_combs: dict[str, np.ndarray],
-    scalar_features: ml_data.ScalarFeatures,
+    # scalar_features: ml_data.ScalarFeatures,
+    event_scalar_feature_dfs: dict[str, pd.DataFrame],
     graph_feature_keys: dict[str, Sequence[str]],
     run_config: RunConfig,
     emp_res_df: pd.DataFrame = None,
@@ -828,8 +861,8 @@ def get_graph_data(
         Available sites per event
     event_site_combs: dict[str, np.ndarray]
         Scenario definitions
-    scalar_features: ml_data.ScalarFeatures
-        Scalar features for the nodes and edges
+    event_scalar_feature_dfs: dict[str, pd.DataFrame]
+        Dataframes with the scalar features for each event
     graph_feature_keys: dict[str, Sequence[str]]
         Graph feature keys for the different node & edge types
     run_config: RunConfig
@@ -851,11 +884,11 @@ def get_graph_data(
         List of graph data objects
     """
     # Create the scalar features tensors
-    scalar_event_feature_values, scalar_feature_columns = (
-        ml_data.create_event_scalar_feature_dfs(
-            event_sites, scalar_features, event_site_combs
-        )
-    )
+    # event_scalar_feature_dfs, _ = (
+        # ml_data.create_event_scalar_feature_dfs(
+            # event_sites, scalar_features, event_site_combs
+        # )
+    # )
 
     # Site2Site Correlation for DoC weight calculation
     assert (not run_config.doc_scenario_weighting) or (dist_matrix is not None)
@@ -877,7 +910,7 @@ def get_graph_data(
                     cur_site_combs,
                     obs_data,
                     emp_res_df,
-                    scalar_event_feature_values[cur_event],
+                    event_scalar_feature_dfs[cur_event],
                     graph_feature_keys,
                     run_config,
                     corr_data=corr_data,
@@ -894,7 +927,7 @@ def get_graph_data(
                         cur_site_combs,
                         obs_data,
                         emp_res_df,
-                        scalar_event_feature_values[cur_event],
+                        event_scalar_feature_dfs[cur_event],
                         graph_feature_keys,
                         run_config,
                         corr_data,
@@ -1325,13 +1358,13 @@ def get_predictions(
             cur_result.loc[:, loss_keys] = cur_batch_result.ind_loss.cpu().numpy(
                 force=True
             )
-            cur_result.loc[:, "loss"] = cur_batch_result.loss.cpu().numpy(force=True)
+            # cur_result.loc[:, "loss"] = cur_batch_result.loss.cpu().numpy(force=True)
             cur_result.loc[:, w_loss_keys] = cur_batch_result.w_ind_loss.cpu().numpy(
                 force=True
             )
-            cur_result.loc[:, "w_loss"] = cur_batch_result.w_loss.cpu().numpy(
-                force=True
-            )
+            # cur_result.loc[:, "w_loss"] = cur_batch_result.w_loss.cpu().numpy(
+                # force=True
+            # )
 
         # Index
         cur_result = cur_result.set_index(

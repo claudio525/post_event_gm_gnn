@@ -8,6 +8,7 @@ import shutil
 import numpy as np
 import pandas as pd
 from labelled_data_array import LabelledDataArray
+import ml_tools as mlt
 
 
 @dataclass
@@ -215,9 +216,25 @@ def create_event_scalar_feature_dfs(
     event_scalar_features_dfs = {}
     for cur_event in events:
         cur_sites = event_sites[cur_event]
+
+
+
         cur_site_combs = event_site_combs[cur_event]
+
+        # Include self for SoIs
+        cur_site_combs = np.concatenate(
+            (
+                cur_site_combs,
+                np.tile(np.unique(cur_site_combs[:, 0])[:, None], (1, 2))
+                ,
+            ),
+            axis=0,
+        )
+        cur_site_combs = cur_site_combs[np.argsort(cur_site_combs[:, 0]), :]
+
         cur_site_ints = cur_sites[cur_site_combs[:, 0]]
         cur_site_obs = cur_sites[cur_site_combs[:, 1]]
+        cur_site_comb_keys = mlt.array_utils.numpy_str_join("_", cur_site_ints, cur_site_obs)
 
         cur_tensor = np.full(
             (
@@ -284,7 +301,7 @@ def create_event_scalar_feature_dfs(
             ]
 
         event_scalar_features_dfs[cur_event] = pd.DataFrame(
-            data=cur_tensor, columns=scalar_feature_columns
+            index=cur_site_comb_keys, data=cur_tensor, columns=scalar_feature_columns
         )
         # scalar_features_values.append(cur_tensor)
 

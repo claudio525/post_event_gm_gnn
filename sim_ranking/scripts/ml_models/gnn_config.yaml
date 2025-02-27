@@ -32,6 +32,9 @@ doc_max_weight: 2
 doc_start: 1
 doc_end: 6
 
+### Data Perturbations
+soi_with_obs_pert: True
+soi_with_obs_pert_prob: 0.05
 
 # Features
 graph_feature_keys:

@@ -1,3 +1,4 @@
+import random
 from typing import Any, Sequence, TYPE_CHECKING
 
 import einops
@@ -12,6 +13,7 @@ import torch_geometric.nn.inits as ginits
 import torch_geometric.utils as gutils
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.typing import Adj, Size
+from torch_geometric.transforms import BaseTransform
 import numpy as np
 
 import ml_tools as mlt
@@ -313,7 +315,9 @@ class CustomAttentionGNN(torch.nn.Module):
         x_site_int = node_emb_dict["site_int"]
 
         if self.fc1 is not None:
-            x_site_int = mlt.torch.get_act_fn(self.run_config.fc_act_fn)(self.fc1(x_site_int))
+            x_site_int = mlt.torch.get_act_fn(self.run_config.fc_act_fn)(
+                self.fc1(x_site_int)
+            )
 
         out = self.out_fc(x_site_int)
         ln_im_mean, ln_im_std = out.chunk(2, dim=1)
@@ -441,3 +445,71 @@ class IntNodeConv(MessagePassing):
             dim=1,
         )
         return m
+
+
+class AddSoIObsIMsTransform(BaseTransform):
+
+    def __init__(
+        self,
+        event_scalar_feature_dfs: dict[str, pd.DataFrame],
+        run_config: "gnn_gm.RunConfig",
+    ):
+        super().__init__()
+
+        self.event_scalar_feature_dfs = event_scalar_feature_dfs
+        self.pert_probability = run_config.soi_with_obs_pert_prob
+
+        self.run_config = run_config
+
+        # Set the seed
+        random.seed(run_config.seed)
+
+    def forward(self, data: gdata.HeteroData) -> gdata.HeteroData:
+        if random.uniform(0, 1) < self.pert_probability:
+            if self.run_config.graph_feature_keys["site_obs"] is None:
+                event = data["metadata"]["event"]
+                site_int = data["metadata"]["site_int"]
+                n_obs_sites = data["metadata"]["obs_sites"].size
+                scalar_feature_df = self.event_scalar_feature_dfs[event]
+
+                data["site_obs"]["x"] = torch.cat(
+                    (data["site_obs"]["x"], torch.nan_to_num(data["y"], nan=99)), dim=0
+                )
+                data[("site_obs", "self_loop", "site_obs")]["edge_index"] = torch.arange(
+                    0, n_obs_sites + 1
+                ).tile((2, 1))
+
+                data[("site_obs", "informs", "site_int")]["edge_index"] = torch.cat(
+                    (
+                        torch.arange(0, n_obs_sites + 1)[None, :],
+                        torch.zeros((1, n_obs_sites + 1), dtype=int),
+                    ),
+                    dim=0,
+                )
+                data[("site_obs", "informs", "site_int")]["edge_attr"] = torch.cat(
+                    (
+                        data[("site_obs", "informs", "site_int")]["edge_attr"],
+                        torch.from_numpy(scalar_feature_df.loc[f"{site_int}_{site_int}", self.run_config.graph_feature_keys["edge"]].values).to(torch.float32)[None, :]
+                    ),
+                    dim=0,
+                )
+
+                return data
+            else:
+                raise NotImplementedError()
+        else:
+            return data
+
+
+class CustomGraphDataset(gdata.InMemoryDataset):
+
+    def __init__(self, graph_objects: list[gdata.HeteroData], transform=None):
+        super().__init__(".", transform=transform)
+
+        self.data, self.slices = self.collate(graph_objects)
+
+    def _download(self):
+        pass
+
+    def _process(self):
+        pass
