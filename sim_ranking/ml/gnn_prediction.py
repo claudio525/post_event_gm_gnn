@@ -31,6 +31,8 @@ def predict_event(
     obs_site_df: pd.DataFrame,
     obs_event_site_df: pd.DataFrame,
     obs_im_data: pd.DataFrame,
+    emp_gm_params: pd.DataFrame = None,
+    obs_emp_res_df: pd.DataFrame = None,
     allow_self: bool = True,
 ):
     """
@@ -53,16 +55,26 @@ def predict_event(
         DataFrame containing event-site information for observation sites.
     obs_im_data : pd.DataFrame
         DataFrame containing intensity measure (IM) data for observation sites.
+    emp_gm_params : pd.DataFrame, optional
+        DataFrame containing empirical GM parameters for the event and all sites.
+        Only used if run_config.use_emp_gm_model is True.
+    obs_emp_res_df : pd.DataFrame, optional
+        DataFrame containing empirical GM residuals for the observation sites.
+        Only used if run_config.use_emp_gm_model is True.
     allow_self : bool
         Whether to allow the prediction site to be one of the observation sites.
 
     Returns
     -------
     pd.DataFrame
-        DataFrame containing the prediction results with columns for event_id, site_int, 
+        DataFrame containing the prediction results with columns for event_id, site_int,
         obs_sites, predicted IMs, and their standard deviations.
     """
     run_config = gnn_gm.RunConfig.from_yaml(model_dir / "run_config.yaml")
+    if run_config.use_emp_gm_model and emp_gm_params is None:
+        raise ValueError(
+            "emp_gm_params must be provided if run_config.use_emp_gm_model is True"
+        )
 
     model = torch.load(model_dir / "model.pt")
     model.eval()
@@ -72,7 +84,8 @@ def predict_event(
         obs_im_data.event_id == event_id, run_config.ims + ["event_id", "site_id"]
     ].copy()
     obs_im_data[run_config.ims] = (
-        np.log(obs_im_data[run_config.ims]) - run_config.im_scale_params["mean"][run_config.ims]
+        np.log(obs_im_data[run_config.ims])
+        - run_config.im_scale_params["mean"][run_config.ims]
     ) / run_config.im_scale_params["std"][run_config.ims]
 
     obs_sites = obs_im_data.site_id.values.astype(str)
@@ -154,7 +167,6 @@ def predict_event(
     )
     scalar_feature_df = event_scalar_feature_dfs[event_id]
 
-
     # Generate the graph data
     graph_data = []
     for cur_int_site_ix in np.unique(site_combs[:, 0]):
@@ -166,13 +178,22 @@ def predict_event(
             scalar_feature_df,
             obs_im_data.set_index("site_id"),
             run_config,
+            obs_emp_res_df=(
+                obs_emp_res_df.loc[obs_emp_res_df.event_id == event_id].set_index("site_id")
+                if obs_emp_res_df is not None
+                else None
+            ),
         )
         graph_data.append(cur_graph_data)
 
-    result_df = _run_prediction(model, graph_data, run_config)
+    result_df = _run_prediction(
+        model, graph_data, run_config, emp_gm_params=emp_gm_params
+    )
 
     # Add site information
-    result_df = pd.merge(result_df, comb_site_df, left_on="site_int", right_index=True, how="left")
+    result_df = pd.merge(
+        result_df, comb_site_df, left_on="site_int", right_index=True, how="left"
+    )
     return result_df
 
 
@@ -221,7 +242,8 @@ def predict_scenarios(
     # Scale the IM data
     obs_im_data = obs_im_data[run_config.ims + ["event_id", "site_id"]].copy()
     obs_im_data[run_config.ims] = (
-        np.log(obs_im_data[run_config.ims]) - run_config.im_scale_params["mean"][run_config.ims]
+        np.log(obs_im_data[run_config.ims])
+        - run_config.im_scale_params["mean"][run_config.ims]
     ) / run_config.im_scale_params["std"][run_config.ims]
 
     # Get the events and relevant event site pairs
@@ -310,32 +332,39 @@ def _create_graph_data(
     scalar_feature_df: pd.DataFrame,
     im_data: pd.DataFrame,
     run_config: gnn_gm.RunConfig,
+    obs_emp_res_df: pd.DataFrame = None,
 ):
     """
     Creates the graph data for the specified scenario
 
     Note: sites must match the sites used for site_combs!
     """
-    site_combs_mask = site_combs[:, 0] == site_int_ix
-    cur_site_int = sites[site_combs[site_combs_mask, 0][0]]
-    cur_obs_sites = sites[site_combs[site_combs_mask, 1]]
+    cur_site_int = sites[site_int_ix]
+    cur_obs_sites = sites[site_combs[site_combs[:, 0] == site_int_ix, 1]]
+    cur_site_combs = mlt.array_utils.numpy_str_join("_", cur_site_int, cur_obs_sites)
 
     # Create the site_int node features
     site_int_features = scalar_feature_df.loc[
-        site_combs_mask, run_config.graph_feature_keys["site_int"]
+        cur_site_combs, run_config.graph_feature_keys["site_int"]
     ].values[0]
 
-    # Get observation site IM values and deal with nan values
-    obs_sites_im_values = (
-        im_data.loc[cur_obs_sites, run_config.ims].replace(np.nan, 99).values
-    )
+    # Get the residuals or IM values
+    if run_config.use_emp_gm_model:
+        obs_sites_im_values = (
+            obs_emp_res_df.loc[cur_obs_sites, run_config.ims].replace(np.nan, 99).values
+        )
+    else:
+        obs_sites_im_values = (
+            im_data.loc[cur_obs_sites, run_config.ims].replace(np.nan, 99).values
+        )
+
     if (
         run_config.graph_feature_keys["site_obs"] is not None
         and len(run_config.graph_feature_keys["site_obs"]) > 0
     ):
         # Create the site_obs node features
         obs_sites_features = scalar_feature_df.loc[
-            site_combs_mask,
+            cur_site_combs,
             run_config.graph_feature_keys["site_obs"],
         ].values
         # Add the IM values
@@ -351,16 +380,14 @@ def _create_graph_data(
 
     # Create the edge features
     edge_features = scalar_feature_df.loc[
-        site_combs_mask, run_config.graph_feature_keys["edge"]
+        cur_site_combs, run_config.graph_feature_keys["edge"]
     ].values
 
     graph_data = gdata.HeteroData()
-    graph_data["site_int"].x = torch.tensor(
-        site_int_features, dtype=torch.float32
-    )[None, :]
-    graph_data["site_obs"].x = torch.tensor(
-        obs_sites_features, dtype=torch.float32
-    )
+    graph_data["site_int"].x = torch.tensor(site_int_features, dtype=torch.float32)[
+        None, :
+    ]
+    graph_data["site_obs"].x = torch.tensor(obs_sites_features, dtype=torch.float32)
 
     graph_data["site_obs", "informs", "site_int"].edge_index = torch.tensor(
         [[ix, 0] for ix, _ in enumerate(cur_obs_sites)],
@@ -374,6 +401,11 @@ def _create_graph_data(
         [[ix, ix] for ix in range(len(cur_obs_sites))], dtype=torch.long
     ).T
 
+    assert (
+        graph_data["site_obs", "informs", "site_int"].edge_index.shape[1]
+        == graph_data["site_obs", "informs", "site_int"].edge_attr.shape[0]
+    )
+
     graph_data["metadata"] = {
         "sc_id": f"{event_id}_{cur_site_int}",
         "event": event_id,
@@ -385,10 +417,15 @@ def _create_graph_data(
 
 
 def _run_prediction(
-    model: nn.Module, graph_data: list[gdata.HeteroData], run_config: gnn_gm.RunConfig
+    model: nn.Module,
+    graph_data: list[gdata.HeteroData],
+    run_config: gnn_gm.RunConfig,
+    emp_gm_params: pd.DataFrame = None,
 ):
-    pred_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred")
-    pred_std_cols = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_std")
+
+    pred_im_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred")
+    pred_im_std_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_std")
+    pred_res_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_res")
 
     results = []
     loader = gloader.DataLoader(graph_data, batch_size=1024, shuffle=False)
@@ -396,16 +433,9 @@ def _run_prediction(
         cur_batch = cur_batch.to(run_config.device)
 
         # Get predictions
-        cur_out = model(cur_batch)
-        torch_pred_ln_im_mean, torch_pred_ln_im_ln_std = cur_out
-        pred_ln_im_std = torch.exp(torch_pred_ln_im_ln_std).cpu().numpy(force=True)
-        pred_ln_im_mean = torch_pred_ln_im_mean.cpu().numpy(force=True)
-
-        # Revert the IM scaling
-        if run_config.scale_IMs:
-            pred_ln_im_mean, pred_ln_im_std = gnn_gm.revert_im_scaling(
-                pred_ln_im_mean, run_config, pred_ln_im_std
-            )
+        torch_pred_mean, torch_pred_ln_std = model(cur_batch)
+        pred_std = torch.exp(torch_pred_ln_std).cpu().numpy(force=True)
+        pred_mean = torch_pred_mean.cpu().numpy(force=True)
 
         cur_result_df = pd.DataFrame(
             {
@@ -414,8 +444,36 @@ def _run_prediction(
                 "obs_sites": cur_batch["metadata"]["obs_sites"],
             }
         )
-        cur_result_df[pred_cols] = pred_ln_im_mean
-        cur_result_df[pred_std_cols] = pred_ln_im_std
+        cur_result_df.index = mlt.array_utils.numpy_str_join(
+            "_",
+            cur_result_df["event_id"].values.astype(str),
+            cur_result_df["site_int"].values.astype(str),
+        )
+        cur_result_df["n_obs_sites"] = [cur_obs_sites.size for cur_obs_sites in cur_result_df.obs_sites]
+
+        # GNN Residual Model
+        if run_config.use_emp_gm_model:
+            cur_result_df.loc[:, pred_res_keys] = pred_mean
+            cur_result_df.loc[:, pred_im_std_keys] = pred_std
+
+            # IM value is simply GMM mean + GNN predicted residual
+            pred_ln_im_mean = (
+                emp_gm_params.loc[
+                    cur_result_df.index, utils.get_emp_gm_mean_im_keys(run_config.ims)
+                ].values
+                + pred_mean
+            )
+            cur_result_df.loc[:, pred_im_keys] = pred_ln_im_mean
+        # GNN IM Model
+        else:
+            # Revert the IM scaling
+            if run_config.scale_IMs:
+                pred_ln_im_mean, pred_ln_im_std = gnn_gm.revert_im_scaling(
+                    pred_mean, run_config, pred_std
+                )
+
+            cur_result_df[pred_im_keys] = pred_ln_im_mean
+            cur_result_df[pred_im_std_keys] = pred_ln_im_std
 
         results.append(cur_result_df)
 

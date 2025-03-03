@@ -41,6 +41,11 @@ def run_full(
     if len(run_config.ignore_events) > 0:
         obs_data = obs_data.drop_events(run_config.ignore_events)
 
+    if run_config.use_emp_gm_model:
+        emp_gm_params, emp_res_df = gnn_gm.load_emp_gm_params_res(
+            run_config.emp_gm_params_ffp, obs_data
+        )
+
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites
     print(f"Number of events: {len(events)}")
@@ -73,4 +78,6 @@ def run_full(
         obs_data,
         scalar_features,
         run_config,
+        emp_gm_params=emp_gm_params,
+        emp_res_df=emp_res_df,
     )

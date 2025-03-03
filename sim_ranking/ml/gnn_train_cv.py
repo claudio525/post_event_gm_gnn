@@ -65,23 +65,9 @@ def run_cv(
 
     # Load empirical GMM data & compute empirical residuals
     if run_config.use_emp_gm_model:
-        assert run_config.im_set == "pSA", "Only pSA supported when using empirical GMM model"
-        emp_gm_params = pd.read_parquet(run_config.emp_gm_params_ffp)
-        assert obs_data.record_df.index.isin(
-            emp_gm_params.index
-        ).all(), "Missing empirical data"
-        emp_gm_params = emp_gm_params.loc[obs_data.record_df.index]
-
-        emp_res_df = pd.DataFrame(
-            data=np.log(obs_data.record_df[constants.PSA_KEYS].values)
-            - emp_gm_params.loc[
-                obs_data.record_df.index, constants.GMM_PRED_PSA_KEYS
-            ].values,
-            index=obs_data.record_df.index,
-            columns=constants.PSA_KEYS,
+        emp_gm_params, emp_res_df = gnn_gm.load_emp_gm_params_res(
+            run_config.emp_gm_params_ffp, obs_data
         )
-        emp_res_df["event_id"] = emp_gm_params.loc[emp_res_df.index, "event_id"]
-        emp_res_df["site_id"] = emp_gm_params.loc[emp_res_df.index, "site_id"]
 
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites

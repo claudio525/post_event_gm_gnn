@@ -1,0 +1,100 @@
+### Same as v2p1, except uses an empirical model as a base model, and only considers pSA.
+
+### All paths specified are relative to the environment variable $wdata
+
+# General settings
+seed: 42
+
+# IMs
+im_set: "pSA"
+
+# Input data settings
+rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.2/custom/mod_ground_motion_im_table_rotd50_flat.csv
+max_dist: 30
+closest_max_dist: 10
+max_n_obs_sites: 10
+min_n_obs_sites: 2
+
+rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p2/emp_gm_params_400MaxRjb.parquet
+use_emp_gm_model: True
+
+ignore_events: ["3468575"]
+
+### Scenario Weighting
+# Magnitude
+mag_scenario_weighting: True
+mag_min_weight: 1
+mag_max_weight: 5
+mag_start: 4.5
+mag_end: 6.0
+# DoC
+doc_scenario_weighting: True
+doc_min_weight: 1
+doc_max_weight: 2
+doc_start: 1
+doc_end: 6
+
+
+# Features
+graph_feature_keys:
+  edge:
+    - "dist"
+    - "angular_dist"
+    - "vs30_site_int"
+    - "vs30_diff"
+    - "z1p0_site_int"
+    - "z1p0_diff"
+    - "z2p5_site_int"
+    - "z2p5_diff"
+    # - "tsite_site_int"
+    # - "tsite_diff"
+    - "rrup_site_int"
+    - "rrup_diff"
+    - "mag"
+  site_int:
+    - "vs30_site_int"
+    - "z1p0_site_int"
+    - "z2p5_site_int"
+    # - "tsite_site_int"
+    - "rrup_site_int"
+    - "mag"
+  site_obs:
+#    - "vs30_site_obs"
+#    - "z1p0_site_obs"
+#    - "z2p5_site_obs"
+#    - "tsite_site_obs"
+#    - "rrup_site_obs"
+
+# Model settings
+scale_IMs: true
+
+# Hyperparameters
+n_epochs: 250
+batch_size: 1024
+
+use_lr_scheduler: True
+lr_patience: 50
+lr_factor: 0.5
+
+fc_n_units: 64
+fc_act_fn: "relu"
+
+batch_norm: true
+
+int_embedding_act_fn: null
+obs_embedding_act_fn: null
+edge_embedding_act_fn: null
+n_int_node_channels: [2, 2]
+n_obs_node_channels: [32, 32]
+n_edge_channels: [4, 4]
+gcn_act_fn: "relu"
+
+n_att_heads: [4, 4]
+att_n_units: [8, 8]
+att_act_fn: "tanh"
+
+l2_reg: 0.0005
+dropout_rate: 0.1
+
+# Output settings
+rel_results_dir: sim_ranking/results/gnn

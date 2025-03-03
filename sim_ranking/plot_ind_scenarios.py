@@ -185,17 +185,29 @@ def plot_obs_sites(
     log_values: bool = False,
 ):
     cur_obs_sites_dist = dist_matrix.loc[int_site].loc[obs_sites]
-    cur_obs_data = obs_data.get_event_data(event, obs_sites)
+    cur_obs_data = obs_data.get_event_data(event, list(obs_sites) + [int_site])
 
-    for int_site in obs_sites:
-        cur_values = cur_obs_data.loc[int_site, sr.constants.PSA_KEYS].values.astype(
+    for cur_site in obs_sites:
+        cur_values = cur_obs_data.loc[cur_site, sr.constants.PSA_KEYS].values.astype(
             float
         )
         ax.plot(
             sr.constants.PERIODS,
             np.log(cur_values) if log_values else cur_values,
-            label=f"{int_site}, {cur_obs_sites_dist[int_site]:.2f} km",
+            label=f"{cur_site}, {cur_obs_sites_dist[cur_site]:.2f} km",
+            linestyle="--",
         )
+
+    site_int_values = cur_obs_data.loc[int_site, sr.constants.PSA_KEYS].values.astype(
+        float
+    )
+    ax.plot(
+        sr.constants.PERIODS,
+        np.log(site_int_values) if log_values else site_int_values,
+        label=f"{int_site}",
+        c="r",
+        linewidth=2.5,
+    )
 
     ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
 
@@ -321,6 +333,3 @@ def get_site_info_df(
     )
 
     return site_info_df
-
-
-

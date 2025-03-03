@@ -1,21 +1,51 @@
-gnn_prediction_config:
+gnn_event_estimation_config:
   # Note: This has to be a fully trained model, not a set of CV models!
-  benchmark_model_dir: "sim_ranking/results/gnn/test_benchmark_model"
-
-  nzgmdb_ffp: "gm_datasets/nz_gmdb/v4.1/Tables/ground_motion_im_table_rotd50_flat.csv"
-
+  model_dirs: 
+    - "sim_ranking/results/gnn/archive/0218_2000_full_v4p2NZGMDB_v2p1GNN"
+    - "sim_ranking/results/gnn/archive/0227_1700_full_v4p2NZGMDB_v2p3_pSAOnly"
   events: 
-    - "3528839"
-    - "2016p859616"
-    - "2019p088069"
-    - "2014p715167"
-    - "2018p249209"
-    - "2016p831374"
-    - "2012p812341"
-    - "3531495"
-    - "2021p246745"
-    - "2016p858526"
-    - "2023p187094"
+    - "3381030"
+    - "2016p558975"
+    - "2016p858115"
+    - "2017p255879"
+    - "2016p474397"
+    - "2022p768417"
+    - "3505099"
+    - "2022p564358"
+    - "3586837"
+    - "2018p139380"
+gnn_scenario_estimation_config:
+  # Note: These have to be fully trained models, not a set of CV models!
+  model_dirs:
+    - "sim_ranking/results/gnn/archive/0218_2000_full_v4p2NZGMDB_v2p1GNN"
+  scenario_ids:
+    - "2016p860234_WEL"
+    - "2016p864224_WNKS"
+    - "2016p439634_PTOS"
+    - "2013p708602_NNBS"
+    - "2016p858915_PNMS"
+    - "2017p113098_SCAC"
+    - "2017p865076_KPOC"
+    - "2017p517915_LHRS"
+    - "2012p073274_PARS"
+    - "2013p614125_CPLB"
+    - "2023p568770_POTS"
+    - "2016p858348_SOCS"
+    - "2016p858492_DAVS"
+    - "2016p871889_POLS"
+    - "3631409_SHLC"
+    - "3528858_GODS"
+    - "2017p036679_WTYS"
+    - "2021p218945_SOMS"
+    - "2013p614345_WNKS"
+    - "2013p739681_LIRS"
+    - "2016p859677_LNBS"
+    - "2022p434901_POTS"
+    - "2331099_WDAS"
+    - "2016p883896_POKS"
+    - "2023p427805_PHHS"
+
+  
 compute_emp_gm_params_config:
   benchmark_emp_gm_params_ffp: "sim_ranking/emp_gm_params/nzgmdb_v4p1/emp_gm_params_400MaxRjb.parquet"
   nzgmdb_ffp: "gm_datasets/nz_gmdb/v4.1/Tables/ground_motion_im_table_rotd50_flat.csv"

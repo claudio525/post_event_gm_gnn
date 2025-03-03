@@ -137,10 +137,15 @@ def compute_site_combinations(
         if closest_max_dist < max_dist:
             # Note: The fact that cur_dist_matrix is not sorted (per row) does not matter,
             # as its an any check and the result is broadcasted (along the rows)
+            cur_site_int_obs_sites_dist_df = cur_dist_matrix.loc[:, cur_obs_sites]
             closest_max_dist_mask = (
-                cur_dist_matrix.loc[:, cur_obs_sites].values < closest_max_dist
+                cur_site_int_obs_sites_dist_df.values < closest_max_dist
             )
-            np.fill_diagonal(closest_max_dist_mask, False)  # Ignore the site itself
+            if not allow_self:
+                # Ignore the site itself
+                closest_max_dist_mask &=  ~(cur_site_int_obs_sites_dist_df.values == 0.0)
+                assert np.count_nonzero(cur_site_int_obs_sites_dist_df == 0.0) == cur_obs_sites.size
+                # np.fill_diagonal(closest_max_dist_mask, False)  # Ignore the site itself
             dist_mask &= np.any(closest_max_dist_mask, axis=1)[:, None]
 
         # Enforce maximum number of observation sites
@@ -193,7 +198,6 @@ def create_event_scalar_feature_dfs(
         7) Event site to site features
     """
     events = np.asarray(list(event_sites.keys()))
-    # assert np.all(np.asarray(list(event_sites.keys())) == events)
 
     scalar_feature_columns = np.asarray(
         [
@@ -216,9 +220,6 @@ def create_event_scalar_feature_dfs(
     event_scalar_features_dfs = {}
     for cur_event in events:
         cur_sites = event_sites[cur_event]
-
-
-
         cur_site_combs = event_site_combs[cur_event]
 
         # Include self for SoIs
@@ -300,12 +301,15 @@ def create_event_scalar_feature_dfs(
                 cur_feature_df.columns.get_indexer_for(cur_site_obs),
             ]
 
-        event_scalar_features_dfs[cur_event] = pd.DataFrame(
+
+        cur_scalar_features_df = pd.DataFrame(
             index=cur_site_comb_keys, data=cur_tensor, columns=scalar_feature_columns
         )
-        # scalar_features_values.append(cur_tensor)
+        # Drop duplicate entries, this can occur when given site-combinations
+        # already contain self-loops 
+        cur_scalar_features_df = cur_scalar_features_df.loc[~cur_scalar_features_df.index.duplicated(keep="first")]
+        event_scalar_features_dfs[cur_event] = cur_scalar_features_df
 
-    # scalar_features_values = np.concatenate(scalar_features_values, axis=0)
     return event_scalar_features_dfs, scalar_feature_columns
 
 

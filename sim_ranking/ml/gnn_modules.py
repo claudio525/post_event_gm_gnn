@@ -448,6 +448,15 @@ class IntNodeConv(MessagePassing):
 
 
 class AddSoIObsIMsTransform(BaseTransform):
+    """
+    A transform for adding an observation node for the SoI 
+    to the graph data with a certain probability.
+    This forces to model to learn to use the observation 
+    at the SoI if they are available, additionally it helps
+    teach the model site-to-site correlation 
+    (i.e. very close sites are highly correlated).
+    """
+
 
     def __init__(
         self,

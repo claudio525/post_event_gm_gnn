@@ -79,6 +79,7 @@ def predict_event_3468575(
     non_uniform_site_dir: Path,
     srf_ffp: Path,
     out_ffp: Path,
+    emp_gm_params_ffp: Path = None,
     allow_self: bool = True,
 ):
     region = sr.constants.CANTERBURY_REGION
@@ -108,6 +109,15 @@ def predict_event_3468575(
     run_config = sr.ml.RunConfig.from_yaml(model_dir / "run_config.yaml")
     obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
 
+    emp_gm_params, obs_emp_res_df = None, None
+    if run_config.use_emp_gm_model:
+        # Load empirical GMM residuals for observation sites
+        _, obs_emp_res_df = sr.ml.gnn_gm.load_emp_gm_params_res(
+            run_config.emp_gm_params_ffp, obs_data
+        )
+        # Load empirical GMM parameters for prediction sites
+        emp_gm_params = pd.read_parquet(emp_gm_params_ffp)
+
     # Run prediction
     result_df = sr.ml.predict_event(
         model_dir,
@@ -117,6 +127,8 @@ def predict_event_3468575(
         obs_data.site_df.loc[obs_data.event_sites[event_id]],
         obs_data.record_df[["event_id", "site_id", "rrup"]],
         obs_data.record_df[sr.constants.IMs + ["event_id", "site_id"]],
+        emp_gm_params=emp_gm_params,
+        obs_emp_res_df=obs_emp_res_df,
         allow_self=allow_self,
     )
 

@@ -50,10 +50,6 @@ class RunConfig:
     min_n_obs_sites: int
     """Minimum number of observation sites required"""
 
-    rel_emp_gm_params_fp: Path | None
-    """Relative path to the empirical GM parameters file"""
-    use_emp_gm_model: bool
-    """Whether to use an empirical GMM"""
 
     ignore_events: Sequence[str]
     """Events to ignore"""
@@ -85,7 +81,7 @@ class RunConfig:
 
     ### Model settings
     scale_IMs: bool
-    """Whether to scale the IMs"""
+    """Whether to scale the IMs. Does nothing if use_emp_gm_model is True."""
 
     ### Hyperparameters
     n_epochs: int
@@ -139,6 +135,12 @@ class RunConfig:
     """Number of epochs to wait before reducing the learning rate"""
     lr_factor: float = 0.5
     """Factor to reduce the learning rate by"""
+
+    ### Empirical GMM Base Model
+    use_emp_gm_model: bool = False
+    """Whether to use an empirical GMM"""
+    rel_emp_gm_params_fp: Path | None = None
+    """Relative path to the empirical GM parameters file"""
 
     ### Data perturbations
     soi_with_obs_pert: bool = False
@@ -521,21 +523,20 @@ def run_model_training(
         dist_matrix=dist_matrix,
     )
 
-
     train_transform = gnn_modules.AddSoIObsIMsTransform(train_event_scalar_feature_dfs, run_config) if run_config.soi_with_obs_pert else None
     train_dataset = gnn_modules.CustomGraphDataset(train_graph_data, transform=train_transform)
     train_loader = gloader.DataLoader(
         train_dataset, batch_size=run_config.batch_size, shuffle=True, drop_last=True
     )
 
-    val_event_scalar_feature_dfs, _ = (
-        ml_data.create_event_scalar_feature_dfs(
-            val_event_sites, scalar_features, val_event_site_combs
-        )
-    )
-
     val_graph_data, val_loader = None, None
     if val_int_sites is not None:
+        val_event_scalar_feature_dfs, _ = (
+            ml_data.create_event_scalar_feature_dfs(
+                val_event_sites, scalar_features, val_event_site_combs
+            )
+        )
+
         val_graph_data = get_graph_data(
             obs_data,
             val_event_sites,
@@ -598,6 +599,9 @@ def run_model_training(
 
     # Create output directory
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # TMP
+    pd.to_pickle(train_graph_data, out_dir / "train_graph_data.pickle")
 
     # Save the training sites and validation sites
     np.save(out_dir / "val_int_sites.npy", val_int_sites)
@@ -677,7 +681,7 @@ def run_model_training(
     mlt.utils.write_to_yaml(metadata, out_dir / "metadata.yaml")
 
 
-def _get_event_graph_data(
+def _get_train_event_graph_data(
     event: str,
     sites: np.ndarray,
     site_combs: np.ndarray,
@@ -904,7 +908,7 @@ def get_graph_data(
             event_site_combs.items(), disable=not verbose
         ):
             graph_data.append(
-                _get_event_graph_data(
+                _get_train_event_graph_data(
                     cur_event,
                     event_sites[cur_event],
                     cur_site_combs,
@@ -919,7 +923,7 @@ def get_graph_data(
     else:
         with mp.Pool(n_procs) as pool:
             graph_data = pool.starmap(
-                _get_event_graph_data,
+                _get_train_event_graph_data,
                 [
                     (
                         cur_event,
@@ -1498,3 +1502,27 @@ def get_doc_weight_func(
             return grad * doc + bias
 
     return doc_weight_fn
+
+
+def load_emp_gm_params_res(emp_gm_params_ffp: Path, obs_data: ObservedData):
+    """
+    Loads the empirical GM parameters and residuals wrt. observed
+    """
+    emp_gm_params = pd.read_parquet(emp_gm_params_ffp)
+    assert obs_data.record_df.index.isin(
+        emp_gm_params.index
+    ).all(), "Missing empirical data"
+    emp_gm_params = emp_gm_params.loc[obs_data.record_df.index]
+
+    emp_res_df = pd.DataFrame(
+        data=np.log(obs_data.record_df[constants.PSA_KEYS].values)
+        - emp_gm_params.loc[
+            obs_data.record_df.index, constants.GMM_PRED_PSA_KEYS
+        ].values,
+        index=obs_data.record_df.index,
+        columns=constants.PSA_KEYS,
+    )
+    emp_res_df["event_id"] = emp_gm_params.loc[emp_res_df.index, "event_id"]
+    emp_res_df["site_id"] = emp_gm_params.loc[emp_res_df.index, "site_id"]
+
+    return emp_gm_params, emp_res_df
