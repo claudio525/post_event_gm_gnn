@@ -572,7 +572,12 @@ def run_model_training(
     )
 
     metrics_df = pd.DataFrame(metrics)
+    assert best_model_epoch == metrics_df.w_loss_hist_val.argmin()
     agg_metrics = {
+        "w_loss_train_best_epoch": metrics_df.w_loss_hist_train.argmin(),
+        "w_loss_train_min": metrics_df.w_loss_hist_train.min(),
+        "w_loss_val_best_epoch": metrics_df.w_loss_hist_val.argmin(),
+        "w_loss_val_min": metrics_df.w_loss_hist_val.min(),
         "loss_train_best_epoch": metrics_df.loss_hist_train.argmin(),
         "loss_train_min": metrics_df.loss_hist_train.min(),
         "loss_val_best_epoch": metrics_df.loss_hist_val.argmin(),
