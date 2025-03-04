@@ -323,8 +323,8 @@ class CustomAttentionGNN(torch.nn.Module):
         ln_im_mean, ln_im_std = out.chunk(2, dim=1)
 
         # Clip predicted values to prevent numerical issues
-        # ln_im_std = torch.clamp(ln_im_std, min=-20, max=5)
-        # ln_im_mean = torch.clamp(ln_im_mean, min=-20, max=5)
+        ln_im_std = torch.clamp(ln_im_std, min=-3, max=1)
+        ln_im_mean = torch.clamp(ln_im_mean, min=-3, max=1)
 
         return ln_im_mean, ln_im_std
 
