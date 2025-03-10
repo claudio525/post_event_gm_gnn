@@ -4,7 +4,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
-import pytest
 
 import sim_ranking as sr
 
@@ -22,9 +21,11 @@ def test_nzgmdb_emp_gm_params(tmpdir: Path):
     nzgmdb_ffp = wdata / config["nzgmdb_ffp"]
     output_ffp = tmpdir / "test.parquet"
 
+    obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
+
     sr.data.compute_nzgmdb_emp_gm_params(
         output_ffp,
-        nzgmdb_ffp,
+        obs_data,
         config["max_rjb"],
     )
 

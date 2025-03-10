@@ -572,7 +572,7 @@ def run_model_training(
     )
 
     metrics_df = pd.DataFrame(metrics)
-    assert best_model_epoch == metrics_df.w_loss_hist_val.argmin()
+    assert best_model_epoch is None or best_model_epoch == metrics_df.w_loss_hist_val.argmin()
     agg_metrics = {
         "w_loss_train_best_epoch": metrics_df.w_loss_hist_train.argmin(),
         "w_loss_train_min": metrics_df.w_loss_hist_train.min(),
@@ -1405,6 +1405,7 @@ def get_residuals(
     results: pd.DataFrame,
     ims: Sequence[str] = constants.PSA_KEYS,
     pred_suffix: str = "pred",
+    site_col: str = "site_int",
 ):
     """Computes the residual between the observed and predicted IMs for each scenario"""
     pred_im_keys = mlt.array_utils.numpy_str_join("_", ims, pred_suffix)
@@ -1415,7 +1416,7 @@ def get_residuals(
 
     res_df.index = results.index
     res_df["event_id"] = results["event_id"]
-    res_df["site_int"] = results["site_int"]
+    res_df[site_col] = results[site_col]
     if "n_obs_sites" in results.columns:
         res_df["n_obs_sites"] = results["n_obs_sites"]
     return res_df

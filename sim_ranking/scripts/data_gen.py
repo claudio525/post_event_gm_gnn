@@ -38,9 +38,11 @@ def get_nzgmdb_emp_gmm_params(
     """Computes the GM parameters using empirical GMMs"""
     events = mlt.utils.load_txt(events_ffp) if events_ffp is not None else None
 
+    obs_data = sr.data.load_obs_nzgmdb(nzgmdb_flatfile_ffp)
+
     sr.data.compute_nzgmdb_emp_gm_params(
         output_ffp,
-        nzgmdb_flatfile_ffp,
+        obs_data,
         rjb_max,
         events=events,
     )

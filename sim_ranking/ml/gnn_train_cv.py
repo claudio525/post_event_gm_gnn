@@ -281,7 +281,7 @@ def run_cv(
     }
     mlt.utils.write_to_yaml(agg_metrics, out_dir / "agg_metrics.yaml")
 
-    # Generate report
+    # Generate reports
     cv_agg_notebook = (
         Path(__file__).parent.parent
         / "scripts/ml_models/report_notebooks/cv_agg_results.ipynb"
@@ -304,6 +304,18 @@ def run_cv(
         out_dir / "ind_scenarios.html",
         results_dir=out_dir,
         wdata=run_config.wdata,
+    )
+
+    loss_worst_notebook = (
+        Path(__file__).parent.parent
+        / "scripts/ml_models/report_notebooks/loss_worst_report.ipynb"
+    )
+    mlt.quarto.render_quarto(
+        "mamba activate sim-ranking-pip",
+        loss_worst_notebook,
+        out_dir / "loss_worst_report.html",
+        results_dir=out_dir,
+        wdata=run_config.wdata
     )
 
     return out_dir, agg_metrics

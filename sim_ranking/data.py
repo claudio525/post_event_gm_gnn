@@ -271,7 +271,7 @@ def compute_event_non_uniform_sites_emp_gm_params(
 
 def compute_nzgmdb_emp_gm_params(
     output_ffp: Path,
-    nzgmdb_flat_ffp: Path,
+    obs_data: ObservedData,
     rjb_max: float,
     events: Sequence[str] = None,
     periods: Sequence[float] = constants.PERIODS,
@@ -297,10 +297,6 @@ def compute_nzgmdb_emp_gm_params(
         The empirical GMM parameters for PGA
         and the default set of pSA periods
     """
-
-    ### Data loading
-    obs_data = load_obs_nzgmdb(nzgmdb_flat_ffp)
-
     # Create rupture dataframe
     columns = [
         ObservedData.EventColEnums.EVENT_ID,

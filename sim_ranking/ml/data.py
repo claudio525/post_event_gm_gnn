@@ -363,6 +363,9 @@ def get_valid_site_ints(
     )
     rupture_df["vs30measured"] = True
 
+    # Z1.0 needs to be in kilometres
+    rupture_df["z1pt0"] = rupture_df["z1pt0"] / 1000.0
+
     # Get PGA results
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)

@@ -9,6 +9,7 @@ def get_bias_residual_fig(
     top: float = 0.98,
     bottom: float = 0.1,
     bias_y_axis_limits: tuple[float, float] = (-1.0, 1.0),
+    std_y_axis_limits: tuple[float, float] = (0.0, 1.0),
 ):
     """
     Create a figure a bias and residual plots for
@@ -72,13 +73,13 @@ def get_bias_residual_fig(
     ax3.set_ylabel("Residual Standard Deviation")
     ax3.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax3.set_xscale("log")
-    ax3.set_ylim(0.0, 1.0)
+    ax3.set_ylim(*std_y_axis_limits)
     ax3.set_xlim(0.01, 10.0)
 
     ax4 = fig.add_subplot(grid_residual[1])
     ax4.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax4.set_yticklabels([])
-    ax4.set_ylim(0.0, 1.0)
+    ax4.set_ylim(*std_y_axis_limits)
 
     # Remove general figure padding
     fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom)

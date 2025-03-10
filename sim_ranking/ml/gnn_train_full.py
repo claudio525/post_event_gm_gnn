@@ -16,7 +16,7 @@ from .. import utils
 
 def run_full(
     out_dir: Path,
-    run_config: Path,
+    run_config_ffp: Path,
     n_epochs: int = None,
     device: str = None,
 ):
@@ -31,16 +31,16 @@ def run_full(
         Number of epochs to run the model for.
     """
     # Create the config
-    if isinstance(run_config, Path):
-        run_config = gnn_gm.RunConfig.from_config_kwargs(
-            run_config, n_epochs=n_epochs, device=device
-        )
+    run_config = gnn_gm.RunConfig.from_config_kwargs(
+        run_config_ffp, n_epochs=n_epochs, device=device
+    )
 
     ### Data loading
     obs_data = data.load_obs_nzgmdb(run_config.obs_data_ffp)
     if len(run_config.ignore_events) > 0:
         obs_data = obs_data.drop_events(run_config.ignore_events)
 
+    emp_gm_params, emp_res_df = None, None
     if run_config.use_emp_gm_model:
         emp_gm_params, emp_res_df = gnn_gm.load_emp_gm_params_res(
             run_config.emp_gm_params_ffp, obs_data
