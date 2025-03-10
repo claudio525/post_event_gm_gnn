@@ -159,7 +159,7 @@ class CustomAttentionGNN(torch.nn.Module):
 
             # Attention model
             att_model = _create_multi_mlp(
-                cur_n_edge_channels,
+                n_edge_in_channels,
                 run_config.att_n_units,
                 cur_n_att_heads,
                 run_config.att_act_fn,
@@ -399,8 +399,6 @@ class IntNodeConv(MessagePassing):
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
     ):
-        edge_attr = self.edge_update(edge_attr)
-
         # Compute the messages
         m_s = self.propagate(
             edge_index=edge_index,
@@ -410,6 +408,10 @@ class IntNodeConv(MessagePassing):
 
         # Update the nodes
         out = m_s + self.int_update_model(x[1])
+
+        # Update the edge attributes
+        edge_attr = self.edge_update(edge_attr)
+
         return out, edge_attr
 
     def edge_update(self, edge_attr: torch.Tensor) -> Tensor:
