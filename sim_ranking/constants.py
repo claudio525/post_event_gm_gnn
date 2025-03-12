@@ -116,7 +116,7 @@ IM_WEIGTHS_SETS = {
 COMPONENTS = ["090", "000", "ver"]
 
 SCALAR_FEATURE_KEYS = {
-    "event": ["mag"],
+    "event": ["mag", "is_subduction"],
     "site": ["vs30", "z1p0", "z2p5", "tsite"],
     "site_to_site": ["dist", "vs30_diff", "z1p0_diff", "z2p5_diff", "tsite_diff"],
     "event_site": ["rrup"],

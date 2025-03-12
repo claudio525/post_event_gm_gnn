@@ -28,6 +28,7 @@ def get_scalar_features(
     event_site_df = event_site_df.copy(True)
 
     ### Event features
+    event_df["is_subduction"] = event_df["tect_type"].isin([constants.TectonicType.SUBDUCTION_INTERFACE, constants.TectonicType.SUBDUCTION_SLAB]).astype(float)
     event_features_df = _pre_process_event_features(event_df, scalar_feature_keys["event"])
 
     ### Site features
@@ -124,9 +125,15 @@ def _pre_process_event_features(
     """Scales the event features to be between -1 and 1"""
     event_df = event_df.loc[:, event_feature_keys]
     for cur_key in event_feature_keys:
-        cur_min, cur_max = constants.PRE_PROCESS_CONFIG[cur_key]
-        event_df[cur_key] = 2 * (event_df[cur_key] - cur_min) / (cur_max - cur_min) - 1
+        # No scaling for is_subduction
+        if cur_key == "is_subduction":
+            continue
+        # Scaling for all other features
+        else:
+            cur_min, cur_max = constants.PRE_PROCESS_CONFIG[cur_key]
+            event_df[cur_key] = 2 * (event_df[cur_key] - cur_min) / (cur_max - cur_min) - 1
 
+    assert len(event_df.columns) == len(event_feature_keys)
     return event_df
 
 

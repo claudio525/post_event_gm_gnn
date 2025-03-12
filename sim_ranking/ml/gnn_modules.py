@@ -451,14 +451,13 @@ class IntNodeConv(MessagePassing):
 
 class AddSoIObsIMsTransform(BaseTransform):
     """
-    A transform for adding an observation node for the SoI 
+    A transform for adding an observation node for the SoI
     to the graph data with a certain probability.
-    This forces to model to learn to use the observation 
+    This forces to model to learn to use the observation
     at the SoI if they are available, additionally it helps
-    teach the model site-to-site correlation 
+    teach the model site-to-site correlation
     (i.e. very close sites are highly correlated).
     """
-
 
     def __init__(
         self,
@@ -477,37 +476,57 @@ class AddSoIObsIMsTransform(BaseTransform):
 
     def forward(self, data: gdata.HeteroData) -> gdata.HeteroData:
         if random.uniform(0, 1) < self.pert_probability:
-            if self.run_config.graph_feature_keys["site_obs"] is None:
-                event = data["metadata"]["event"]
-                site_int = data["metadata"]["site_int"]
-                n_obs_sites = data["metadata"]["obs_sites"].size
-                scalar_feature_df = self.event_scalar_feature_dfs[event]
+            event = data["metadata"]["event"]
+            site_int = data["metadata"]["site_int"]
+            n_obs_sites = data["metadata"]["obs_sites"].size
+            scalar_feature_df = self.event_scalar_feature_dfs[event]
 
-                data["site_obs"]["x"] = torch.cat(
-                    (data["site_obs"]["x"], torch.nan_to_num(data["y"], nan=99)), dim=0
-                )
-                data[("site_obs", "self_loop", "site_obs")]["edge_index"] = torch.arange(
-                    0, n_obs_sites + 1
-                ).tile((2, 1))
 
-                data[("site_obs", "informs", "site_int")]["edge_index"] = torch.cat(
+            # IM values
+            site_obs_x = torch.nan_to_num(data["y"], nan=99)
+            # Scalar features
+            if len(self.run_config.graph_feature_keys["site_obs"]) > 0:
+                site_obs_x = torch.cat(
                     (
-                        torch.arange(0, n_obs_sites + 1)[None, :],
-                        torch.zeros((1, n_obs_sites + 1), dtype=int),
+                        torch.from_numpy(
+                            scalar_feature_df.loc[
+                                f"{site_int}_{site_int}",
+                                self.run_config.graph_feature_keys["site_obs"],
+                            ].values[None, :]
+                        ).to(torch.float32),
+                        site_obs_x,
                     ),
-                    dim=0,
+                    dim=1,
                 )
-                data[("site_obs", "informs", "site_int")]["edge_attr"] = torch.cat(
-                    (
-                        data[("site_obs", "informs", "site_int")]["edge_attr"],
-                        torch.from_numpy(scalar_feature_df.loc[f"{site_int}_{site_int}", self.run_config.graph_feature_keys["edge"]].values).to(torch.float32)[None, :]
-                    ),
-                    dim=0,
-                )
+            data["site_obs"]["x"] = torch.cat((data["site_obs"]["x"], site_obs_x), dim=0)
 
-                return data
-            else:
-                raise NotImplementedError()
+            # Observation site self-loop
+            data[("site_obs", "self_loop", "site_obs")]["edge_index"] = torch.arange(
+                0, n_obs_sites + 1
+            ).tile((2, 1))
+
+            # Observation site -> SoI edge
+            data[("site_obs", "informs", "site_int")]["edge_index"] = torch.cat(
+                (
+                    torch.arange(0, n_obs_sites + 1)[None, :],
+                    torch.zeros((1, n_obs_sites + 1), dtype=int),
+                ),
+                dim=0,
+            )
+            data[("site_obs", "informs", "site_int")]["edge_attr"] = torch.cat(
+                (
+                    data[("site_obs", "informs", "site_int")]["edge_attr"],
+                    torch.from_numpy(
+                        scalar_feature_df.loc[
+                            f"{site_int}_{site_int}",
+                            self.run_config.graph_feature_keys["edge"],
+                        ].values
+                    ).to(torch.float32)[None, :],
+                ),
+                dim=0,
+            )
+
+            return data
         else:
             return data
 

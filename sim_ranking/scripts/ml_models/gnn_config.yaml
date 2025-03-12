@@ -59,12 +59,13 @@ graph_feature_keys:
     # - "tsite_site_int"
     - "rrup_site_int"
     - "mag"
+    # - "is_subduction"
   site_obs:
-#    - "vs30_site_obs"
-#    - "z1p0_site_obs"
+  #  - "vs30_site_obs"
+  #  - "z1p0_site_obs"
 #    - "z2p5_site_obs"
 #    - "tsite_site_obs"
-#    - "rrup_site_obs"
+  #  - "rrup_site_obs"
 
 # Model settings
 scale_IMs: true
