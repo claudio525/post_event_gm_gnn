@@ -116,15 +116,18 @@ class CustomAttentionGNN(torch.nn.Module):
             ## Observation node transform model
             # This model performs the transformation of the observation
             # nodes used to update the SoI node
-            n_obs_transform_in_channels = (
-                run_config.site_obs_n_features
+            n_msg_transform_in_channels = (
+                (run_config.site_obs_n_features)
                 if ix == 0
                 else run_config.n_obs_node_channels[ix - 1]
             )
-            obs_transform_models = nn.ModuleList(
+            # Use the edge embedding for the message
+            if run_config.use_edge_emb_for_msg:
+                n_msg_transform_in_channels += run_config.n_edge_features if ix == 0 else run_config.n_edge_channels[ix - 1]
+            msg_transform_models = nn.ModuleList(
                 [
                     _create_single_mlp(
-                        n_obs_transform_in_channels,
+                        n_msg_transform_in_channels,
                         cur_int_n_channels,
                         # Use tanh for first layer to handle large nan replacement values
                         "tanh" if ix == 0 else run_config.int_embedding_act_fn,
@@ -172,10 +175,11 @@ class CustomAttentionGNN(torch.nn.Module):
                             obs_update_model=obs_update_model,
                         ),
                         ("site_obs", "informs", "site_int"): IntNodeConv(
-                            obs_transform_models=obs_transform_models,
+                            msg_transform_models=msg_transform_models,
                             int_update_model=int_update_model,
                             edge_update_model=edge_update_model,
                             att_model=att_model,
+                            use_edge_emb_for_msg=run_config.use_edge_emb_for_msg,
                         ),
                     },
                     aggr="sum",
@@ -352,10 +356,11 @@ class IntNodeConv(MessagePassing):
         # obs_transform_model: nn.Module,
         # int_transform_model: nn.Module,
         # att_model: nn.Module,
-        obs_transform_models: nn.ModuleList,
+        msg_transform_models: nn.ModuleList,
         int_update_model: nn.Module,
         edge_update_model: nn.Module,
         att_model: nn.Module,
+        use_edge_emb_for_msg: bool = False,
         **kwargs,
     ):
         """
@@ -375,22 +380,21 @@ class IntNodeConv(MessagePassing):
 
         self.att_model = att_model
 
-        self.obs_transform_models = obs_transform_models
+        self.msg_transform_models = msg_transform_models
         self.int_update_model = int_update_model
         self.edge_update_model = edge_update_model
 
-        self.n_heads = len(self.obs_transform_models)
+        self.use_edge_emb_for_msg = use_edge_emb_for_msg
 
-        # self.obs_transform_model = obs_transform_model
-        # self.int_transform_model = int_transform_model
+        self.n_heads = len(self.msg_transform_models)
 
-        # self.aggr = "add"
+
         self.reset_parameters()
 
     def reset_parameters(self):
         super().reset_parameters()
         ginits.reset(self.att_model)
-        ginits.reset(self.obs_transform_models)
+        ginits.reset(self.msg_transform_models)
         ginits.reset(self.int_update_model)
 
     def forward(
@@ -439,9 +443,10 @@ class IntNodeConv(MessagePassing):
         # 1) Compute the transformed source node
         # 2) Multiply with the attention coefficient
         # 3) Concatenate the results
+        msg_model_input = torch.cat((x_j, edge_attr), dim=1) if self.use_edge_emb_for_msg else x_j
         m = torch.cat(
             [
-                alpha[:, i][:, None] * self.obs_transform_models[i](x_j)
+                alpha[:, i][:, None] * self.msg_transform_models[i](msg_model_input)
                 for i in range(self.n_heads)
             ],
             dim=1,
@@ -481,11 +486,13 @@ class AddSoIObsIMsTransform(BaseTransform):
             n_obs_sites = data["metadata"]["obs_sites"].size
             scalar_feature_df = self.event_scalar_feature_dfs[event]
 
-
             # IM values
             site_obs_x = torch.nan_to_num(data["y"], nan=99)
             # Scalar features
-            if len(self.run_config.graph_feature_keys["site_obs"]) > 0:
+            if (
+                self.run_config.graph_feature_keys["site_obs"] is not None
+                and len(self.run_config.graph_feature_keys["site_obs"]) > 0
+            ):
                 site_obs_x = torch.cat(
                     (
                         torch.from_numpy(
@@ -498,7 +505,9 @@ class AddSoIObsIMsTransform(BaseTransform):
                     ),
                     dim=1,
                 )
-            data["site_obs"]["x"] = torch.cat((data["site_obs"]["x"], site_obs_x), dim=0)
+            data["site_obs"]["x"] = torch.cat(
+                (data["site_obs"]["x"], site_obs_x), dim=0
+            )
 
             # Observation site self-loop
             data[("site_obs", "self_loop", "site_obs")]["edge_index"] = torch.arange(

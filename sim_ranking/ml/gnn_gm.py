@@ -129,6 +129,7 @@ class RunConfig:
     dropout_rate: float = 0.0
     """Dropout rate"""
 
+    # Learning Rate Scheduler
     use_lr_scheduler: bool = False
     """Whether to use a learning rate scheduler"""
     lr_patience: int = 5
@@ -148,6 +149,11 @@ class RunConfig:
     soi_with_obs_pert_prob: float = 0.0
     """Probability of perturbing scenarios, and adding observation site for SoI"""
 
+    ### Embedding settings
+    use_edge_emb_for_msg: bool = False
+    """Whether to use the edge embedding as an input for the message neural network"""
+
+    
     _im_scale_params: dict[str, pd.Series] | None = None
 
     ### Features
@@ -303,6 +309,7 @@ class RunConfig:
             "rel_emp_gm_params_fp": self.rel_emp_gm_params_fp,
             "soi_with_obs_pert": self.soi_with_obs_pert,
             "soi_with_obs_pert_prob": self.soi_with_obs_pert_prob,
+            "use_edge_emb_for_msg": self.use_edge_emb_for_msg,
         }
         if self.im_scale_params is not None:
             result["_im_scale_params"] = {
