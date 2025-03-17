@@ -316,6 +316,7 @@ def create_event_scalar_feature_dfs(
 def get_valid_site_ints(
     event_sites: Dict[str, np.ndarray],
     record_df: pd.DataFrame,
+    min_pga: float = 0.01,
 ):
     """
     Gets the list of site of interests per event that experience
@@ -330,6 +331,8 @@ def get_valid_site_ints(
         Available sites per event
     record_df: Dataframe
         Record data
+    min_pga: float, optional
+        Minimum PGA value
 
     Returns
     -------
@@ -347,12 +350,6 @@ def get_valid_site_ints(
 
     # Create the rupture dataframe
     rupture_df = record_df.copy(True)
-
-    # Constant inputs
-    rupture_df["mag"] = 6.0
-    rupture_df["rake"] = 45.0
-    rupture_df["dip"] = 45.0
-    rupture_df["z_tor"] = 0.0
 
     # Rename the columns to be in line what openquake expects
     rupture_df = rupture_df.rename(
@@ -382,7 +379,7 @@ def get_valid_site_ints(
     pga_result["site_id"] = rupture_df["site_id"]
 
     # Get the valid site of interests
-    pga_result = pga_result.loc[pga_result["PGA_mean"] >= np.log(0.01)]
+    pga_result = pga_result.loc[pga_result["PGA_mean"] >= np.log(min_pga)]
     valid_event_int_sites = {
         cur_event: np.intersect1d(
             cur_df.site_id.values.astype(str), event_sites[cur_event]

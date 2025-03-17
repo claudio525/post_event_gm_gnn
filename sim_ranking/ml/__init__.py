@@ -2,6 +2,7 @@ from . import data
 from . import features
 from . import gnn_gm
 from . import gnn_modules
+from . import gnn_hp
 
 from . import utils
 
@@ -18,6 +19,7 @@ __all__ = [
     "features",
     "gnn_gm",
     "gnn_modules",
+    "gnn_hp",
     "utils",
     "RunConfig",
     "run_cv",

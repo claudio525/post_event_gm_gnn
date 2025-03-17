@@ -76,7 +76,7 @@ def run_cv(
     # Get the set of valid site-interests per event
     print("Getting valid sites of interest")
     int_sites, valid_event_int_sites, _ = ml_data.get_valid_site_ints(
-        event_sites, obs_data.record_df.drop(columns=obs_data.ims)
+        event_sites, obs_data.record_df.drop(columns=obs_data.ims), min_pga=run_config.min_pga
     )
     events = np.intersect1d(events, np.asarray(list(valid_event_int_sites.keys())))
 

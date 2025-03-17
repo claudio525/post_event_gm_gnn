@@ -41,6 +41,8 @@ class RunConfig:
     rel_obs_data_ffp: Path
     """Relative path to the observed data file (NZGMDB)"""
 
+    min_pga: float
+    """Minimum PGA value based on Br13 at location of interest"""
     max_dist: float
     """Maximum distance between site-interest and observation sites"""
     closest_max_dist: float
@@ -152,7 +154,6 @@ class RunConfig:
     ### Embedding settings
     use_edge_emb_for_msg: bool = False
     """Whether to use the edge embedding as an input for the message neural network"""
-
     
     _im_scale_params: dict[str, pd.Series] | None = None
 
@@ -265,6 +266,7 @@ class RunConfig:
         result = {
             "seed": self.seed,
             "rel_obs_data_ffp": self.rel_obs_data_ffp,
+            "min_pga": self.min_pga,
             "max_dist": self.max_dist,
             "closest_max_dist": self.closest_max_dist,
             "max_n_obs_sites": self.max_n_obs_sites,

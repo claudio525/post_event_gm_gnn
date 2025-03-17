@@ -1,3 +1,4 @@
+### Same as v2p3, except it adds using the edge embedding as input for the message model
 ### All paths specified are relative to the environment variable $wdata
 
 # General settings
@@ -8,7 +9,6 @@ im_set: "pSA"
 
 # Input data settings
 rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.2/custom/mod_ground_motion_im_table_rotd50_flat.csv
-min_pga: 0.005
 max_dist: 30
 closest_max_dist: 10
 max_n_obs_sites: 10
@@ -103,7 +103,6 @@ dropout_rate: 0.1
 
 # Embedding settings
 use_edge_emb_for_msg: True
-
 
 # Output settings
 rel_results_dir: sim_ranking/results/gnn

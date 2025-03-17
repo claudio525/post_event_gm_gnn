@@ -185,10 +185,13 @@ class HPObjective:
             self.hp_opt_config["l2_reg"],
         )
 
-        batch_norm = trial.suggest_categorical(
-            "batch_norm",
-            self.hp_opt_config["batch_norm"],
-        )
+        if "batch_norm" in self.hp_opt_config:
+            batch_norm = trial.suggest_categorical(
+                "batch_norm",
+                self.hp_opt_config["batch_norm"],
+            )
+        else:
+            batch_norm = False
 
         dropout_rate = trial.suggest_categorical(
             "dropout_rate",

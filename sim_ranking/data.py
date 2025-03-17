@@ -350,13 +350,13 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
 
     # Some basic filtering
     if obs_data.nzgmdb_version is constants.NZGMDBVersion.v3p4:
-        obs_data = obs_data.metadata_filter(dict(rrup=(0, 250)))
+        obs_data = obs_data.metadata_filter(dict(rrup=(0, 350)))
     elif obs_data.nzgmdb_version in [
         constants.NZGMDBVersion.v4p0,
         constants.NZGMDBVersion.v4p1,
         constants.NZGMDBVersion.v4p2,
     ]:
-        obs_data = obs_data.metadata_filter(dict(rrup=(0, 250), is_ground_level=True))
+        obs_data = obs_data.metadata_filter(dict(rrup=(0, 350), is_ground_level=True))
     else:
         raise NotImplementedError("Invalid NZGMDB version")
 
