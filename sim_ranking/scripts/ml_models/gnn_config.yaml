@@ -8,13 +8,13 @@ im_set: "pSA"
 
 # Input data settings
 rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.2/custom/mod_ground_motion_im_table_rotd50_flat.csv
-min_pga: 0.005
+min_pga: 0.0025
 max_dist: 30
 closest_max_dist: 10
-max_n_obs_sites: 10
+max_n_obs_sites: 20
 min_n_obs_sites: 2
 
-rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p2/emp_gm_params_400MaxRjb.parquet
+rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p2/emp_gm_params_350MaxRjb.parquet
 use_emp_gm_model: True
 
 ignore_events: ["3468575"]
@@ -77,7 +77,7 @@ batch_size: 1024
 
 # Learning rate scheduling
 use_lr_scheduler: True
-lr_patience: 50
+lr_patience: 10
 lr_factor: 0.5
 
 fc_n_units: 64

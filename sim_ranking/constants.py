@@ -138,6 +138,9 @@ PRE_PROCESS_CONFIG = {
     "tsite_diff": (-7.10, 7.10),
 }
 
+MAG_BINS = [3, 4.5, 6, 8]
+RRUP_BINS = [0, 25, 50, 100, 200, 350]
+DOC_BINS = [0, 1.0, 2.25, 3.75, 8.0]
 
 
 CANTERBURY_REGION = [171.54, 173.12, -43.95, -43.22]

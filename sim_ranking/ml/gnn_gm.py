@@ -710,7 +710,7 @@ def _get_train_event_graph_data(
     graph_data = []
 
     ### Weighting functions
-    # Have to get these here, as they are not picklable
+    # Have to get these here, as they are not pickleable
     # Magnitude weighting function
     mag_weight_fn = (
         get_mag_weight_func(
@@ -722,6 +722,15 @@ def _get_train_event_graph_data(
         if run_config.mag_scenario_weighting
         else None
     )
+
+    # Get magnitude weight
+    assert (not run_config.mag_scenario_weighting) or (mag_weight_fn is not None)
+    cur_mag_weight = (
+        mag_weight_fn(obs_data.event_df.loc[event, "mag"])
+        if run_config.mag_scenario_weighting
+        else None
+    )
+
     # Degree of Constraint weighting function
     doc_weight_fn = None
     if run_config.doc_scenario_weighting:
@@ -732,13 +741,6 @@ def _get_train_event_graph_data(
             run_config.doc_end,
         )
 
-    # Get magnitude weight
-    assert (not run_config.mag_scenario_weighting) or (mag_weight_fn is not None)
-    cur_mag_weight = (
-        mag_weight_fn(obs_data.event_df.loc[event, "mag"])
-        if run_config.mag_scenario_weighting
-        else None
-    )
 
     if run_config.use_emp_gm_model:
         # Get the empirical GMM residuals

@@ -13,7 +13,7 @@ closest_max_dist: 10
 max_n_obs_sites: 10
 min_n_obs_sites: 2
 
-rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p2/emp_gm_params_400MaxRjb.parquet
+rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p2/emp_gm_params_350MaxRjb.parquet
 use_emp_gm_model: True
 
 ignore_events: ["3468575"]

@@ -286,6 +286,8 @@ def create_2plot_log(
     obs_data: sr.ObservedData,
     dist_matrix: pd.DataFrame,
     emp_gmm_params: pd.DataFrame = None,
+    plot_gnn_with_obs: bool = False,
+    plot_cim_with_obs: bool = False,
 ):
     cur_id = f"{event}_{int_site}"
 
@@ -304,6 +306,17 @@ def create_2plot_log(
     min_y4, max_y4 = plot_obs_sites(
         ax2, event, int_site, obs_sites, obs_data, dist_matrix, log_values=True
     )
+    # GNN
+    if plot_gnn_with_obs:
+        ax2.plot(sr.constants.PERIODS, gnn_results.loc[
+            cur_id, sr.constants.GNN_PRED_PSA_KEYS
+        ].values.astype(float), c="b", label="GNN", linewidth=2.5)
+    # cIM
+    if cim_results is not None and plot_cim_with_obs:
+        ax2.plot(sr.constants.PERIODS, cim_results.loc[
+            cur_id, sr.constants.CIM_PRED_PSA_KEYS
+        ].values.astype(float), c="g", label="cIM", linewidth=2.5)
+
     ax2.legend()
 
     # y-axis limits
