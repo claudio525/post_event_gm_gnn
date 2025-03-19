@@ -45,6 +45,12 @@ def sample_weighting(
     min_pga: float = 0.025,
     mag_n_bins: int = 20,
     rrup_n_bins: int = 20,
+    mag_max_weight: float = 4.0,
+    mag_start: float = 4.5,
+    mag_end: float = 6.0,
+    doc_max_weight: float = 1.0,
+    doc_start: float = 1.0,
+    doc_end: float = 6.0,
 ):
     # Load observed data
     obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
@@ -99,7 +105,7 @@ def sample_weighting(
     ax.xaxis.set_minor_locator(plt.MultipleLocator(0.25))
 
     # Weighting
-    weight_func = sr.ml.gnn_gm.get_mag_weight_func(0.0, 6, 4.8, 6.5)
+    weight_func = sr.ml.gnn_gm.get_mag_weight_func(0.0, mag_max_weight, mag_start, mag_end)
     mag_values = np.linspace(scenario_df.mag.min(), scenario_df.mag.max(), 100)
     weights = np.asarray([weight_func(cur_mag) for cur_mag in mag_values])
     ax_weight = ax.twinx()
@@ -132,7 +138,7 @@ def sample_weighting(
     ax_hist.set_xlim(0.0)
 
     # Weighting
-    doc_weight_fn = sr.ml.gnn_gm.get_doc_weight_func(0.0, 2, 1, 6)
+    doc_weight_fn = sr.ml.gnn_gm.get_doc_weight_func(0.0, doc_max_weight, doc_start, doc_end)
     doc_values = np.linspace(scenario_df.constraintness.min(), scenario_df.constraintness.max(), 100)
     weights = [doc_weight_fn(cur_doc) for cur_doc in doc_values]
 

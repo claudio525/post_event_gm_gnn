@@ -24,14 +24,14 @@ ignore_events: ["3468575"]
 ### Scenario Weighting
 # Magnitude
 mag_scenario_weighting: True
-mag_min_weight: 1
-mag_max_weight: 5
+mag_min_weight: 0
+mag_max_weight: 4
 mag_start: 4.5
 mag_end: 6.0
 # DoC
 doc_scenario_weighting: True
-doc_min_weight: 1
-doc_max_weight: 2
+doc_min_weight: 0
+doc_max_weight: 1
 doc_start: 1
 doc_end: 6
 

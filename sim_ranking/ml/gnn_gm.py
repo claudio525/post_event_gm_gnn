@@ -1465,14 +1465,6 @@ def get_mag_weight_func(
     grad = (max_weight - min_weight) / (mag_end - mag_start)
     bias = min_weight - grad * mag_start
 
-    # def mag_weight_func(mag_values: np.ndarray[float]):
-    #     weights = np.ones_like(mag_values) * min_weight
-    #     weights[mag_values > mag_end] = max_weight
-    #
-    #     weights = np.where((mag_values > mag_start) & (mag_values <= mag_end), (grad*mag_values + bias), weights)
-    #
-    #     return weights
-
     def mag_weight_func(mag: float) -> float:
         if mag <= mag_start:
             return min_weight
