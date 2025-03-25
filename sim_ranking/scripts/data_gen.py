@@ -32,7 +32,6 @@ COLUMN_MAPPING = {
 def get_nzgmdb_emp_gmm_params(
     output_ffp: Path,
     nzgmdb_flatfile_ffp: Path,
-    rjb_max: float,
     events_ffp: Path = None,
 ):
     """Computes the GM parameters using empirical GMMs"""
@@ -43,7 +42,6 @@ def get_nzgmdb_emp_gmm_params(
     sr.data.compute_nzgmdb_emp_gm_params(
         output_ffp,
         obs_data,
-        rjb_max,
         events=events,
     )
 

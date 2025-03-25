@@ -111,8 +111,8 @@ def _compute_emp_gm_params(
     ### Constants
     GMM_MAPPING = {
         TectType.ACTIVE_SHALLOW: GMM.Br_13,
-        TectType.SUBDUCTION_SLAB: GMM.ZA_06,
-        TectType.SUBDUCTION_INTERFACE: GMM.ZA_06,
+        TectType.SUBDUCTION_SLAB: GMM.K_20,
+        TectType.SUBDUCTION_INTERFACE: GMM.K_20,
     }
 
     TECT_CLASS_MAPPING = {
@@ -169,7 +169,6 @@ def _compute_emp_gm_params(
 
     result_df = pd.concat(dfs, axis=0)
     return result_df
-    
 
 
 def compute_event_non_uniform_sites_emp_gm_params(
@@ -260,7 +259,9 @@ def compute_event_non_uniform_sites_emp_gm_params(
     rupture_df = rupture_df.rename(columns=OBS_DATA_OQ_COLS_MAPPING)
     rupture_df["vs30measured"] = False
 
-    rupture_df.index = mlt.array_utils.numpy_str_join("_", event_id, rupture_df.site_id.values.astype(str))
+    rupture_df.index = mlt.array_utils.numpy_str_join(
+        "_", event_id, rupture_df.site_id.values.astype(str)
+    )
 
     # Compute the empirical GM parameters
     result_df = _compute_emp_gm_params(rupture_df, constants.PERIODS, output_ffp)
@@ -272,7 +273,6 @@ def compute_event_non_uniform_sites_emp_gm_params(
 def compute_nzgmdb_emp_gm_params(
     output_ffp: Path,
     obs_data: ObservedData,
-    rjb_max: float,
     events: Sequence[str] = None,
     periods: Sequence[float] = constants.PERIODS,
 ):
@@ -287,9 +287,6 @@ def compute_nzgmdb_emp_gm_params(
         Output file path
     nzgmdb_flat_ffp: Path
         Path to the NZGMDB flat file
-    rjb_max: float
-        Maximum Rjb distance for which to
-        to compute the empirical GMM parameters
 
     Returns
     -------
@@ -311,9 +308,6 @@ def compute_nzgmdb_emp_gm_params(
     # Filter events
     if events is not None:
         rupture_df = rupture_df.loc[rupture_df.event.isin(events)]
-
-    # Apply rjb filter
-    rupture_df = rupture_df.loc[rupture_df.rjb <= rjb_max]
 
     # Convert Z1.0 to kilometres
     rupture_df[ObservedData.SiteColEnums.Z1P0] /= 1000
@@ -348,17 +342,38 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
     # Filter out nan values
     obs_data = obs_data.drop_nan()
 
-    # Some basic filtering
-    if obs_data.nzgmdb_version is constants.NZGMDBVersion.v3p4:
-        obs_data = obs_data.metadata_filter(dict(rrup=(0, 350)))
-    elif obs_data.nzgmdb_version in [
-        constants.NZGMDBVersion.v4p0,
-        constants.NZGMDBVersion.v4p1,
-        constants.NZGMDBVersion.v4p2,
-    ]:
-        obs_data = obs_data.metadata_filter(dict(rrup=(0, 350), is_ground_level=True))
-    else:
-        raise NotImplementedError("Invalid NZGMDB version")
+    # Perform filtering in line with Lee et al. (2024) Table 4
+    obs_data = obs_data.metadata_filter(dict(rrup=(0, 500), is_ground_level=True))
+
+    # Crustal, Mag >= 3.5 and rrup <= 300
+    records_to_keep = list(
+        obs_data.record_df.loc[
+            (obs_data.record_df.tect_type == constants.TectonicType.CRUSTAL)
+            & (obs_data.record_df.mag >= 3.5)
+            & (obs_data.record_df.rrup <= 300)
+        ].index.values.astype(str)
+    )
+
+    # Subduction Interface, Mag >= 4.5 and rrup <= 500
+    records_to_keep += list(
+        obs_data.record_df.loc[
+            (
+                obs_data.record_df.tect_type
+                == constants.TectonicType.SUBDUCTION_INTERFACE
+            )
+            & (obs_data.record_df.mag >= 4.5)
+        ].index.values.astype(str)
+    )
+
+    # Subduction Slab, Mag >= 4.5 and rrup <= 500
+    records_to_keep += list(
+        obs_data.record_df.loc[
+            (obs_data.record_df.tect_type == constants.TectonicType.SUBDUCTION_SLAB)
+            & (obs_data.record_df.mag >= 4.5)
+        ].index.values.astype(str)
+    )
+
+    obs_data.filter_record_ids(records_to_keep)
 
     # Drop duplicates
     # Use the one with the smaller fmin
@@ -459,7 +474,12 @@ def add_srf_site_to_source_distances(
     record_df = site_df.copy(True)
     record_df[ObservedData.SiteColEnums.SITE_ID] = record_df.index.values.astype(str)
     record_df[ObservedData.EventColEnums.EVENT_ID] = event_id
-    record_df = record_df.rename(columns={"lon": ObservedData.SiteColEnums.SITE_LON, "lat": ObservedData.SiteColEnums.SITE_LAT})
+    record_df = record_df.rename(
+        columns={
+            "lon": ObservedData.SiteColEnums.SITE_LON,
+            "lat": ObservedData.SiteColEnums.SITE_LAT,
+        }
+    )
 
     srf_model = srf.read_srf(srf_ffp)
 
@@ -550,9 +570,9 @@ def load_emp_gmm_params(emp_gmm_ffp: Path):
 
 
 def gen_uniform_site_grid(
-        region: tuple[float, float, float, float],
-        resolution: float,
-        output_ffp: Path,
+    region: tuple[float, float, float, float],
+    resolution: float,
+    output_ffp: Path,
 ):
     """
     Generates a uniform site grid within a specified region and resolution,
@@ -575,7 +595,10 @@ def gen_uniform_site_grid(
 
     # Create the land/water mask
     land_mask = pygmt.grdlandmask(
-        region=region, spacing=f"{int(resolution)}e/{int(resolution)}e", maskvalues=[0, 1, 1, 1, 1], resolution="f"
+        region=region,
+        spacing=f"{int(resolution)}e/{int(resolution)}e",
+        maskvalues=[0, 1, 1, 1, 1],
+        resolution="f",
     )
 
     # Use land/water mask to create meshgrid

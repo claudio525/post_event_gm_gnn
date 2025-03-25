@@ -25,10 +25,21 @@ def get_im_filename(im: str):
         return im.replace(".", "p", 1)
     return im
 
-def get_nice_im_name(im: str):
+def get_nice_im_name(im: str, use_latex: bool = False):
     if im.startswith("pSA"):
         return f"pSA({im.split('_')[-1]}s)"
+    
+    if use_latex:
+        match im.lower():
+            case "ds595":
+                return "$D_{s595}$"
+            case "ds575":
+                return "$D_{s575}$"
+            case _:
+                return im
     return im
+
+
 
 def get_emp_gm_mean_im_keys(ims: Sequence[str]):
     return [f"{im}_mean" for im in ims]

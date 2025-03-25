@@ -262,6 +262,22 @@ class ObservedData:
 
         self.__reset_cache()
         return self
+    
+    def filter_record_ids(
+        self,
+        record_ids: np.ndarray[str],
+    ):
+        """
+        Filters the observed data based on the provided record IDs.
+
+        Parameters
+        ----------
+        record_ids: array of strings
+            Record IDs to keep.
+        """
+        self.record_df = self.record_df[self.record_df.index.isin(record_ids)]
+        self.__reset_cache()
+        return self
 
     def apply_fmin_filter(self, fmin_col: str):
         """Applies fmin filtering to pSA"""

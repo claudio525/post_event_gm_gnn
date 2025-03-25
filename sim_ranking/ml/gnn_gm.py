@@ -41,8 +41,6 @@ class RunConfig:
     rel_obs_data_ffp: Path
     """Relative path to the observed data file (NZGMDB)"""
 
-    min_pga: float
-    """Minimum PGA value based on Br13 at location of interest"""
     max_dist: float
     """Maximum distance between site-interest and observation sites"""
     closest_max_dist: float
@@ -51,7 +49,6 @@ class RunConfig:
     """Maximum number of observation sites to consider"""
     min_n_obs_sites: int
     """Minimum number of observation sites required"""
-
 
     ignore_events: Sequence[str]
     """Events to ignore"""
@@ -154,7 +151,7 @@ class RunConfig:
     ### Embedding settings
     use_edge_emb_for_msg: bool = False
     """Whether to use the edge embedding as an input for the message neural network"""
-    
+
     _im_scale_params: dict[str, pd.Series] | None = None
 
     ### Features
@@ -187,7 +184,9 @@ class RunConfig:
 
     @property
     def non_pSA_ims(self):
-        return constants.NON_PSA_IMs
+        if self.im_set == constants.IMSet.all:
+            return constants.NON_PSA_IMs
+        return None
 
     @property
     def pred_std_keys(self):
@@ -266,7 +265,6 @@ class RunConfig:
         result = {
             "seed": self.seed,
             "rel_obs_data_ffp": self.rel_obs_data_ffp,
-            "min_pga": self.min_pga,
             "max_dist": self.max_dist,
             "closest_max_dist": self.closest_max_dist,
             "max_n_obs_sites": self.max_n_obs_sites,
@@ -511,10 +509,8 @@ def run_model_training(
         not run_config.use_emp_gm_model or emp_res_df is not None
     ), "Empirical GM parameters are required when run_config.use_emp_gm_model is True"
 
-    train_event_scalar_feature_dfs, _ = (
-        ml_data.create_event_scalar_feature_dfs(
-            train_event_sites, scalar_features, train_event_site_combs
-        )
+    train_event_scalar_feature_dfs, _ = ml_data.create_event_scalar_feature_dfs(
+        train_event_sites, scalar_features, train_event_site_combs
     )
 
     if verbose:
@@ -532,18 +528,22 @@ def run_model_training(
         dist_matrix=dist_matrix,
     )
 
-    train_transform = gnn_modules.AddSoIObsIMsTransform(train_event_scalar_feature_dfs, run_config) if run_config.soi_with_obs_pert else None
-    train_dataset = gnn_modules.CustomGraphDataset(train_graph_data, transform=train_transform)
+    train_transform = (
+        gnn_modules.AddSoIObsIMsTransform(train_event_scalar_feature_dfs, run_config)
+        if run_config.soi_with_obs_pert
+        else None
+    )
+    train_dataset = gnn_modules.CustomGraphDataset(
+        train_graph_data, transform=train_transform
+    )
     train_loader = gloader.DataLoader(
         train_dataset, batch_size=run_config.batch_size, shuffle=True, drop_last=True
     )
 
     val_graph_data, val_loader = None, None
     if val_int_sites is not None:
-        val_event_scalar_feature_dfs, _ = (
-            ml_data.create_event_scalar_feature_dfs(
-                val_event_sites, scalar_features, val_event_site_combs
-            )
+        val_event_scalar_feature_dfs, _ = ml_data.create_event_scalar_feature_dfs(
+            val_event_sites, scalar_features, val_event_site_combs
         )
 
         val_graph_data = get_graph_data(
@@ -559,8 +559,14 @@ def run_model_training(
             dist_matrix=dist_matrix,
         )
 
-        val_transform = gnn_modules.AddSoIObsIMsTransform(val_event_scalar_feature_dfs, run_config) if run_config.soi_with_obs_pert else None
-        val_dataset = gnn_modules.CustomGraphDataset(val_graph_data, transform=val_transform)
+        val_transform = (
+            gnn_modules.AddSoIObsIMsTransform(val_event_scalar_feature_dfs, run_config)
+            if run_config.soi_with_obs_pert
+            else None
+        )
+        val_dataset = gnn_modules.CustomGraphDataset(
+            val_graph_data, transform=val_transform
+        )
         val_loader = gloader.DataLoader(
             val_dataset, batch_size=run_config.batch_size, shuffle=True
         )
@@ -581,7 +587,10 @@ def run_model_training(
     )
 
     metrics_df = pd.DataFrame(metrics)
-    assert best_model_epoch is None or best_model_epoch == metrics_df.w_loss_hist_val.argmin()
+    assert (
+        best_model_epoch is None
+        or best_model_epoch == metrics_df.w_loss_hist_val.argmin()
+    )
     agg_metrics = {
         "w_loss_train_best_epoch": metrics_df.w_loss_hist_train.argmin(),
         "w_loss_train_min": metrics_df.w_loss_hist_train.min(),
@@ -741,7 +750,6 @@ def _get_train_event_graph_data(
             run_config.doc_end,
         )
 
-
     if run_config.use_emp_gm_model:
         # Get the empirical GMM residuals
         cur_im_data = emp_res_df.loc[emp_res_df.event_id == event].set_index("site_id")[
@@ -765,15 +773,17 @@ def _get_train_event_graph_data(
             "_", cur_site_int, cur_obs_sites
         )
 
-
         # cur_site_combs_mask = site_combs[:, 0] == cur_site_int_ix
 
         # DoC scenario weighting
-        doc_weight = doc_weight_fn(
-            corr_data.corr_data.sel[cur_site_int, :, :]
-            .loc[cur_obs_sites, constants.PSA_KEYS]
-            .sum(axis=0)
-            .mean()
+
+        doc_weight = (
+            doc_weight_fn(
+                corr_data.corr_data.sel[cur_site_int, :, :]
+                .loc[cur_obs_sites, constants.PSA_KEYS]
+                .sum(axis=0)
+                .mean()
+            )
             if run_config.doc_scenario_weighting
             else None
         )
@@ -903,19 +913,13 @@ def get_graph_data(
     graph_data: list[gdata.HeteroData]
         List of graph data objects
     """
-    # Create the scalar features tensors
-    # event_scalar_feature_dfs, _ = (
-        # ml_data.create_event_scalar_feature_dfs(
-            # event_sites, scalar_features, event_site_combs
-        # )
-    # )
-
     # Site2Site Correlation for DoC weight calculation
     assert (not run_config.doc_scenario_weighting) or (dist_matrix is not None)
-    if run_config.doc_scenario_weighting:
-        corr_data = LBSiteCorrelationData.from_dist_matrix(
-            dist_matrix, constants.PSA_KEYS
-        )
+    corr_data = (
+        LBSiteCorrelationData.from_dist_matrix(dist_matrix, constants.PSA_KEYS)
+        if run_config.doc_scenario_weighting
+        else None
+    )
 
     # Create the graph data objects
     graph_data = []
@@ -1383,7 +1387,7 @@ def get_predictions(
                 force=True
             )
             # cur_result.loc[:, "w_loss"] = cur_batch_result.w_loss.cpu().numpy(
-                # force=True
+            # force=True
             # )
 
         # Index
@@ -1431,6 +1435,17 @@ def get_residuals(
     if "n_obs_sites" in results.columns:
         res_df["n_obs_sites"] = results["n_obs_sites"]
     return res_df
+
+def get_res_mean_std(
+    residual_df: pd.DataFrame,
+    ims: Sequence[str] = constants.PSA_KEYS,
+):
+    """Compute the bias and residual standard deviation"""
+    res_mean_std_df = pd.concat((residual_df[ims].mean(axis=0), residual_df[ims].std(axis=0)), axis=1)
+    res_mean_std_df.columns = ["mean", "std"]
+
+    return res_mean_std_df
+    
 
 
 def get_mag_weight_func(

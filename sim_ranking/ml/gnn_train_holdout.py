@@ -36,8 +36,8 @@ def run_holdout(
     ### Data setup
     # Get the set of valid site-interests per event
     print("Getting valid sites of interest")
-    valid_int_sites, valid_event_int_sites, _ = ml_data.get_valid_site_ints(
-        event_sites, obs_data.record_df.drop(columns=obs_data.ims), min_pga=run_config.min_pga
+    valid_int_sites, valid_event_int_sites, _ = ml_data.get_valid_site_ints_Lee2024(
+        event_sites, obs_data.record_df.drop(columns=obs_data.ims)
     )
     events = np.intersect1d(events, np.asarray(list(valid_event_int_sites.keys())))
     print(f"Number of valid events: {len(events)}/{len(obs_data.events)}")

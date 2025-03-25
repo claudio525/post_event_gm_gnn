@@ -8,13 +8,12 @@ im_set: "pSA"
 
 # Input data settings
 rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.2/custom/mod_ground_motion_im_table_rotd50_flat.csv
-min_pga: 0.0025
 max_dist: 30
 closest_max_dist: 10
 max_n_obs_sites: 10
 min_n_obs_sites: 2
 
-rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p2/emp_gm_params_350MaxRjb.parquet
+rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p2/emp_gm_params.parquet
 use_emp_gm_model: True
 
 ignore_events: ["3468575"]

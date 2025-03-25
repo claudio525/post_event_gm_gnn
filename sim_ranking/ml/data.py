@@ -10,6 +10,8 @@ import pandas as pd
 from labelled_data_array import LabelledDataArray
 import ml_tools as mlt
 
+from .. import constants
+
 
 @dataclass
 class ScalarFeatures:
@@ -143,8 +145,11 @@ def compute_site_combinations(
             )
             if not allow_self:
                 # Ignore the site itself
-                closest_max_dist_mask &=  ~(cur_site_int_obs_sites_dist_df.values == 0.0)
-                assert np.count_nonzero(cur_site_int_obs_sites_dist_df == 0.0) == cur_obs_sites.size
+                closest_max_dist_mask &= ~(cur_site_int_obs_sites_dist_df.values == 0.0)
+                assert (
+                    np.count_nonzero(cur_site_int_obs_sites_dist_df == 0.0)
+                    == cur_obs_sites.size
+                )
                 # np.fill_diagonal(closest_max_dist_mask, False)  # Ignore the site itself
             dist_mask &= np.any(closest_max_dist_mask, axis=1)[:, None]
 
@@ -226,8 +231,7 @@ def create_event_scalar_feature_dfs(
         cur_site_combs = np.concatenate(
             (
                 cur_site_combs,
-                np.tile(np.unique(cur_site_combs[:, 0])[:, None], (1, 2))
-                ,
+                np.tile(np.unique(cur_site_combs[:, 0])[:, None], (1, 2)),
             ),
             axis=0,
         )
@@ -235,7 +239,9 @@ def create_event_scalar_feature_dfs(
 
         cur_site_ints = cur_sites[cur_site_combs[:, 0]]
         cur_site_obs = cur_sites[cur_site_combs[:, 1]]
-        cur_site_comb_keys = mlt.array_utils.numpy_str_join("_", cur_site_ints, cur_site_obs)
+        cur_site_comb_keys = mlt.array_utils.numpy_str_join(
+            "_", cur_site_ints, cur_site_obs
+        )
 
         cur_tensor = np.full(
             (
@@ -301,19 +307,80 @@ def create_event_scalar_feature_dfs(
                 cur_feature_df.columns.get_indexer_for(cur_site_obs),
             ]
 
-
         cur_scalar_features_df = pd.DataFrame(
             index=cur_site_comb_keys, data=cur_tensor, columns=scalar_feature_columns
         )
         # Drop duplicate entries, this can occur when given site-combinations
-        # already contain self-loops 
-        cur_scalar_features_df = cur_scalar_features_df.loc[~cur_scalar_features_df.index.duplicated(keep="first")]
+        # already contain self-loops
+        cur_scalar_features_df = cur_scalar_features_df.loc[
+            ~cur_scalar_features_df.index.duplicated(keep="first")
+        ]
         event_scalar_features_dfs[cur_event] = cur_scalar_features_df
 
     return event_scalar_features_dfs, scalar_feature_columns
 
 
-def get_valid_site_ints(
+def get_valid_site_ints_Lee2024(
+    event_sites: Dict[str, np.ndarray],
+    record_df: pd.DataFrame,
+):
+    """
+    Gets the list of site of interests per event that experience
+    strong enough GM to be of interest.
+
+    Uses the magnitude-distance scaling relationship from
+    Lee et al. (2024)[1]
+
+    Parameters
+    ----------
+    event_sites: dict
+        Available sites per event
+    record_df: Dataframe
+        Record data
+    mw_rrup_ffp: Path
+        Path to the magnitude-distance scaling relationship
+        file
+
+    Returns
+    -------
+    valid_int_sites: np.ndarray
+        All sites that are valid sites for
+        at least one event
+    valid_event_int_sites: dict
+        Valid sites of interests per event
+
+    References
+    ----------
+    [1] Lee, Robin L., et al. "Evaluation of empirical
+    ground‐motion models for the 2022 New Zealand National
+    Seismic Hazard Model revision."
+    Bulletin of the Seismological Society of America 114.1 (2024): 311-328.
+    """
+    # Load magnitude-distance scaling relationship
+    mag_values = constants.MW_RRUP_LIMITS[:, 0]
+    rrup_values = constants.MW_RRUP_LIMITS[:, 1]
+
+    # Compute valid records
+    record_rrup_limits = np.interp(record_df.mag.values, mag_values, rrup_values)
+    mask = record_df.rrup.values < record_rrup_limits
+
+    valid_record_df = record_df.loc[mask]
+
+    valid_event_int_sites = {
+        cur_event: np.intersect1d(
+            cur_df.site_id.values.astype(str), event_sites[cur_event]
+        )
+        for cur_event, cur_df in valid_record_df.groupby("event_id")
+    }
+    valid_int_sites = np.unique(valid_record_df.site_id.values.astype(str))
+
+    valid_record_ids = valid_record_df.index.values.astype(str)
+
+    print(f"Valid SOI records: {valid_record_df.shape[0]}/{record_df.shape[0]}")
+    return valid_int_sites, valid_event_int_sites, valid_record_ids
+
+
+def get_valid_site_ints_PGA(
     event_sites: Dict[str, np.ndarray],
     record_df: pd.DataFrame,
     min_pga: float = 0.01,
@@ -341,6 +408,8 @@ def get_valid_site_ints(
         at least one event
     valid_event_int_sites: dict
         Valid sites of interests per event
+    valid_record_ids: np.ndarray
+        Valid record ids
     """
     from empirical.util.classdef import TectType, GMM
     from empirical.util.openquake_wrapper_vectorized import oq_run
@@ -433,11 +502,11 @@ def load_cv_metrics(results_dir: Path):
 
 def copy_cim_cv_results(src_dir: Path, dest_dir: Path):
     """
-    Copy conditional intensity measure (cIM) cross-validation 
+    Copy conditional intensity measure (cIM) cross-validation
     results from source to destination directory.
 
-    This function copies cIM results between directories while 
-    verifying that the validation and training scenarios align 
+    This function copies cIM results between directories while
+    verifying that the validation and training scenarios align
     between source and destination directories.
 
     Parameters
@@ -450,10 +519,10 @@ def copy_cim_cv_results(src_dir: Path, dest_dir: Path):
     Raises
     ------
     AssertionError
-        If the validation scenarios, number of CV directories, 
+        If the validation scenarios, number of CV directories,
         or training/validation scenarios don't align.
     ValueError
-        If cIM results already exist in 
+        If cIM results already exist in
         the destination directory for any CV directory.
     """
     # Check that scenarios align
