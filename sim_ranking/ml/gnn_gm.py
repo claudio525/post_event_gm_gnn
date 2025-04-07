@@ -189,6 +189,15 @@ class RunConfig:
         return None
 
     @property
+    def pred_mean_keys(self):
+        if self.im_set == constants.IMSet.all:
+            constants.GNN_PRED_IM_KEYS
+        elif self.im_set == constants.IMSet.pSA:
+            return constants.GNN_PRED_PSA_KEYS
+        else:
+            raise ValueError(f"Unknown IM set: {self.im_set}")
+
+    @property
     def pred_std_keys(self):
         return [f"{cur_key}_pred_std" for cur_key in self.ims]
 
@@ -1341,6 +1350,10 @@ def get_predictions(
             cur_result.loc[:, "doc_weight"] = (
                 cur_batch["metadata"]["doc_weight"].cpu().numpy(force=True)
             )
+        if run_config.mag_scenario_weighting or run_config.doc_scenario_weighting:
+            cur_result.loc[:, "sc_weight"] = (
+                cur_batch["sc_weight"].cpu().numpy(force=True)
+            )
 
         ## Add observed
         cur_result.loc[:, run_config.ims] = np.log(
@@ -1436,16 +1449,97 @@ def get_residuals(
         res_df["n_obs_sites"] = results["n_obs_sites"]
     return res_df
 
+
 def get_res_mean_std(
     residual_df: pd.DataFrame,
     ims: Sequence[str] = constants.PSA_KEYS,
 ):
     """Compute the bias and residual standard deviation"""
-    res_mean_std_df = pd.concat((residual_df[ims].mean(axis=0), residual_df[ims].std(axis=0)), axis=1)
+    res_mean_std_df = pd.concat(
+        (residual_df[ims].mean(axis=0), residual_df[ims].std(axis=0)), axis=1
+    )
     res_mean_std_df.columns = ["mean", "std"]
 
     return res_mean_std_df
-    
+
+
+def compute_site_int_obs_correlations(
+    site_pairs_df: pd.DataFrame,
+    site_pair_events: dict,
+    ims: np.ndarray[str],
+    site_int_im_df: pd.DataFrame,
+    site_obs_im_df: pd.DataFrame,
+    verbose: bool = True,
+):
+    """
+    Computes the IM correlations for each site-pair, with the first
+    site always corresponding to a site of interest and the second
+    site corresponding to an observation site.
+
+    Parameters
+    ----------
+    site_pairs_df : pd.DataFrame
+        DataFrame containing the site-pairs and their counts
+    site_pair_events : dict
+        Dictionary containing the events for each site-pair
+    ims : np.ndarray[str]
+        Array of IM keys
+    site_int_im_df : pd.DataFrame
+        DataFrame containing the IMs for the site of interest
+        in logspace and columns corresponding to the IM keys
+    site_obs_im_df : pd.DataFrame
+        DataFrame containing the IMs for the observation site
+        in logspace and columns corresponding to the IM keys
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the correlations for each site-pair
+        and IM key
+    """
+    site_pair_corrs = pd.DataFrame(index=site_pairs_df.index, columns=ims)
+    for cur_ix, cur_row in tqdm.tqdm(
+        site_pairs_df.iterrows(),
+        desc="Computing correlations",
+        total=len(site_pairs_df),
+        disable=not verbose,
+    ):
+        cur_site_int, cur_obs_site = cur_row.site_int, cur_row.obs_site
+        cur_events = site_pair_events[cur_row.name]
+        assert len(cur_events) == cur_row["count"]
+
+        cur_site_int_keys = mlt.array_utils.numpy_str_join(
+            "_", cur_events, cur_site_int
+        )
+        cur_site_int_im_df = site_int_im_df.loc[cur_site_int_keys, ims]
+
+        cur_obs_site_keys = mlt.array_utils.numpy_str_join(
+            "_", cur_events, cur_obs_site
+        )
+        cur_obs_site_im_df = site_obs_im_df.loc[cur_obs_site_keys, ims]
+
+        for cur_im in ims:
+            # Drop NaN values
+            cur_nan_mask = (
+                cur_obs_site_im_df[cur_im].isna().values
+                | cur_site_int_im_df[cur_im].isna().values
+            )
+            if (~cur_nan_mask).sum() < 10:
+                continue
+
+            cur_im_int_df = cur_site_int_im_df.loc[~cur_nan_mask, cur_im]
+            cur_im_obs_df = cur_obs_site_im_df.loc[~cur_nan_mask, cur_im]
+
+            # Compute the correlation
+            cur_corr = np.mean(
+                (cur_im_int_df.values - cur_im_int_df.values.mean())
+                * (cur_im_obs_df.values - cur_im_obs_df.values.mean())
+            )
+            cur_corr /= cur_im_int_df.values.std() * cur_im_obs_df.values.std()
+
+            site_pair_corrs.loc[cur_ix, cur_im] = cur_corr
+
+    return site_pair_corrs
 
 
 def get_mag_weight_func(

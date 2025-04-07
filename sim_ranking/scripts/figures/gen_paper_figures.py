@@ -242,11 +242,12 @@ def bias_res_std(
     of the GNN-Only, GNN-Residual, marginal and cIM models.
     """
     # Update font size
-    plt.rcParams.update(
-        {
-            "font.size": sr.constants.FIG_FONT_SIZE,
-        }
-    )
+    if sr.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": sr.constants.FIG_FONT_SIZE,
+            }
+        )
 
     gnn_only_run_config = sr.ml.RunConfig.from_yaml(
         gnn_only_result_dir / "run_config.yaml"
@@ -422,14 +423,37 @@ def mag_bias_res_std(
     legend_ax: int = 1,
     output_name: str = None,
 ):
+    """
+    Generates a figure comparing the bias and residual standard deviation
+    for different magnitude bins
+
+    Parameters
+    ----------
+    gnn_results_dir : Path
+        Directory containing the GNN results
+    cim_result_dir : Path
+        Directory containing the cIM results
+    output_dir : Path
+        Directory to save the figure
+    plot_labels : str
+        Labels for the plot
+        (comma separated)
+    show_legend : bool
+        Whether to show the legend
+    legend_ax : int
+        Axis to show the legend on
+    output_name : str
+        Name of the output file
+    """
     plot_labels = plot_labels.split(",") if plot_labels is not None else None
 
     # Update font size
-    plt.rcParams.update(
-        {
-            "font.size": sr.constants.FIG_FONT_SIZE,
-        }
-    )
+    if sr.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": sr.constants.FIG_FONT_SIZE,
+            }
+        )
 
     gnn_run_config = sr.ml.RunConfig.from_yaml(gnn_results_dir / "run_config.yaml")
 
@@ -658,11 +682,610 @@ def mag_bias_res_std(
         ax4.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     output_name = (
-        f"{output_name}.{sr.constants.FIG_FORMAT}" if output_name is not None else f"mag_bias_residual_std.{sr.constants.FIG_FORMAT}"
+        f"{output_name}.{sr.constants.FIG_FORMAT}"
+        if output_name is not None
+        else f"mag_bias_residual_std.{sr.constants.FIG_FORMAT}"
     )
     fig.savefig(
         output_dir / output_name,
     )
+
+
+@app.command("rrup-bias-res-std")
+def rrup_bias_res_std(
+    gnn_results_dir: Path,
+    cim_result_dir: Path,
+    output_dir: Path,
+    plot_labels: str = None,
+    show_legend: bool = True,
+    legend_ax: int = 1,
+    output_name: str = None,
+):
+    """
+    Generates a figure comparing the bias and residual standard deviation
+    for different rrup bins
+
+    Parameters
+    ----------
+    gnn_results_dir : Path
+        Directory containing the GNN results
+    cim_result_dir : Path
+        Directory containing the cIM results
+    output_dir : Path
+        Directory to save the figure
+    plot_labels : str
+        Labels for the plot
+        (comma separated)
+    show_legend : bool
+        Whether to show the legend
+    legend_ax : int
+        Axis to show the legend on
+    output_name : str
+        Name of the output file
+    """
+    plot_labels = plot_labels.split(",") if plot_labels is not None else None
+
+    # Update font size
+    if sr.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": sr.constants.FIG_FONT_SIZE,
+            }
+        )
+
+    gnn_run_config = sr.ml.RunConfig.from_yaml(gnn_results_dir / "run_config.yaml")
+
+    # Load observed data
+    obs_data = sr.data.load_obs_nzgmdb(gnn_run_config.obs_data_ffp)
+
+    # Load results
+    gnn_results = pd.read_parquet(gnn_results_dir / "val_results.parquet").sort_index()
+    cim_results = pd.read_parquet(cim_result_dir / "val_results.parquet").sort_index()
+
+    # Sanity check
+    assert gnn_results.index.equals(cim_results.index), "Index mixmatch"
+
+    # Compute residuals
+    gnn_res_df = sr.ml.gnn_gm.get_residuals(gnn_results, ims=gnn_run_config.ims)
+    gnn_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(
+        gnn_res_df, ims=gnn_run_config.ims
+    )
+
+    cim_res_df = sr.ml.gnn_gm.get_residuals(cim_results, pred_suffix="cond_mean")
+    cim_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(cim_res_df)
+
+    # Apply rrup binning
+    gnn_res_df["rrup"] = obs_data.record_df.loc[gnn_res_df.index, "rrup"].values
+    gnn_res_df["rrup_bin"] = pd.cut(
+        gnn_res_df["rrup"],
+        bins=sr.constants.RRUP_BINS,
+        labels=sr.constants.RRUP_BIN_LABELS,
+    )
+
+    gnn_res_rrup_groups = gnn_res_df.groupby("rrup_bin")
+    gnn_res_rrup_bias = gnn_res_rrup_groups[gnn_run_config.ims].mean()
+    gnn_res_rrup_std = gnn_res_rrup_groups[gnn_run_config.ims].std()
+
+    cim_res_df["rrup"] = obs_data.record_df.loc[cim_res_df.index, "rrup"].values
+    cim_res_df["rrup_bin"] = pd.cut(
+        cim_res_df["rrup"],
+        bins=sr.constants.RRUP_BINS,
+        labels=sr.constants.RRUP_BIN_LABELS,
+    )
+
+    cim_res_rrup_groups = cim_res_df.groupby("rrup_bin")
+    cim_res_rrup_bias = cim_res_rrup_groups[sr.constants.PSA_KEYS].mean()
+    cim_res_rrup_std = cim_res_rrup_groups[sr.constants.PSA_KEYS].std()
+
+    group_colors = sr.constants.RRUP_COLORS
+    group_linewidth = 2.0
+    group_scatter_size = 12.5
+
+    if gnn_run_config.non_pSA_ims is not None:
+        fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
+            sr.constants.FIG_SIZE,
+            left=0.08,
+            main_wspace=0.175,
+            sub_wspace=0.05,
+            right=0.99,
+            std_y_axis_limits=(0.0, 1.25),
+            bottom=0.125,
+        )
+    else:
+        fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
+            sr.constants.FIG_SIZE,
+            main_wspace=0.175,
+            left=0.08,
+            right=0.99,
+            std_y_axis_limits=(0.0, 1.25),
+            bottom=0.125,
+        )
+
+    ### Bias
+    ax1.plot(
+        sr.constants.PERIODS,
+        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        color="black",
+        linewidth=2.5,
+        label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
+    )
+    ax1.plot(
+        sr.constants.PERIODS,
+        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        color="black",
+        linestyle="--",
+        linewidth=2.5,
+        label="MVN-CIM",
+    )
+    for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            cim_res_rrup_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            c=group_colors[i],
+            linestyle="--",
+            linewidth=group_linewidth,
+        )
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            gnn_res_rrup_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            label=f"{cur_key}, N: {gnn_res_rrup_groups.size()[cur_key]}",
+            c=group_colors[i],
+            linewidth=group_linewidth,
+        )
+    if show_legend and legend_ax == 1:
+        ax1.legend()
+
+    ax1.text(
+        0.03,
+        0.03,
+        "Overprediction",
+        transform=ax1.transAxes,
+        va="bottom",
+        ha="left",
+    )
+    ax1.text(
+        0.03,
+        0.03,
+        "Overprediction",
+        transform=ax1.transAxes,
+        va="bottom",
+        ha="left",
+    )
+
+    if plot_labels is not None:
+        ax1.text(
+            -0.2 if gnn_run_config.non_pSA_ims is not None else -0.175,
+            0.98,
+            plot_labels[0],
+            transform=ax1.transAxes,
+            va="center",
+            ha="left",
+            fontsize=14,
+        )
+
+    if gnn_run_config.non_pSA_ims is not None:
+        ax2.scatter(
+            [
+                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                for cur_im in gnn_run_config.non_pSA_ims
+            ],
+            gnn_res_bias_std_df.loc[gnn_run_config.non_pSA_ims, "mean"],
+            color="black",
+            s=17.5,
+        )
+        for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
+            ax2.scatter(
+                [
+                    sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                    for cur_im in gnn_run_config.non_pSA_ims
+                ],
+                gnn_res_rrup_bias.loc[cur_key, gnn_run_config.non_pSA_ims],
+                c=group_colors[i],
+                s=group_scatter_size,
+            )
+
+        ax2.set_xticklabels(
+            ax2.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
+        )
+        ax2.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
+
+    ### Residual Standard Deviation
+    ax3.plot(
+        sr.constants.PERIODS,
+        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        color="black",
+        linewidth=2.5,
+        label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
+    )
+    ax3.plot(
+        sr.constants.PERIODS,
+        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        color="black",
+        linestyle="--",
+        linewidth=2.5,
+        label="MVN-CIM",
+    )
+    for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
+        ax3.semilogx(
+            sr.constants.PERIODS,
+            cim_res_rrup_std.loc[cur_key, sr.constants.PSA_KEYS],
+            c=group_colors[i],
+            linestyle="--",
+            linewidth=group_linewidth,
+        )
+        ax3.semilogx(
+            sr.constants.PERIODS,
+            gnn_res_rrup_std.loc[cur_key, sr.constants.PSA_KEYS],
+            c=group_colors[i],
+            linewidth=group_linewidth,
+            label=f"{cur_key}, N: {gnn_res_rrup_groups.size()[cur_key]}",
+        )
+    if show_legend and legend_ax == 3:
+        ax3.legend()
+
+    if plot_labels is not None:
+        ax3.text(
+            -0.175 if gnn_run_config.non_pSA_ims is not None else -0.15,
+            0.98,
+            plot_labels[1],
+            transform=ax3.transAxes,
+            va="center",
+            ha="left",
+            fontsize=14,
+        )
+
+    if gnn_run_config.non_pSA_ims is not None:
+        ax4.scatter(
+            [
+                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                for cur_im in gnn_run_config.non_pSA_ims
+            ],
+            gnn_res_bias_std_df.loc[gnn_run_config.non_pSA_ims, "std"],
+            color="black",
+            s=17.5,
+        )
+        for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
+            ax4.scatter(
+                [
+                    sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                    for cur_im in gnn_run_config.non_pSA_ims
+                ],
+                gnn_res_rrup_std.loc[cur_key, gnn_run_config.non_pSA_ims],
+                c=group_colors[i],
+                s=group_scatter_size,
+            )
+        ax4.set_xticklabels(
+            ax4.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
+        )
+        ax4.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
+
+    output_name = (
+        f"{output_name}.{sr.constants.FIG_FORMAT}"
+        if output_name is not None
+        else f"rrup_bias_residual_std.{sr.constants.FIG_FORMAT}"
+    )
+    fig.savefig(
+        output_dir / output_name,
+    )
+
+
+@app.command("doc-bias-res-std")
+def doc_bias_res_std(
+    gnn_results_dir: Path,
+    cim_result_dir: Path,
+    output_dir: Path,
+    plot_labels: str = None,
+    show_legend: bool = True,
+    legend_ax: int = 1,
+    output_name: str = None,
+):
+    """
+    Generates a figure comparing the bias and residual standard deviation
+    for different degree of constraint bins
+
+    Parameters
+    ----------
+    gnn_results_dir : Path
+        Directory containing the GNN results
+    cim_result_dir : Path
+        Directory containing the cIM results
+    output_dir : Path
+        Directory to save the figure
+    plot_labels : str
+        Labels for the plot
+        (comma separated)
+    show_legend : bool
+        Whether to show the legend
+    legend_ax : int
+        Axis to show the legend on
+    output_name : str
+        Name of the output file
+    """
+    plot_labels = plot_labels.split(",") if plot_labels is not None else None
+
+    # Update font size
+    plt.rcParams.update(
+        {
+            "font.size": sr.constants.FIG_FONT_SIZE,
+        }
+    )
+
+    gnn_run_config = sr.ml.RunConfig.from_yaml(gnn_results_dir / "run_config.yaml")
+
+    # Load observed data
+    obs_data = sr.data.load_obs_nzgmdb(gnn_run_config.obs_data_ffp)
+
+    # Load results
+    gnn_results = pd.read_parquet(gnn_results_dir / "val_results.parquet").sort_index()
+    cim_results = pd.read_parquet(cim_result_dir / "val_results.parquet").sort_index()
+
+    # Add DoC
+    dist_matrix = sr.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
+    corr_data = sr.LBSiteCorrelationData.from_dist_matrix(
+        dist_matrix, gnn_run_config.pSA_ims
+    )
+    gnn_results = sr.utils.compute_degree_of_constraint(gnn_results, corr_data)
+
+    # Sanity check
+    assert gnn_results.index.equals(cim_results.index), "Index mixmatch"
+
+    # Compute residuals
+    gnn_res_df = sr.ml.gnn_gm.get_residuals(gnn_results, ims=gnn_run_config.ims)
+    gnn_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(
+        gnn_res_df, ims=gnn_run_config.ims
+    )
+
+    cim_res_df = sr.ml.gnn_gm.get_residuals(cim_results, pred_suffix="cond_mean")
+    cim_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(cim_res_df)
+
+    # Apply degree of constraint binning
+    gnn_res_df["doc"] = gnn_results.loc[gnn_res_df.index, "doc"].values
+    gnn_res_df["doc_bin"] = pd.cut(
+        gnn_res_df["doc"],
+        bins=sr.constants.DOC_BINS,
+        labels=sr.constants.DOC_BIN_LABELS,
+    )
+
+    gnn_res_doc_groups = gnn_res_df.groupby("doc_bin")
+    gnn_res_doc_bias = gnn_res_doc_groups[gnn_run_config.ims].mean()
+    gnn_res_doc_std = gnn_res_doc_groups[gnn_run_config.ims].std()
+
+    cim_res_df["doc"] = gnn_results.loc[cim_res_df.index, "doc"].values
+    cim_res_df["doc_bin"] = pd.cut(
+        cim_res_df["doc"],
+        bins=sr.constants.DOC_BINS,
+        labels=sr.constants.DOC_BIN_LABELS,
+    )
+
+    cim_res_doc_groups = cim_res_df.groupby("doc_bin")
+    cim_res_doc_bias = cim_res_doc_groups[sr.constants.PSA_KEYS].mean()
+    cim_res_doc_std = cim_res_doc_groups[sr.constants.PSA_KEYS].std()
+
+    group_colors = sr.constants.DOC_COLORS
+    group_linewidth = 2.0
+    group_scatter_size = 12.5
+
+    if gnn_run_config.non_pSA_ims is not None:
+        fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
+            sr.constants.FIG_SIZE,
+            left=0.08,
+            main_wspace=0.175,
+            sub_wspace=0.05,
+            right=0.99,
+            std_y_axis_limits=(0.0, 1.25),
+            bottom=0.125,
+        )
+    else:
+        fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
+            sr.constants.FIG_SIZE,
+            main_wspace=0.175,
+            left=0.08,
+            right=0.99,
+            std_y_axis_limits=(0.0, 1.25),
+            bottom=0.125,
+        )
+
+    ### Bias
+    ax1.plot(
+        sr.constants.PERIODS,
+        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        color="black",
+        linewidth=2.5,
+        label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
+    )
+    ax1.plot(
+        sr.constants.PERIODS,
+        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        color="black",
+        linestyle="--",
+        linewidth=2.5,
+        label="MVN-CIM",
+    )
+    for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            cim_res_doc_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            c=group_colors[i],
+            linestyle="--",
+            linewidth=group_linewidth,
+        )
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            gnn_res_doc_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            label=f"{cur_key}, N: {gnn_res_doc_groups.size()[cur_key]}",
+            c=group_colors[i],
+            linewidth=group_linewidth,
+        )
+    if show_legend and legend_ax == 1:
+        ax1.legend()
+
+    ax1.text(
+        0.03, 0.03, "Overprediction", transform=ax1.transAxes, va="bottom", ha="left"
+    )
+    ax1.text(
+        0.03, 0.97, "Underprediction", transform=ax1.transAxes, va="top", ha="left"
+    )
+
+    if plot_labels is not None:
+        ax1.text(
+            -0.2 if gnn_run_config.non_pSA_ims is not None else -0.175,
+            0.98,
+            plot_labels[0],
+            transform=ax1.transAxes,
+            va="center",
+            ha="left",
+            fontsize=14,
+        )
+
+    if gnn_run_config.non_pSA_ims is not None:
+        ax2.scatter(
+            [
+                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                for cur_im in gnn_run_config.non_pSA_ims
+            ],
+            gnn_res_bias_std_df.loc[gnn_run_config.non_pSA_ims, "mean"],
+            color="black",
+            s=17.5,
+        )
+        for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
+            ax2.scatter(
+                [
+                    sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                    for cur_im in gnn_run_config.non_pSA_ims
+                ],
+                gnn_res_doc_bias.loc[cur_key, gnn_run_config.non_pSA_ims],
+                c=group_colors[i],
+                s=group_scatter_size,
+            )
+
+        ax2.set_xticklabels(
+            ax2.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
+        )
+        ax2.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
+
+    ### Residual Standard Deviation
+    ax3.plot(
+        sr.constants.PERIODS,
+        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        color="black",
+        linewidth=2.5,
+        label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
+    )
+    ax3.plot(
+        sr.constants.PERIODS,
+        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        color="black",
+        linestyle="--",
+        linewidth=2.5,
+        label="MVN-CIM",
+    )
+    for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
+        ax3.semilogx(
+            sr.constants.PERIODS,
+            cim_res_doc_std.loc[cur_key, sr.constants.PSA_KEYS],
+            c=group_colors[i],
+            linestyle="--",
+            linewidth=group_linewidth,
+        )
+        ax3.semilogx(
+            sr.constants.PERIODS,
+            gnn_res_doc_std.loc[cur_key, sr.constants.PSA_KEYS],
+            c=group_colors[i],
+            linewidth=group_linewidth,
+            label=f"{cur_key}, N: {gnn_res_doc_groups.size()[cur_key]}",
+        )
+    if show_legend and legend_ax == 3:
+        ax3.legend()
+
+    if plot_labels is not None:
+        ax3.text(
+            -0.175 if gnn_run_config.non_pSA_ims is not None else -0.15,
+            0.98,
+            plot_labels[1],
+            transform=ax3.transAxes,
+            va="center",
+            ha="left",
+            fontsize=14,
+        )
+
+    if gnn_run_config.non_pSA_ims is not None:
+        ax4.scatter(
+            [
+                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                for cur_im in gnn_run_config.non_pSA_ims
+            ],
+            gnn_res_bias_std_df.loc[gnn_run_config.non_pSA_ims, "std"],
+            color="black",
+            s=17.5,
+        )
+        for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
+            ax4.scatter(
+                [
+                    sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                    for cur_im in gnn_run_config.non_pSA_ims
+                ],
+                gnn_res_doc_std.loc[cur_key, gnn_run_config.non_pSA_ims],
+                c=group_colors[i],
+                s=group_scatter_size,
+            )
+        ax4.set_xticklabels(
+            ax4.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
+        )
+        ax4.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
+
+    output_name = (
+        f"{output_name}.{sr.constants.FIG_FORMAT}"
+        if output_name is not None
+        else f"doc_bias_residual_std.{sr.constants.FIG_FORMAT}"
+    )
+    fig.savefig(
+        output_dir / output_name,
+    )
+
+
+@app.command("fmin-filter")
+def fmin_filter(nzgmdb_ffp: Path, gnn_result_dir: Path, output_dir: Path):
+    # Update font size
+    if sr.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": sr.constants.FIG_FONT_SIZE,
+            }
+        )
+
+    obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
+    record_count_df = (~obs_data.record_df[sr.constants.PSA_KEYS].isna()).sum(axis=0)
+
+    gnn_results = pd.read_parquet(gnn_result_dir / "val_results.parquet")
+    scenario_count = (~gnn_results[sr.constants.PSA_KEYS].isna()).sum(axis=0)
+
+    fig, ax = plt.subplots(figsize=sr.constants.FIG_SIZE)
+
+    ax.plot(
+        sr.constants.PERIODS,
+        record_count_df.loc[sr.constants.PSA_KEYS],
+        color="black",
+        linewidth=2.5,
+        label="Number of records",
+    )
+    ax.plot(
+        sr.constants.PERIODS,
+        scenario_count.loc[sr.constants.PSA_KEYS],
+        color="blue",
+        linewidth=2.5,
+        label="Number of scenarios",
+    )
+    ax.set_xlabel("Period (s)")
+    ax.set_xscale("log")
+    ax.set_ylabel("Count")
+    ax.set_xlim(0.01, 10.0)
+    ax.legend()
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+    fig.tight_layout()
+
+    fig.savefig(output_dir / f"fmin_filter.{sr.constants.FIG_FORMAT}")
+    plt.close(fig)
 
 
 if __name__ == "__main__":

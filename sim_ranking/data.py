@@ -171,13 +171,13 @@ def _compute_emp_gm_params(
     return result_df
 
 
-def compute_event_non_uniform_sites_emp_gm_params(
+def compute_event_sites_emp_gm_params(
     event_id: str,
-    non_uniform_sites_dir: Path,
+    site_df: pd.DataFrame,
     nzgmdb_ffp: Path,
     srf_ffp: Path,
-    max_rjb: float,
     output_ffp: Path,
+    max_rjb: float = None,
 ):
     """
     Compute empirical ground motion parameters
@@ -187,23 +187,29 @@ def compute_event_non_uniform_sites_emp_gm_params(
     ----------
     event_id : str
         The identifier for the event.
-    non_uniform_sites_dir : Path
-        Directory containing non-uniform site data.
+    site_df : pd.DataFrame
+        DataFrame containing site information with columns:
+        - 'lon': Longitude
+        - 'lat': Latitude
+        - 'site_id': Site identifier
+        - 'vs30': Vs30 value
+        - 'z1p0': Z1.0 value in meters
+        - 'z2p5': Z2.5 value in kilometres
     nzgmdb_ffp : Path
         File path to the NZGMDB data file.
     srf_ffp : Path
         File path to the SRF file.
-    max_rjb : float
-        Maximum RJB distance.
     output_ffp : Path
         File path to save the output empirical ground motion parameters.
+    max_rjb : float, optional
+        Maximum RJB distance.
     """
     # NZGMBD data
     obs_data = load_obs_nzgmdb(nzgmdb_ffp)
     obs_event_data = obs_data.get_event_data(event_id)
 
     # Load non-uniform grid data
-    site_df = data.load_non_uniform_grid(non_uniform_sites_dir)
+    
     rupture_df = data.add_srf_site_to_source_distances(
         site_df,
         srf_ffp,
@@ -250,7 +256,8 @@ def compute_event_non_uniform_sites_emp_gm_params(
     ]
 
     # Filter out sites with rjb > max_rjb
-    rupture_df = rupture_df.loc[rupture_df.rjb <= max_rjb]
+    if max_rjb is not None:
+        rupture_df = rupture_df.loc[rupture_df.rjb <= max_rjb]
 
     # Convert Z1.0 to kilometres
     rupture_df[ObservedData.SiteColEnums.Z1P0] /= 1000

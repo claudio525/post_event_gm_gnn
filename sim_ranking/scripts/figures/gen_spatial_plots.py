@@ -33,7 +33,7 @@ def event_site_map(
 
     assert max_lon is None or min_lon is not None
 
-    obs_data = sr.ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
+    obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
     obs_sites = obs_data.record_df.loc[
         obs_data.record_df.event_id == event, "site_id"
     ].values.astype(str)

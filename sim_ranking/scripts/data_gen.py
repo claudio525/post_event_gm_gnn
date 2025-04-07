@@ -51,13 +51,32 @@ def get_event_non_uniform_sites_gm_params(
     non_uniform_sites_dir: Path,
     nzgmdb_ffp: Path,
     srf_ffp: Path,
-    max_rjb: float,
     output_ffp: Path,
+    max_rjb: float = None,
 ):
     """Computes the GM parameters for a single event for non-uniform grid sites"""
-    sr.data.compute_event_non_uniform_sites_emp_gm_params(
-        event_id, non_uniform_sites_dir, nzgmdb_ffp, srf_ffp, max_rjb, output_ffp
+    site_df = sr.data.load_non_uniform_grid(non_uniform_sites_dir)
+
+    sr.data.compute_event_sites_emp_gm_params(
+        event_id, site_df, nzgmdb_ffp, srf_ffp, output_ffp, max_rjb=max_rjb
     )
+
+@app.command("get-event-uniform-gm-params")
+def get_event_uniform_sites_gm_params(
+    event_id: str,
+    grid_ffp: Path,
+    nzgmdb_ffp: Path,
+    srf_ffp: Path,
+    output_ffp: Path,
+    max_rjb: float = None,
+):
+    """Computes the GM parameters for a single event for uniform grid sites"""
+    site_df = pd.read_parquet(grid_ffp)
+
+    sr.data.compute_event_sites_emp_gm_params(
+        event_id, site_df, nzgmdb_ffp, srf_ffp, output_ffp, max_rjb=max_rjb
+    )
+    
 
 @app.command("gen-uniform-site-grid")
 def gen_uniform_site_grid(

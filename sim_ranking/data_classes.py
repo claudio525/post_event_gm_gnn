@@ -11,6 +11,9 @@ import sha_calc as sha
 from labelled_data_array import LabelledDataArray
 
 from . import constants
+from . import loth_baker_2013_corr_model as lb13
+from . import utils
+
 
 
 class ObservedData:
@@ -651,26 +654,55 @@ class ObservedData:
         )
 
 
+class DynamicLBSiteCorrelationsData:
+
+    def __init__(self, dist_matrix: pd.DataFrame):
+        self.dist_matrix = dist_matrix
+        self.sites = dist_matrix.index.values.astype(str)
+
+    def get_im_corr(self, im: str, sites: np.ndarray = None):
+        """
+        Gets the correlation for the specified IM
+        and the specified sites. If sites are not specified,
+        all sites in the distance matrix are used.
+        """
+        T = utils.get_pSA_period(im)
+        
+        sites = sites if sites is not None else self.sites
+        cur_dist_matrix = self.dist_matrix.loc[sites, sites]
+
+        corr_matrix = lb13.get_correlations(T, T, cur_dist_matrix.values)
+        corr_matrix = corr_matrix.reshape(cur_dist_matrix.shape)
+        # np.fill_diagonal(corr_matrix, 1.0)
+        assert np.allclose(np.diagonal(corr_matrix), 1.0)
+        return pd.DataFrame(
+            index=cur_dist_matrix.index,
+            data=corr_matrix,
+            columns=cur_dist_matrix.columns,
+        )
+
+    def get_ims_corr(self, ims: Sequence[str], sites: np.ndarray = None):
+        """
+        Gets the correlations for the specified IMs
+        and the specified sites. If sites are not specified,
+        all sites in the distance matrix are used.
+        """
+        T = np.array([utils.get_pSA_period(im) for im in ims])
+        sites = sites if sites is not None else self.sites
+        cur_dist_matrix = self.dist_matrix.loc[sites, sites]
+
+        corr_matrix = lb13.get_correlations_vec(T, T, cur_dist_matrix.values.ravel())
+        corr_matrix = corr_matrix.T.reshape(sites.size, sites.size, T.size)
+        
+        return LabelledDataArray(corr_matrix, (sites, sites, ims), ("site1", "site2", "im"))
+        
+
 class LBSiteCorrelationData:
 
     def __init__(self, corr_data: LabelledDataArray):
         self.corr_data = corr_data
 
     @classmethod
-    def from_dist_matrix(cls, dist_matrix: pd.DataFrame, ims: Sequence[str], verbose: bool = False):
-        sites = dist_matrix.index
-        corr_values = []
-        for cur_im in tqdm(ims, disable=not verbose):
-            r = sha.loth_baker_corr_model.get_correlations(
-                cur_im, cur_im, dist_matrix.values.ravel()
-            )
-            cur_corr_matrix = r.reshape(dist_matrix.shape)
-            np.fill_diagonal(cur_corr_matrix, 1.0)
-            corr_values.append(cur_corr_matrix)
-
-        corr_values = np.stack(corr_values, axis=-1)
-        lda = LabelledDataArray(
-            corr_values, (sites, sites, ims), ("site1", "site2", "im")
-        )
-
+    def from_dist_matrix(cls, dist_matrix: pd.DataFrame, ims: Sequence[str]):
+        lda = DynamicLBSiteCorrelationsData(dist_matrix).get_ims_corr(ims, dist_matrix.index)
         return cls(lda)

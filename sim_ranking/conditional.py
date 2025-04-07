@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 import ml_tools as mlt
 
-from .data_classes import ObservedData, LBSiteCorrelationData
+from .data_classes import ObservedData, DynamicLBSiteCorrelationsData
 from . import ml
 from . import data
 from . import utils
@@ -127,7 +127,8 @@ def run_cim_for_GNN(
 
     # Get the correlation data
     dist_matrix = utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
-    corr_data = LBSiteCorrelationData.from_dist_matrix(dist_matrix, constants.PSA_KEYS)
+    # corr_data = LBSiteCorrelationData.from_dist_matrix(dist_matrix, constants.PSA_KEYS)
+    corr_data = DynamicLBSiteCorrelationsData(dist_matrix)
 
     # Get the sites of interest for each event
     event_int_sites = gnn_results.groupby("event_id").site_int.unique().to_dict()
@@ -183,7 +184,7 @@ def run_cim_for_GNN(
 
 def predict_event_cIM(
     event_id: str,
-    non_uniform_sites_df: pd.DataFrame,
+    sites_df: pd.DataFrame,
     obs_data: ObservedData,
     obs_sites: np.ndarray[str],
     gm_params_df: pd.DataFrame,
@@ -197,8 +198,8 @@ def predict_event_cIM(
     -----------
     event_id : str
         Identifier for the event to predict.
-    non_uniform_sites_df : pd.DataFrame
-        Non-uniform grid sites for which to predict the conditional IM distributions.
+    sites_df : pd.DataFrame
+        Sites for which to predict the conditional IM distributions.
     obs_data : ObservedData
         Observation data used to compute the conditional IM distributions.
     gm_params_df : pd.DataFrame
@@ -210,20 +211,19 @@ def predict_event_cIM(
     """
     assert np.all(gm_params_df["event_id"].values == event_id), "Mismatch in event_id"
     all_sites = np.union1d(int_sites, obs_sites)
-    assert np.all(np.isin(all_sites, gm_params_df["site_id"])), "Missing GM parameters"
+    assert np.all(mlt.array_utils.pandas_isin(all_sites, gm_params_df["site_id"])), "Missing GM parameters"
 
     # Compute distance matrix and correlations
     comb_site_df = pd.concat(
         [
             obs_data.site_df[["lon", "lat"]],
-            non_uniform_sites_df.loc[gm_params_df.loc[~np.isin(gm_params_df["site_id"], obs_data.site_df.index), "site_id"].values, ["lon", "lat"]],
+            sites_df.loc[gm_params_df.loc[~np.isin(gm_params_df["site_id"], obs_data.site_df.index), "site_id"].values, ["lon", "lat"]],
         ],
         axis=0,
     )
     print(f"Computing distance matrix for {len(all_sites)} sites")
     dist_matrix = utils.calculate_distance_matrix(all_sites, comb_site_df, verbose=True)
-    print("Computing site correlations")
-    corr_data = LBSiteCorrelationData.from_dist_matrix(dist_matrix, constants.PSA_KEYS, verbose=True)
+    corr_data = DynamicLBSiteCorrelationsData(dist_matrix)
 
     # Compute conditional IM distributions
     result_df = run_event_cim(
@@ -259,7 +259,7 @@ def run_event_cim(
     int_sites: np.ndarray[str],
     obs_data: ObservedData,
     gm_params_df: pd.DataFrame,
-    corr_data: LBSiteCorrelationData,
+    corr_data: DynamicLBSiteCorrelationsData,
     dist_matrix: pd.DataFrame,
     ims: list[str],
     n_obs_sites: int,
@@ -283,7 +283,7 @@ def run_event_cim(
     gm_params_df: dataframe
         Ground motion parameters
         Index has to be site_id
-    corr_data: LBSiteCorrelationData
+    corr_data: DynamicLBSiteCorrelationsData
         Correlation data
     dist_matrix: dataframe
         Distance matrix
@@ -361,9 +361,7 @@ def run_event_cim(
                 continue
 
             # Get the correlation matrix
-            cur_R = corr_data.corr_data.sel[:, :, cur_im].loc[
-                cur_rel_sites, cur_rel_sites
-            ]
+            cur_R = corr_data.get_im_corr(cur_im, cur_rel_sites)
 
             # Get the GM parameters for the relevant sites
             # and put into correct format

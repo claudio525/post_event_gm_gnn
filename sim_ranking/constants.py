@@ -15,6 +15,7 @@ class NZGMDBVersion(StrEnum):
     v4p0 = "v4.0"
     v4p1 = "v4.1"
     v4p2 = "v4.2"
+    v4p3 = "v4.3"
 
 
 class TectonicType(StrEnum):
@@ -92,7 +93,15 @@ PERIODS = [
 ]
 PSA_KEYS = [f"pSA_{x}" for x in PERIODS]
 
+NON_PSA_IMs = ["PGA", "PGV", "AI", "CAV", "Ds575", "Ds595"]
+IMs = NON_PSA_IMs + PSA_KEYS
+
+GNN_PRED_NON_PSA_KEYS = [
+    f"{cur_key}_pred" for cur_key in NON_PSA_IMs
+]
 GNN_PRED_PSA_KEYS = [f"{cur_key}_pred" for cur_key in PSA_KEYS]
+GNN_PRED_IM_KEYS = GNN_PRED_NON_PSA_KEYS + GNN_PRED_PSA_KEYS
+
 GNN_PRED_STD_PSA_KEYS = [f"{cur_key}_pred_std" for cur_key in PSA_KEYS]
 
 CIM_PRED_PSA_KEYS = [f"{cur_key}_cond_mean" for cur_key in PSA_KEYS]
@@ -100,8 +109,6 @@ CIM_PRED_STD_PSA_KEYS = [f"{cur_key}_cond_std" for cur_key in PSA_KEYS]
 
 GMM_PRED_PSA_KEYS = [f"{cur_key}_mean" for cur_key in PSA_KEYS]
 
-NON_PSA_IMs = ["PGA", "PGV", "AI", "CAV", "Ds575", "Ds595"]
-IMs = NON_PSA_IMs + PSA_KEYS
 
 IM_SETS = {IMSet.pSA: PSA_KEYS, IMSet.all: IMs}
 
@@ -141,8 +148,12 @@ PRE_PROCESS_CONFIG = {
 MAG_BINS = [3.5, 4.5, 5.5, 8]
 MAG_BIN_LABELS = ["$M_w$ 3.5 - 4.5", "$M_w$ 4.5 - 5.5", "$M_w$: 5.5 - 8"]
 MAG_COLORS = ["blue", "purple", "red"]
-RRUP_BINS = [0, 25, 50, 100, 200, 500]
-DOC_BINS = [0, 1.0, 2.25, 3.75, 8.0, 15]
+RRUP_BINS = [0, 30, 100, 250, 500]
+RRUP_BIN_LABELS = ["$R_{Rup}$ 0 - 30", "$R_{Rup}$ 30 - 100", "$R_{Rup}$ 100 - 250", "$R_{Rup}$ 250 - 500"]
+RRUP_COLORS = ["blue", "purple", "red", "maroon"]
+DOC_BINS = [0, 2.5, 4, 8]
+DOC_BIN_LABELS = ["DoC 0 - 2.5", "DoC 2.5 - 4", "DoC 4 - 8"]
+DOC_COLORS = ["blue", "purple", "red"]
 
 
 CANTERBURY_REGION = [171.54, 173.12, -43.95, -43.22]
