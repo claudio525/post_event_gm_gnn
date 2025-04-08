@@ -70,6 +70,11 @@ def predict_event_cIM(
     nzgmdb_gm_params = pd.read_parquet(nzgmdb_emp_gm_params_ffp)
     nzgmdb_gm_params = nzgmdb_gm_params.loc[nzgmdb_gm_params.event_id == event_id]
 
+    nan_mask = grid_gm_params_df["PGA_mean"].isna()
+    if np.any(nan_mask):
+        print(f"Dropping {np.sum(nan_mask)} rows in grid_gm_params_df due to NaN values")
+        grid_gm_params_df = grid_gm_params_df[~nan_mask]
+
     # Combine the empirical GM params
     gm_params_df = pd.concat(
         [

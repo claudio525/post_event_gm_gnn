@@ -209,7 +209,6 @@ def compute_event_sites_emp_gm_params(
     obs_event_data = obs_data.get_event_data(event_id)
 
     # Load non-uniform grid data
-    
     rupture_df = data.add_srf_site_to_source_distances(
         site_df,
         srf_ffp,
