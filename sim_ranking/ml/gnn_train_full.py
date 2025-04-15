@@ -12,6 +12,7 @@ from . import features
 from .. import constants
 from .. import data
 from .. import utils
+from .. import analysis
 
 
 def run_full(
@@ -42,7 +43,7 @@ def run_full(
 
     emp_gm_params, emp_res_df = None, None
     if run_config.use_emp_gm_model:
-        emp_gm_params, emp_res_df = gnn_gm.load_emp_gm_params_res(
+        emp_gm_params, emp_res_df = analysis.load_emp_gm_params_res(
             run_config.emp_gm_params_ffp, obs_data
         )
 

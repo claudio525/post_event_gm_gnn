@@ -112,7 +112,7 @@ def predict_event_3468575(
     emp_gm_params, obs_emp_res_df = None, None
     if run_config.use_emp_gm_model:
         # Load empirical GMM residuals for observation sites
-        _, obs_emp_res_df = sr.ml.gnn_gm.load_emp_gm_params_res(
+        _, obs_emp_res_df = sr.analysis.load_emp_gm_params_res(
             run_config.emp_gm_params_ffp, obs_data
         )
         # Load empirical GMM parameters for prediction sites

@@ -16,6 +16,7 @@ from . import features
 from .. import constants
 from .. import data
 from .. import utils
+from .. import analysis
 
 
 def run_cv(
@@ -65,7 +66,7 @@ def run_cv(
 
     # Load empirical GMM data & compute empirical residuals
     if run_config.use_emp_gm_model:
-        emp_gm_params, emp_res_df = gnn_gm.load_emp_gm_params_res(
+        emp_gm_params, emp_res_df = analysis.load_emp_gm_params_res(
             run_config.emp_gm_params_ffp, obs_data
         )
 
@@ -306,17 +307,17 @@ def run_cv(
         wdata=run_config.wdata,
     )
 
-    loss_worst_notebook = (
-        Path(__file__).parent.parent
-        / "scripts/ml_models/report_notebooks/loss_worst_report.ipynb"
-    )
-    mlt.quarto.render_quarto(
-        "mamba activate sim-ranking-pip",
-        loss_worst_notebook,
-        out_dir / "loss_worst_report.html",
-        results_dir=out_dir,
-        wdata=run_config.wdata
-    )
+    # loss_worst_notebook = (
+    #     Path(__file__).parent.parent
+    #     / "scripts/ml_models/report_notebooks/loss_worst_report.ipynb"
+    # )
+    # mlt.quarto.render_quarto(
+    #     "mamba activate sim-ranking-pip",
+    #     loss_worst_notebook,
+    #     out_dir / "loss_worst_report.html",
+    #     results_dir=out_dir,
+    #     wdata=run_config.wdata
+    # )
 
     return out_dir, agg_metrics
 

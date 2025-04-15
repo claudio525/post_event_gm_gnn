@@ -16,15 +16,17 @@ app = typer.Typer()
 @app.command("event-site-map")
 def event_site_map(
     event: str,
-    site_int_ids: List[str],
     max_lon: float,
     min_lon: float,
     max_lat: float,
     min_lat: float,
     nzgmdb_ffp: Path,
     output_ffp: Path,
+    site_int_lon: float = None,
+    site_int_lat: float = None,
+    site_int_ids: List[str] = None,
     val_int_site_ids_ffp: Path = None,
-    map_data_ffp: Path = None,
+    use_map_data: bool = False,
 ):
     """
     Create a map plot of the event and the site locations
@@ -40,18 +42,19 @@ def event_site_map(
     event_data = obs_data.event_df.loc[event]
 
     # Don't use the validation sites
-    val_int_sites = (
-        np.concatenate((np.load(val_int_site_ids_ffp), site_int_ids), axis=0)
-        if val_int_site_ids_ffp is not None
-        else site_int_ids
-    )
-    obs_sites = obs_sites[~np.isin(obs_sites, val_int_sites)]
+    val_int_sites = None
+    if site_int_ids or val_int_site_ids_ffp:
+        val_int_sites = (
+            np.concatenate((np.load(val_int_site_ids_ffp), site_int_ids), axis=0)
+            if val_int_site_ids_ffp is not None
+            else site_int_ids
+        )
+        obs_sites = obs_sites[~np.isin(obs_sites, val_int_sites)]
 
     # Load map data
-    print(f"Loading map data from {map_data_ffp}")
     map_data = (
-        plotting.NZMapData.load(map_data_ffp, high_res_topo=True)
-        if map_data_ffp is not None
+        plotting.NZMapData.load(high_res_topo=True)
+        if use_map_data is not None
         else None
     )
 
@@ -59,13 +62,34 @@ def event_site_map(
     fig = plotting.gen_region_fig(
         region=(min_lon, max_lon, min_lat, max_lat),
         map_data=map_data,
-        plot_kwargs=dict(frame_args=["+n"]),
+        plot_kwargs={
+            "topo_cmap": "gray",  
+            "topo_cmap_min": 0,
+            "topo_cmap_max": 1500,
+            "topo_cmap_inc": 25,
+            "topo_cmap_reverse": True,
+            "land_color": "white",
+            "road_pen_color": "black",
+            "highway_pen_color": "orange",
+        },
+        # plot_kwargs=dict(frame_args=["+n"]),
         # config_options=dict(
         #     MAP_FRAME_TYPE="plain",
         #     FORMAT_GEO_MAP="ddd.xx",
         #     MAP_FRAME_PEN="thinner,black",
         #     FONT_ANNOT_PRIMARY="6p,Helvetica,black",
         # ),
+        config_options=dict(
+            MAP_FRAME_TYPE="graph",
+            FORMAT_GEO_MAP="ddd.xx",
+            MAP_GRID_PEN="0.5p,gray",
+            MAP_TICK_PEN_PRIMARY="1p,black",
+            MAP_FRAME_PEN="thinner,black",
+            MAP_FRAME_AXES="WSEN",
+            FONT_ANNOT_PRIMARY="7p,Helvetica,black",
+            FONT_LABEL="7p",  # Font size for axis labels
+            FONT_TITLE="9p",  # Font size for the title
+        ),
     )
 
     fig.meca(
@@ -93,13 +117,22 @@ def event_site_map(
     )
 
     # Plot the sites of interest
-    fig.plot(
-        x=obs_data.site_df.loc[site_int_ids, "lon"].values,
-        y=obs_data.site_df.loc[site_int_ids, "lat"].values,
-        style="a0.3c",
-        fill="orange",
-        pen="0.1p,black",
-    )
+    if site_int_ids:
+        fig.plot(
+            x=obs_data.site_df.loc[site_int_ids, "lon"].values,
+            y=obs_data.site_df.loc[site_int_ids, "lat"].values,
+            style="a0.3c",
+            fill="red",
+            pen="0.1p,black",
+        )
+    elif site_int_lat and site_int_lon:
+        fig.plot(
+            x=site_int_lon,
+            y=site_int_lat,
+            style="a0.3c",
+            fill="red",
+            pen="0.1p,black",
+        )
 
     fig.savefig(
         output_ffp,

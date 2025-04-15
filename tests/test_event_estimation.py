@@ -32,7 +32,7 @@ def run_config(model_dir):
 @pytest.fixture(scope="module")
 def emp_gm_data(run_config: sr.ml.RunConfig, obs_data: sr.ObservedData):
     if run_config.use_emp_gm_model:
-        return sr.ml.gnn_gm.load_emp_gm_params_res(run_config.emp_gm_params_ffp, obs_data)
+        return sr.analysis.load_emp_gm_params_res(run_config.emp_gm_params_ffp, obs_data)
     return None
 
 @pytest.mark.parametrize("event_id", event_est_config["events"])

@@ -8,6 +8,7 @@ from . import plot_utils
 from . import plot_ind_scenarios
 from . import plot_spatial
 from . import loth_baker_2013_corr_model as lb13
+from . import analysis
 
 __all__ = [
     "data",
@@ -22,4 +23,5 @@ __all__ = [
     "plot_ind_scenarios",
     "plot_spatial",
     "lb13",
+    "analysis",
 ]

@@ -148,7 +148,7 @@ def run_cim_for_GNN(
                 constants.PSA_KEYS,
                 20,
                 None,
-                True if on_train else False,
+                True,
             )
             results.append(cur_result)
     else:
@@ -168,7 +168,7 @@ def run_cim_for_GNN(
                         constants.PSA_KEYS,
                         20,
                         None,
-                        True if on_train else False,
+                        True,
                     )
                     for cur_event in events
                 ],
@@ -180,6 +180,7 @@ def run_cim_for_GNN(
     (out_dir := gnn_result_dir / "cim_results").mkdir(parents=False, exist_ok=True)
     prefix = "train" if on_train else "val"
     result_df.to_parquet(out_dir / f"{prefix}_results.parquet")
+    print("wtf")
 
 
 def predict_event_cIM(
@@ -294,7 +295,8 @@ def run_event_cim(
         Number of observation sites to use
     allow_int_as_obs: bool, optional
         If True then allows sites of interest to be used
-        as observation sites for the conditional IM distribution
+        as observation sites for other sites of interest
+        when computing the conditional IM distribution
 
     Returns
     -------

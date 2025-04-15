@@ -271,7 +271,7 @@ def bias_res_std(
     cim_results = pd.read_parquet(cim_result_dir / "val_results.parquet").sort_index()
 
     # Load marginal GMM residuals
-    _, emp_res_df = sr.ml.gnn_gm.load_emp_gm_params_res(emp_gm_params_ffp, obs_data)
+    _, emp_res_df = sr.analysis.load_emp_gm_params_res(emp_gm_params_ffp, obs_data)
     emp_res_df = emp_res_df.loc[gnn_only_results.index]
 
     # Sanity check
@@ -282,18 +282,18 @@ def bias_res_std(
     ), "Index mixmatch"
 
     # Compute residuals
-    gnn_only_res_df = sr.ml.gnn_gm.get_residuals(
+    gnn_only_res_df = sr.analysis.get_residuals(
         gnn_only_results, ims=gnn_only_run_config.ims
     )
-    gnn_only_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(
+    gnn_only_bias_std_df = sr.analysis.get_res_mean_std(
         gnn_only_res_df, ims=gnn_only_run_config.ims
     )
-    cim_res_df = sr.ml.gnn_gm.get_residuals(cim_results, pred_suffix="cond_mean")
+    cim_res_df = sr.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
 
-    gnn_res_res_df = sr.ml.gnn_gm.get_residuals(gnn_res_results)
-    gnn_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(gnn_res_res_df)
-    cim_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(cim_res_df)
-    marg_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(emp_res_df)
+    gnn_res_res_df = sr.analysis.get_residuals(gnn_res_results)
+    gnn_res_bias_std_df = sr.analysis.get_res_mean_std(gnn_res_res_df)
+    cim_res_bias_std_df = sr.analysis.get_res_mean_std(cim_res_df)
+    marg_res_bias_std_df = sr.analysis.get_res_mean_std(emp_res_df)
 
     fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
         figsize=sr.constants.FIG_SIZE,
@@ -366,9 +366,8 @@ def bias_res_std(
             color="blue",
             zorder=10,
         )
-        ax2.set_xticklabels(
-            ax2.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
-        )
+
+        ax2.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
         ax2.set_xlim(-0.75, len(gnn_only_run_config.non_pSA_ims) - 0.25)
 
     ### Residual Standard Deviation
@@ -405,9 +404,8 @@ def bias_res_std(
             gnn_only_bias_std_df.loc[gnn_only_run_config.non_pSA_ims, "std"],
             color="blue",
         )
-        ax4.set_xticklabels(
-            ax4.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
-        )
+
+        ax4.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
         ax4.set_xlim(-0.75, len(gnn_only_run_config.non_pSA_ims) - 0.25)
 
     plt.savefig(output_dir / f"bias_residual_std.{sr.constants.FIG_FORMAT}")
@@ -468,12 +466,12 @@ def mag_bias_res_std(
     assert gnn_results.index.equals(cim_results.index), "Index mixmatch"
 
     # Compute residuals
-    gnn_res_df = sr.ml.gnn_gm.get_residuals(gnn_results, ims=gnn_run_config.ims)
-    gnn_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(
+    gnn_res_df = sr.analysis.get_residuals(gnn_results, ims=gnn_run_config.ims)
+    gnn_res_bias_std_df = sr.analysis.get_res_mean_std(
         gnn_res_df, ims=gnn_run_config.ims
     )
-    cim_res_df = sr.ml.gnn_gm.get_residuals(cim_results, pred_suffix="cond_mean")
-    cim_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(cim_res_df)
+    cim_res_df = sr.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
+    cim_res_bias_std_df = sr.analysis.get_res_mean_std(cim_res_df)
 
     # Apply magnitude binning
     gnn_res_df["mag"] = obs_data.record_df.loc[gnn_res_df.index, "mag"].values
@@ -604,9 +602,7 @@ def mag_bias_res_std(
                 s=group_scatter_size,
             )
 
-        ax2.set_xticklabels(
-            ax2.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
-        )
+        ax2.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
         ax2.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     ### Residual Standard Deviation
@@ -676,9 +672,7 @@ def mag_bias_res_std(
                 s=group_scatter_size,
             )
 
-        ax4.set_xticklabels(
-            ax4.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
-        )
+        ax4.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
         ax4.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     output_name = (
@@ -746,13 +740,13 @@ def rrup_bias_res_std(
     assert gnn_results.index.equals(cim_results.index), "Index mixmatch"
 
     # Compute residuals
-    gnn_res_df = sr.ml.gnn_gm.get_residuals(gnn_results, ims=gnn_run_config.ims)
-    gnn_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(
+    gnn_res_df = sr.analysis.get_residuals(gnn_results, ims=gnn_run_config.ims)
+    gnn_res_bias_std_df = sr.analysis.get_res_mean_std(
         gnn_res_df, ims=gnn_run_config.ims
     )
 
-    cim_res_df = sr.ml.gnn_gm.get_residuals(cim_results, pred_suffix="cond_mean")
-    cim_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(cim_res_df)
+    cim_res_df = sr.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
+    cim_res_bias_std_df = sr.analysis.get_res_mean_std(cim_res_df)
 
     # Apply rrup binning
     gnn_res_df["rrup"] = obs_data.record_df.loc[gnn_res_df.index, "rrup"].values
@@ -884,9 +878,7 @@ def rrup_bias_res_std(
                 s=group_scatter_size,
             )
 
-        ax2.set_xticklabels(
-            ax2.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
-        )
+        ax2.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
         ax2.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     ### Residual Standard Deviation
@@ -954,9 +946,8 @@ def rrup_bias_res_std(
                 c=group_colors[i],
                 s=group_scatter_size,
             )
-        ax4.set_xticklabels(
-            ax4.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
-        )
+        
+        ax4.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
         ax4.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     output_name = (
@@ -1030,13 +1021,13 @@ def doc_bias_res_std(
     assert gnn_results.index.equals(cim_results.index), "Index mixmatch"
 
     # Compute residuals
-    gnn_res_df = sr.ml.gnn_gm.get_residuals(gnn_results, ims=gnn_run_config.ims)
-    gnn_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(
+    gnn_res_df = sr.analysis.get_residuals(gnn_results, ims=gnn_run_config.ims)
+    gnn_res_bias_std_df = sr.analysis.get_res_mean_std(
         gnn_res_df, ims=gnn_run_config.ims
     )
 
-    cim_res_df = sr.ml.gnn_gm.get_residuals(cim_results, pred_suffix="cond_mean")
-    cim_res_bias_std_df = sr.ml.gnn_gm.get_res_mean_std(cim_res_df)
+    cim_res_df = sr.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
+    cim_res_bias_std_df = sr.analysis.get_res_mean_std(cim_res_df)
 
     # Apply degree of constraint binning
     gnn_res_df["doc"] = gnn_results.loc[gnn_res_df.index, "doc"].values
@@ -1158,9 +1149,7 @@ def doc_bias_res_std(
                 s=group_scatter_size,
             )
 
-        ax2.set_xticklabels(
-            ax2.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
-        )
+        ax2.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
         ax2.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     ### Residual Standard Deviation
@@ -1228,9 +1217,8 @@ def doc_bias_res_std(
                 c=group_colors[i],
                 s=group_scatter_size,
             )
-        ax4.set_xticklabels(
-            ax4.get_xticklabels(), rotation=90, fontsize=sr.constants.FIG_FONT_SIZE
-        )
+
+        ax4.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
         ax4.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     output_name = (

@@ -93,7 +93,7 @@ PERIODS = [
 ]
 PSA_KEYS = [f"pSA_{x}" for x in PERIODS]
 
-NON_PSA_IMs = ["PGA", "PGV", "AI", "CAV", "Ds575", "Ds595"]
+NON_PSA_IMs = ["PGV", "PGA", "AI", "CAV", "Ds575", "Ds595"]
 IMs = NON_PSA_IMs + PSA_KEYS
 
 GNN_PRED_NON_PSA_KEYS = [
@@ -148,9 +148,11 @@ PRE_PROCESS_CONFIG = {
 MAG_BINS = [3.5, 4.5, 5.5, 8]
 MAG_BIN_LABELS = ["$M_w$ 3.5 - 4.5", "$M_w$ 4.5 - 5.5", "$M_w$: 5.5 - 8"]
 MAG_COLORS = ["blue", "purple", "red"]
-RRUP_BINS = [0, 30, 100, 250, 500]
-RRUP_BIN_LABELS = ["$R_{Rup}$ 0 - 30", "$R_{Rup}$ 30 - 100", "$R_{Rup}$ 100 - 250", "$R_{Rup}$ 250 - 500"]
-RRUP_COLORS = ["blue", "purple", "red", "maroon"]
+# RRUP_BINS = [0, 30, 100, 250, 500]
+# RRUP_BIN_LABELS = ["$R_{Rup}$ 0 - 30", "$R_{Rup}$ 30 - 100", "$R_{Rup}$ 100 - 250", "$R_{Rup}$ 250 - 500"]
+RRUP_BINS = [0, 30, 100, 500]
+RRUP_BIN_LABELS = ["$R_{Rup}$ 0 - 30", "$R_{Rup}$ 30 - 100", "$R_{Rup}$ 100 - 500"]
+RRUP_COLORS = ["blue", "purple", "red"]
 DOC_BINS = [0, 2.5, 4, 8]
 DOC_BIN_LABELS = ["DoC 0 - 2.5", "DoC 2.5 - 4", "DoC 4 - 8"]
 DOC_COLORS = ["blue", "purple", "red"]

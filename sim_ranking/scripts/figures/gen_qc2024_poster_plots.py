@@ -137,8 +137,8 @@ def __load_residuals(
     gnn_train_events = gnn_train_results.event_id.unique().astype(str)
     gnn_val_events = gnn_val_results.event_id.unique().astype(str)
 
-    gnn_train_res_df = sr.ml.gnn_gm.get_residuals(gnn_train_results)
-    gnn_val_res_df = sr.ml.gnn_gm.get_residuals(gnn_val_results)
+    gnn_train_res_df = sr.analysis.get_residuals(gnn_train_results)
+    gnn_val_res_df = sr.analysis.get_residuals(gnn_val_results)
 
     # Load empirical cIM results & compute residuals
     train_emp_cim_result = sr.CIMResults.from_dir(emp_cim_results_dir, gnn_train_events)
@@ -689,8 +689,8 @@ def residual_constraintness(gnn_resuls_dir: Path, nzmdb_ffp: Path, ims: List[str
     gnn_val_constraint = pd.Series(gnn_val_constraint, name="constraint")
 
     # Compute the residuals
-    gnn_train_res_df = sr.ml.gnn_gm.get_residuals(gnn_train_results)
-    gnn_val_res_df = sr.ml.gnn_gm.get_residuals(gnn_val_results)
+    gnn_train_res_df = sr.analysis.get_residuals(gnn_train_results)
+    gnn_val_res_df = sr.analysis.get_residuals(gnn_val_results)
 
     # Generate the plot
     cur_x_min = min(gnn_train_constraint.min(), gnn_val_constraint.min())
