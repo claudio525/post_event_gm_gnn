@@ -258,4 +258,4 @@ def compute_site_int_obs_correlation_residuals(
     if emp_cim_res_site_pair_corrs is not None:
         cim_corr_residuals = emp_obs_res_site_pair_corrs - emp_cim_res_site_pair_corrs
 
-    return gnn_corr_residuals, cim_corr_residuals, emp_gnn_res_site_pair_corrs, emp_obs_res_site_pair_corrs, emp_cim_res_site_pair_corrs
+    return gnn_corr_residuals, cim_corr_residuals, emp_gnn_res_site_pair_corrs, emp_obs_res_site_pair_corrs, emp_cim_res_site_pair_corrs, site_pairs_df

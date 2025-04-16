@@ -157,6 +157,14 @@ DOC_BINS = [0, 2.5, 4, 8]
 DOC_BIN_LABELS = ["DoC 0 - 2.5", "DoC 2.5 - 4", "DoC 4 - 8"]
 DOC_COLORS = ["blue", "purple", "red"]
 
+SITE_TO_SITE_DIST_BINS = [0, 5, 10, 30]
+SITE_TO_SITE_DIST_BIN_LABELS = ["0 - 5", "5 - 10", "10 - 30"]
+SITE_TO_SITE_DIST_COLORS = ["blue", "purple", "red"]
+
+LN_VS30_DIFF_BINS = [0, 0.25, 0.75, 2.5]
+LN_VS30_DIFF_BIN_LABELS = ["0 - 0.25", "0.25 - 0.75", "0.75 - 2.5"]
+LN_VS30_DIFF_COLORS = ["blue", "purple", "red"]
+
 
 CANTERBURY_REGION = [171.54, 173.12, -43.95, -43.22]
 CANTERBURY_REGION_EXTENDED = [171.57297981348268, 173.21996004180335, -43.95952294853966, -42.88754722262727]
@@ -181,6 +189,14 @@ if (env_fig_format := os.environ.get("fig_format")) is not None:
 FIG_FONT_SIZE = None
 if (env_fig_font_size := os.environ.get("fig_font_size")) is not None:
     FIG_FONT_SIZE = int(env_fig_font_size)
+
+FIG_LINEWIDTH = None
+if (env_fig_linewidth := os.environ.get("fig_linewidth")) is not None:
+    FIG_LINEWIDTH = float(env_fig_linewidth)
+
+FIG_GROUP_LINEWIDTH = None
+if (env_fig_group_linewidth := os.environ.get("fig_group_linewidth")) is not None:
+    FIG_GROUP_LINEWIDTH = float(env_fig_group_linewidth)
 
 
 MW_RRUP_LIMITS = np.array([

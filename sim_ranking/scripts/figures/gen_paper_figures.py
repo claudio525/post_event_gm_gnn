@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import matplotlib.ticker as ticker
 import typer
 from tqdm import tqdm
 import seaborn as sns
@@ -73,6 +74,7 @@ def mag_rrup_scatter(
         sr.constants.MW_RRUP_LIMITS[:, 0],
         c="blue",
         label="Magnitude-distance filter",
+        linewidth=sr.constants.FIG_LINEWIDTH,
     )
 
     ax_scatter.set_xlabel("Source-to-site distance, $R_{Rup}$ (km)")
@@ -236,6 +238,8 @@ def bias_res_std(
     cim_result_dir: Path,
     emp_gm_params_ffp: Path,
     output_dir: Path,
+    bias_limit: float = 1.0,
+    std_limit: float = 1.0,
 ):
     """
     Generates a figure comparing the bias and residual standard deviation
@@ -301,7 +305,8 @@ def bias_res_std(
         main_wspace=0.175,
         sub_wspace=0.05,
         right=0.99,
-        std_y_axis_limits=(0.0, 1.25),
+        std_y_axis_limits=(0.0, std_limit),
+        bias_y_axis_limits=(-bias_limit, bias_limit),
         bottom=0.125,
     )
 
@@ -310,28 +315,28 @@ def bias_res_std(
         sr.constants.PERIODS,
         marg_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
         color="grey",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="MVN-Marginal",
     )
     ax1.plot(
         sr.constants.PERIODS,
         cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
         color="green",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     ax1.plot(
         sr.constants.PERIODS,
         gnn_only_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
         color="blue",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="GNN-Only",
     )
     ax1.plot(
         sr.constants.PERIODS,
         gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
         color="purple",
-        linewidth=2.5,
+        linewidth= sr.constants.FIG_LINEWIDTH,
         label="GNN-Residual",
     )
 
@@ -375,25 +380,25 @@ def bias_res_std(
         sr.constants.PERIODS,
         marg_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
         color="grey",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
     )
     ax3.plot(
         sr.constants.PERIODS,
         cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
         color="green",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
     )
     ax3.plot(
         sr.constants.PERIODS,
         gnn_only_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
         color="blue",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
     )
     ax3.plot(
         sr.constants.PERIODS,
         gnn_res_bias_std_df["std"],
         color="purple",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
     )
     if gnn_only_run_config.non_pSA_ims is not None:
         ax4.scatter(
@@ -420,6 +425,8 @@ def mag_bias_res_std(
     show_legend: bool = True,
     legend_ax: int = 1,
     output_name: str = None,
+    bias_limit: float = 1.0,
+    std_limit: float = 1.0,
 ):
     """
     Generates a figure comparing the bias and residual standard deviation
@@ -496,7 +503,7 @@ def mag_bias_res_std(
 
     # colors = list(reversed(cm.viridis(np.linspace(0, 1, len(sr.constants.MAG_BINS)))))
     group_colors = sr.constants.MAG_COLORS
-    group_linewidth = 2.0
+    group_linewidth = sr.constants.FIG_GROUP_LINEWIDTH
     group_scatter_size = 12.5
 
     if gnn_run_config.non_pSA_ims is not None:
@@ -506,8 +513,9 @@ def mag_bias_res_std(
             main_wspace=0.175,
             sub_wspace=0.05,
             right=0.99,
-            std_y_axis_limits=(0.0, 1.25),
             bottom=0.125,
+            std_y_axis_limits=(0.0, std_limit),
+            bias_y_axis_limits=(-bias_limit, bias_limit),
         )
     else:
         fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
@@ -515,8 +523,9 @@ def mag_bias_res_std(
             main_wspace=0.175,
             left=0.08,
             right=0.99,
-            std_y_axis_limits=(0.0, 1.25),
             bottom=0.125,
+            std_y_axis_limits=(0.0, std_limit),
+            bias_y_axis_limits=(-bias_limit, bias_limit),
         )
 
     ### Bias
@@ -524,7 +533,7 @@ def mag_bias_res_std(
         sr.constants.PERIODS,
         gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
         color="black",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax1.plot(
@@ -532,7 +541,7 @@ def mag_bias_res_std(
         cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
         color="black",
         linestyle="--",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_mag_groups):
@@ -610,7 +619,7 @@ def mag_bias_res_std(
         sr.constants.PERIODS,
         gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
         color="black",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax3.plot(
@@ -618,7 +627,7 @@ def mag_bias_res_std(
         cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
         color="black",
         linestyle="--",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_mag_groups):
@@ -694,6 +703,8 @@ def rrup_bias_res_std(
     show_legend: bool = True,
     legend_ax: int = 1,
     output_name: str = None,
+    bias_limit: float = 1.0,
+    std_limit: float = 1.0,
 ):
     """
     Generates a figure comparing the bias and residual standard deviation
@@ -772,7 +783,7 @@ def rrup_bias_res_std(
     cim_res_rrup_std = cim_res_rrup_groups[sr.constants.PSA_KEYS].std()
 
     group_colors = sr.constants.RRUP_COLORS
-    group_linewidth = 2.0
+    group_linewidth = sr.constants.FIG_GROUP_LINEWIDTH
     group_scatter_size = 12.5
 
     if gnn_run_config.non_pSA_ims is not None:
@@ -782,8 +793,9 @@ def rrup_bias_res_std(
             main_wspace=0.175,
             sub_wspace=0.05,
             right=0.99,
-            std_y_axis_limits=(0.0, 1.25),
             bottom=0.125,
+            std_y_axis_limits=(0.0, std_limit),
+            bias_y_axis_limits=(-bias_limit, bias_limit),
         )
     else:
         fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
@@ -791,8 +803,9 @@ def rrup_bias_res_std(
             main_wspace=0.175,
             left=0.08,
             right=0.99,
-            std_y_axis_limits=(0.0, 1.25),
             bottom=0.125,
+            std_y_axis_limits=(0.0, std_limit),
+            bias_y_axis_limits=(-bias_limit, bias_limit),
         )
 
     ### Bias
@@ -800,7 +813,7 @@ def rrup_bias_res_std(
         sr.constants.PERIODS,
         gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
         color="black",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax1.plot(
@@ -808,7 +821,7 @@ def rrup_bias_res_std(
         cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
         color="black",
         linestyle="--",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
@@ -822,7 +835,7 @@ def rrup_bias_res_std(
         ax1.semilogx(
             sr.constants.PERIODS,
             gnn_res_rrup_bias.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"{cur_key}, N: {gnn_res_rrup_groups.size()[cur_key]}",
+            label=f"{cur_key} km, N: {gnn_res_rrup_groups.size()[cur_key]}",
             c=group_colors[i],
             linewidth=group_linewidth,
         )
@@ -839,10 +852,10 @@ def rrup_bias_res_std(
     )
     ax1.text(
         0.03,
-        0.03,
-        "Overprediction",
+        0.97,
+        "Underprediction",
         transform=ax1.transAxes,
-        va="bottom",
+        va="top",
         ha="left",
     )
 
@@ -886,7 +899,7 @@ def rrup_bias_res_std(
         sr.constants.PERIODS,
         gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
         color="black",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax3.plot(
@@ -894,7 +907,7 @@ def rrup_bias_res_std(
         cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
         color="black",
         linestyle="--",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
@@ -946,7 +959,7 @@ def rrup_bias_res_std(
                 c=group_colors[i],
                 s=group_scatter_size,
             )
-        
+
         ax4.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
         ax4.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
@@ -969,6 +982,8 @@ def doc_bias_res_std(
     show_legend: bool = True,
     legend_ax: int = 1,
     output_name: str = None,
+    bias_limit: float = 1.0,
+    std_limit: float = 1.0,
 ):
     """
     Generates a figure comparing the bias and residual standard deviation
@@ -1053,7 +1068,7 @@ def doc_bias_res_std(
     cim_res_doc_std = cim_res_doc_groups[sr.constants.PSA_KEYS].std()
 
     group_colors = sr.constants.DOC_COLORS
-    group_linewidth = 2.0
+    group_linewidth = sr.constants.FIG_GROUP_LINEWIDTH
     group_scatter_size = 12.5
 
     if gnn_run_config.non_pSA_ims is not None:
@@ -1063,8 +1078,9 @@ def doc_bias_res_std(
             main_wspace=0.175,
             sub_wspace=0.05,
             right=0.99,
-            std_y_axis_limits=(0.0, 1.25),
             bottom=0.125,
+            std_y_axis_limits=(0.0, std_limit),
+            bias_y_axis_limits=(-bias_limit, bias_limit),
         )
     else:
         fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
@@ -1072,8 +1088,9 @@ def doc_bias_res_std(
             main_wspace=0.175,
             left=0.08,
             right=0.99,
-            std_y_axis_limits=(0.0, 1.25),
             bottom=0.125,
+            std_y_axis_limits=(0.0, std_limit),
+            bias_y_axis_limits=(-bias_limit, bias_limit),
         )
 
     ### Bias
@@ -1081,7 +1098,7 @@ def doc_bias_res_std(
         sr.constants.PERIODS,
         gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
         color="black",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax1.plot(
@@ -1089,7 +1106,7 @@ def doc_bias_res_std(
         cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
         color="black",
         linestyle="--",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
@@ -1157,7 +1174,7 @@ def doc_bias_res_std(
         sr.constants.PERIODS,
         gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
         color="black",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax3.plot(
@@ -1165,7 +1182,7 @@ def doc_bias_res_std(
         cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
         color="black",
         linestyle="--",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
@@ -1233,6 +1250,10 @@ def doc_bias_res_std(
 
 @app.command("fmin-filter")
 def fmin_filter(nzgmdb_ffp: Path, gnn_result_dir: Path, output_dir: Path):
+    """
+    Generates figure showing the number of records and scenarios
+    as a function of pSA period
+    """
     # Update font size
     if sr.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
@@ -1253,14 +1274,14 @@ def fmin_filter(nzgmdb_ffp: Path, gnn_result_dir: Path, output_dir: Path):
         sr.constants.PERIODS,
         record_count_df.loc[sr.constants.PSA_KEYS],
         color="black",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="Number of records",
     )
     ax.plot(
         sr.constants.PERIODS,
         scenario_count.loc[sr.constants.PSA_KEYS],
         color="blue",
-        linewidth=2.5,
+        linewidth=sr.constants.FIG_LINEWIDTH,
         label="Number of scenarios",
     )
     ax.set_xlabel("Period (s)")
@@ -1273,6 +1294,730 @@ def fmin_filter(nzgmdb_ffp: Path, gnn_result_dir: Path, output_dir: Path):
     fig.tight_layout()
 
     fig.savefig(output_dir / f"fmin_filter.{sr.constants.FIG_FORMAT}")
+    plt.close(fig)
+
+
+@app.command("spatial-corr-trends")
+def spatial_corr_trends(
+    gnn_only_results_dir: Path,
+    gnn_residual_results_dir: Path,
+    emp_gm_params_ffp: Path,
+    output_dir: Path,
+    plot_labels: str = None,
+    bias_limit: float = 1.0,
+    std_limit: float = 1.0,
+):
+    plot_labels = plot_labels.split(",") if plot_labels is not None else None
+
+    # Update font size
+    if sr.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": sr.constants.FIG_FONT_SIZE,
+            }
+        )
+
+    gnn_only_run_config = sr.ml.RunConfig.from_yaml(
+        gnn_only_results_dir / "run_config.yaml"
+    )
+    gnn_residual_run_config = sr.ml.RunConfig.from_yaml(
+        gnn_residual_results_dir / "run_config.yaml"
+    )
+    assert gnn_only_run_config.obs_data_ffp == gnn_residual_run_config.obs_data_ffp
+
+    # Load data
+    obs_data = sr.data.load_obs_nzgmdb(gnn_only_run_config.obs_data_ffp)
+    gnn_only_results = pd.read_parquet(
+        gnn_only_results_dir / "val_results.parquet"
+    ).sort_index()
+    gnn_residual_results = pd.read_parquet(
+        gnn_residual_results_dir / "val_results.parquet"
+    ).sort_index()
+    emp_gm_params = pd.read_parquet(emp_gm_params_ffp)
+
+    if (gnn_only_results_dir / "cim_results/val_results.parquet").exists():
+        cim_results = pd.read_parquet(
+            gnn_only_results_dir / "cim_results/val_results.parquet"
+        ).sort_index()
+    elif (gnn_residual_results_dir / "cim_results/val_results.parquet").exists():
+        cim_results = pd.read_parquet(
+            gnn_residual_results_dir / "cim_results/val_results.parquet"
+        ).sort_index()
+    else:
+        print("No CIM results found")
+
+    assert gnn_only_results.index.equals(cim_results.index), "Index mismatch"
+    assert gnn_only_results.index.equals(gnn_residual_results.index), "Index mismatch"
+
+    # Get the correlations
+    (
+        gnn_only_corr_residuals,
+        cim_corr_residuals,
+        _,
+        __,
+        ___,
+        site_pairs_df,
+    ) = sr.analysis.compute_site_int_obs_correlation_residuals(
+        gnn_only_results, obs_data, emp_gm_params, cim_results=cim_results
+    )
+
+    (
+        gnn_residual_corr_residuals,
+        *_,
+    ) = sr.analysis.compute_site_int_obs_correlation_residuals(
+        gnn_residual_results, obs_data, emp_gm_params
+    )
+
+    # Add site-to-site distance
+    dist_matrix = sr.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
+    site_int_ind = dist_matrix.index.get_indexer_for(site_pairs_df["site_int"].values)
+    obs_site_ind = dist_matrix.columns.get_indexer_for(site_pairs_df["obs_site"].values)
+    site_dist = dist_matrix.values[site_int_ind, obs_site_ind]
+    site_pairs_df["dist"] = site_dist
+
+    # Add Vs30 Difference
+    site_pairs_df["site_int_vs30"] = obs_data.site_df.loc[site_pairs_df["site_int"].values, "vs30"].values
+    site_pairs_df["obs_site_vs30"] = obs_data.site_df.loc[site_pairs_df["obs_site"].values, "vs30"].values
+    site_pairs_df["site_int_ln_vs30"] = np.log(obs_data.site_df.loc[site_pairs_df["site_int"].values, "vs30"].values)
+    site_pairs_df["obs_site_ln_vs30"] = np.log(obs_data.site_df.loc[site_pairs_df["obs_site"].values, "vs30"].values)
+
+    site_pairs_df["ln_vs30_diff"] = site_pairs_df["site_int_ln_vs30"] - site_pairs_df["obs_site_ln_vs30"]
+    site_pairs_df["abs_ln_vs30_diff"] = np.abs(site_pairs_df["ln_vs30_diff"])
+
+    # Compute bias and residual standard deviation
+    gnn_only_corr_res_bias = gnn_only_corr_residuals.mean(axis=0)
+    gnn_only_corr_res_std = gnn_only_corr_residuals.std(axis=0)
+
+    gnn_residual_corr_res_bias = gnn_residual_corr_residuals.mean(axis=0)
+    gnn_residual_corr_res_std = gnn_residual_corr_residuals.std(axis=0)
+
+    if cim_corr_residuals is not None:
+        cim_corr_res_bias = cim_corr_residuals.mean(axis=0)
+        cim_corr_res_std = cim_corr_residuals.std(axis=0)
+
+    # Plot total bias and residual standard deviation
+    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
+        sr.constants.FIG_SIZE,
+        main_wspace=0.175,
+        left=0.08,
+        right=0.99,
+        bottom=0.125,
+        bias_y_axis_limits=(-bias_limit, bias_limit),
+        std_y_axis_limits=(0.0, std_limit),
+    )
+
+    ax1.plot(
+        sr.constants.PERIODS,
+        gnn_only_corr_res_bias[sr.constants.PSA_KEYS],
+        label="GNN-only",
+        c="blue",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+    ax1.plot(
+        sr.constants.PERIODS,
+        gnn_residual_corr_res_bias[sr.constants.PSA_KEYS],
+        label="GNN-residual",
+        c="purple",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+
+    ax2.plot(
+        sr.constants.PERIODS,
+        gnn_only_corr_res_std[sr.constants.PSA_KEYS],
+        label="GNN-only",
+        c="blue",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+    ax2.plot(
+        sr.constants.PERIODS,
+        gnn_residual_corr_res_std[sr.constants.PSA_KEYS],
+        label="GNN-residual",
+        c="purple",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+
+    if cim_corr_res_bias is not None:
+        ax1.plot(
+            sr.constants.PERIODS,
+            cim_corr_res_bias[sr.constants.PSA_KEYS],
+            label="MVN-CIM",
+            c="green",
+            linewidth=sr.constants.FIG_LINEWIDTH,
+        )
+        ax2.plot(
+            sr.constants.PERIODS,
+            cim_corr_res_std[sr.constants.PSA_KEYS],
+            label="MVN-CIM",
+            c="green",
+            linewidth=sr.constants.FIG_LINEWIDTH,
+        )
+
+    ax1.legend()
+    # ax1.yaxis.set_major_locator(ticker.MaxNLocator(9))
+    ax1.text(
+        0.03,
+        0.03,
+        "Overprediction",
+        transform=ax1.transAxes,
+        fontsize=sr.constants.FIG_FONT_SIZE,
+        va="bottom",
+        ha="left",
+    )
+    ax1.text(
+        0.03,
+        0.97,
+        "Underprediction",
+        transform=ax1.transAxes,
+        fontsize=sr.constants.FIG_FONT_SIZE,
+        va="top",
+        ha="left",
+    )
+
+    fig.savefig(output_dir / f"spatial_corr_bias_std.{sr.constants.FIG_FORMAT}")
+    plt.close(fig)
+
+    ### Site-to-site distance
+    gnn_only_corr_residuals["dist"] = site_pairs_df["dist"]
+    gnn_only_corr_residuals["dist_bin"] = pd.cut(
+        gnn_only_corr_residuals["dist"],
+        bins=sr.constants.SITE_TO_SITE_DIST_BINS,
+        labels=sr.constants.SITE_TO_SITE_DIST_BIN_LABELS,
+    )
+    gnn_only_corr_residual_groups = gnn_only_corr_residuals.groupby(
+        "dist_bin", observed=False
+    )
+    gnn_only_res_dist_corr_bias = gnn_only_corr_residual_groups.mean()
+    gnn_only_res_dist_corr_std = gnn_only_corr_residual_groups.std()
+
+    gnn_residual_corr_residuals["dist"] = site_pairs_df["dist"]
+    gnn_residual_corr_residuals["dist_bin"] = pd.cut(
+        gnn_residual_corr_residuals["dist"],
+        bins=sr.constants.SITE_TO_SITE_DIST_BINS,
+        labels=sr.constants.SITE_TO_SITE_DIST_BIN_LABELS,
+    )
+    gnn_residual_corr_residual_groups = gnn_residual_corr_residuals.groupby(
+        "dist_bin", observed=False
+    )
+    gnn_residual_res_dist_corr_bias = gnn_residual_corr_residual_groups.mean()
+    gnn_residual_res_dist_corr_std = gnn_residual_corr_residual_groups.std()
+
+    if cim_corr_residuals is not None:
+        cim_corr_residuals["dist"] = site_pairs_df["dist"]
+        cim_corr_residuals["dist_bin"] = pd.cut(
+            cim_corr_residuals["dist"],
+            bins=sr.constants.SITE_TO_SITE_DIST_BINS,
+            labels=sr.constants.SITE_TO_SITE_DIST_BIN_LABELS,
+        )
+        cim_corr_residual_groups = cim_corr_residuals.groupby(
+            "dist_bin", observed=False
+        )
+        cim_res_dist_corr_bias = cim_corr_residual_groups.mean()
+        cim_res_dist_corr_std = cim_corr_residual_groups.std()
+
+    ## GNN-Only
+    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
+        figsize=sr.constants.FIG_SIZE,
+        main_wspace=0.175,
+        left=0.08,
+        right=0.99,
+        bottom=0.125,
+        bias_y_axis_limits=(-bias_limit, bias_limit),
+        std_y_axis_limits=(0, std_limit),
+    )
+
+    # Bias
+    ax1.plot(
+        sr.constants.PERIODS,
+        gnn_only_corr_res_bias[sr.constants.PSA_KEYS],
+        label="GNN-Only",
+        c="black",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+    if cim_corr_residuals is not None:
+        ax1.plot(
+            sr.constants.PERIODS,
+            cim_corr_res_bias[sr.constants.PSA_KEYS],
+            label="MVN-CIM",
+            c="black",
+            linestyle="--",
+            linewidth=sr.constants.FIG_LINEWIDTH,
+        )
+
+    for i, (cur_key, cur_group) in enumerate(gnn_only_corr_residual_groups):
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            gnn_only_res_dist_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            label=f"S2S {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
+            c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+        )
+
+        if cim_corr_res_bias is not None:
+            ax1.semilogx(
+                sr.constants.PERIODS,
+                cim_res_dist_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+                c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+                linestyle="--",
+                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            )
+
+    # ax1.legend()
+    ax1.text(
+        0.03,
+        0.03,
+        "Overprediction",
+        transform=ax1.transAxes,
+        fontsize=sr.constants.FIG_FONT_SIZE,
+        va="bottom",
+        ha="left",
+    )
+    ax1.text(
+        0.03,
+        0.97,
+        "Underprediction",
+        transform=ax1.transAxes,
+        fontsize=sr.constants.FIG_FONT_SIZE,
+        va="top",
+        ha="left",
+    )
+    if plot_labels is not None:
+        ax1.text(
+            -0.175,
+            0.98,
+            plot_labels[0],
+            transform=ax1.transAxes,
+            va="center",
+            ha="left",
+            fontsize=14,
+        )
+
+    # Residual Standard Deviation
+    ax2.plot(
+        sr.constants.PERIODS, gnn_only_corr_res_std[sr.constants.PSA_KEYS], c="black",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+        label="GNN-Only",
+    )
+    ax2.plot(
+        sr.constants.PERIODS,
+        cim_corr_res_std[sr.constants.PSA_KEYS],
+        c="black",
+        linestyle="--",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+        label="MVN-CIM",
+    )
+    for i, (cur_key, cur_group) in enumerate(gnn_only_corr_residual_groups):
+        ax2.semilogx(
+            sr.constants.PERIODS,
+            gnn_only_res_dist_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+            c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            label=f"S2S {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
+        )
+
+        if cim_corr_res_std is not None:
+            ax2.semilogx(
+                sr.constants.PERIODS,
+                cim_res_dist_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+                c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+                linestyle="--",
+                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            )
+
+    ax2.legend()
+    fig.savefig(
+        output_dir / f"spatial_corr_s2s_gnn_only.{sr.constants.FIG_FORMAT}"
+    ) 
+    plt.close(fig)
+
+    ## GNN-Residual
+    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
+        figsize=sr.constants.FIG_SIZE,
+        main_wspace=0.175,
+        left=0.08,
+        right=0.99,
+        bottom=0.125,
+        bias_y_axis_limits=(-bias_limit, bias_limit),
+        std_y_axis_limits=(0, std_limit),
+    )
+
+    # Bias
+    ax1.plot(
+        sr.constants.PERIODS,
+        gnn_residual_corr_res_bias[sr.constants.PSA_KEYS],
+        label="GNN-Residual",
+        c="black",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+    if cim_corr_residuals is not None:
+        ax1.plot(
+            sr.constants.PERIODS,
+            cim_corr_res_bias[sr.constants.PSA_KEYS],
+            label="MVN-CIM",
+            c="black",\
+            linestyle="--",
+            linewidth=sr.constants.FIG_LINEWIDTH,
+        )
+
+    for i, (cur_key, cur_group) in enumerate(gnn_residual_corr_residual_groups):
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            gnn_residual_res_dist_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            label=f"S2S {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
+            c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH
+        )
+
+        if cim_corr_res_bias is not None:
+            ax1.semilogx(
+                sr.constants.PERIODS,
+                cim_res_dist_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+                c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+                linestyle="--",
+                linewidth=sr.constants.FIG_GROUP_LINEWIDTH
+            )
+
+    # ax1.legend()
+    ax1.text(
+        0.03,
+        0.03,
+        "Overprediction",
+        transform=ax1.transAxes,
+        fontsize=sr.constants.FIG_FONT_SIZE,
+        va="bottom",
+        ha="left",
+    )
+    ax1.text(
+        0.03,
+        0.97,
+        "Underprediction",
+        transform=ax1.transAxes,
+        fontsize=sr.constants.FIG_FONT_SIZE,
+        va="top",
+        ha="left",
+    )
+    if plot_labels is not None:
+        ax1.text(
+            -0.175,
+            0.98,
+            plot_labels[1],
+            transform=ax1.transAxes,
+            va="center",
+            ha="left",
+            fontsize=14,
+        )
+
+    # Residual Standard Deviation
+    ax2.plot(
+        sr.constants.PERIODS,
+        gnn_residual_corr_res_std[sr.constants.PSA_KEYS],
+        label="GNN-Residual",
+        c="black",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+    ax2.plot(
+        sr.constants.PERIODS,
+        cim_corr_res_std[sr.constants.PSA_KEYS],
+        label="MVN-CIM",
+        c="black",
+        linestyle="--",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+
+    for i, (cur_key, cur_group) in enumerate(gnn_residual_corr_residual_groups):
+        ax2.semilogx(
+            sr.constants.PERIODS,
+            gnn_residual_res_dist_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+            label=f"S2S {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
+            c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH
+        )
+
+        if cim_corr_res_std is not None:
+            ax2.semilogx(
+                sr.constants.PERIODS,
+                cim_res_dist_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+                c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+                linestyle="--",
+                linewidth=sr.constants.FIG_GROUP_LINEWIDTH
+            )
+
+    ax2.legend()
+
+    fig.savefig(
+        output_dir / f"spatial_corr_s2s_gnn_residual.{sr.constants.FIG_FORMAT}"
+    )
+    plt.close(fig)
+
+    ### Vs30 Difference 
+    gnn_only_corr_residuals["abs_ln_vs30_diff"] = site_pairs_df["abs_ln_vs30_diff"]
+    gnn_only_corr_residuals["ln_vs30_diff_bin"] = pd.cut(
+        gnn_only_corr_residuals["abs_ln_vs30_diff"],
+        bins=sr.constants.LN_VS30_DIFF_BINS,
+        labels=sr.constants.LN_VS30_DIFF_BIN_LABELS,
+    )
+    gnn_only_corr_residual_groups = gnn_only_corr_residuals.groupby(
+        "ln_vs30_diff_bin", observed=False
+    )
+    gnn_only_res_vs30_corr_bias = gnn_only_corr_residual_groups[sr.constants.PSA_KEYS].mean()
+    gnn_only_res_vs30_corr_std = gnn_only_corr_residual_groups[sr.constants.PSA_KEYS].std()
+
+    gnn_residual_corr_residuals["abs_ln_vs30_diff"] = site_pairs_df["abs_ln_vs30_diff"]
+    gnn_residual_corr_residuals["ln_vs30_diff_bin"] = pd.cut(
+        gnn_residual_corr_residuals["abs_ln_vs30_diff"],
+        bins=sr.constants.LN_VS30_DIFF_BINS,
+        labels=sr.constants.LN_VS30_DIFF_BIN_LABELS,
+    )
+    gnn_residual_corr_residual_groups = gnn_residual_corr_residuals.groupby(
+        "ln_vs30_diff_bin", observed=False
+    )
+    gnn_residual_res_vs30_corr_bias = gnn_residual_corr_residual_groups[sr.constants.PSA_KEYS].mean()
+    gnn_residual_res_vs30_corr_std = gnn_residual_corr_residual_groups[sr.constants.PSA_KEYS].std()
+
+    if cim_corr_residuals is not None:
+        cim_corr_residuals["abs_ln_vs30_diff"] = site_pairs_df["abs_ln_vs30_diff"]
+        cim_corr_residuals["ln_vs30_diff_bin"] = pd.cut(
+            cim_corr_residuals["abs_ln_vs30_diff"],
+            bins=sr.constants.LN_VS30_DIFF_BINS,
+            labels=sr.constants.LN_VS30_DIFF_BIN_LABELS,
+        )
+        cim_corr_residual_groups = cim_corr_residuals.groupby(
+            "ln_vs30_diff_bin", observed=False
+        )
+        cim_res_vs30_corr_bias = cim_corr_residual_groups[sr.constants.PSA_KEYS].mean()
+        cim_res_vs30_corr_std = cim_corr_residual_groups[sr.constants.PSA_KEYS].std()
+
+    ## GNN-Only
+    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
+        figsize=sr.constants.FIG_SIZE,
+        main_wspace=0.175,
+        left=0.08,
+        right=0.99,
+        bottom=0.125,
+        bias_y_axis_limits=(-bias_limit, bias_limit),
+        std_y_axis_limits=(0, std_limit),
+    )
+
+    # Bias
+    ax1.plot(
+        sr.constants.PERIODS,
+        gnn_only_corr_res_bias[sr.constants.PSA_KEYS],
+        label="GNN-Only",
+        c="black",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+    if cim_corr_residuals is not None:
+        ax1.plot(
+            sr.constants.PERIODS,
+            cim_corr_res_bias[sr.constants.PSA_KEYS],
+            label="MVN-CIM",
+            c="black",
+            linestyle="--",
+            linewidth=sr.constants.FIG_LINEWIDTH,
+        )
+
+    for i, (cur_key, cur_group) in enumerate(gnn_only_corr_residual_groups):
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            gnn_only_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            label=f"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
+            c=sr.constants.LN_VS30_DIFF_COLORS[i],
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+        )
+        if cim_corr_res_bias is not None:
+            ax1.semilogx(
+                sr.constants.PERIODS,
+                cim_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+                c=sr.constants.LN_VS30_DIFF_COLORS[i],
+                linestyle="--",
+                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            )
+
+    # ax1.legend()
+        ax1.text(
+        0.03,
+        0.03,
+        "Overprediction",
+        transform=ax1.transAxes,
+        fontsize=sr.constants.FIG_FONT_SIZE,
+        va="bottom",
+        ha="left",
+    )
+    ax1.text(
+        0.03,
+        0.97,
+        "Underprediction",
+        transform=ax1.transAxes,
+        fontsize=sr.constants.FIG_FONT_SIZE,
+        va="top",
+        ha="left",
+    )
+    if plot_labels is not None:
+        ax1.text(
+            -0.175,
+            0.98,
+            plot_labels[0],
+            transform=ax1.transAxes,
+            va="center",
+            ha="left",
+            fontsize=14,
+        )
+
+    # Residual Standard Deviation
+    ax2.plot(
+        sr.constants.PERIODS,
+        gnn_only_corr_res_std[sr.constants.PSA_KEYS],
+        label="GNN-Only",
+        c="black",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+    if cim_corr_residuals is not None:
+        ax2.plot(
+            sr.constants.PERIODS,
+            cim_corr_res_std[sr.constants.PSA_KEYS],
+            label="MVN-CIM",
+            c="black",
+            linestyle="--",
+            linewidth=sr.constants.FIG_LINEWIDTH,
+        )
+
+    for i, (cur_key, cur_group) in enumerate(gnn_only_corr_residual_groups):
+        ax2.semilogx(
+            sr.constants.PERIODS,
+            gnn_only_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+            label=f"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
+            c=sr.constants.LN_VS30_DIFF_COLORS[i],
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+        )
+        if cim_corr_res_std is not None:
+            ax2.semilogx(
+                sr.constants.PERIODS,
+                cim_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+                c=sr.constants.LN_VS30_DIFF_COLORS[i],
+                linestyle="--",
+                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            )
+    
+    ax2.legend()
+    fig.savefig(
+        output_dir / f"spatial_corr_vs30_gnn_only.{sr.constants.FIG_FORMAT}"
+    )
+    plt.close(fig)
+
+    ## GNN-Residual
+    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
+        figsize=sr.constants.FIG_SIZE,
+        main_wspace=0.175,
+        left=0.08,
+        right=0.99,
+        bottom=0.125,
+        bias_y_axis_limits=(-bias_limit, bias_limit),
+        std_y_axis_limits=(0, std_limit),
+    )
+
+    # Bias
+    ax1.plot(
+        sr.constants.PERIODS,
+        gnn_residual_corr_res_bias[sr.constants.PSA_KEYS],
+        label="GNN-Residual",
+        c="black",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+    if cim_corr_residuals is not None:
+        ax1.plot(
+            sr.constants.PERIODS,
+            cim_corr_res_bias[sr.constants.PSA_KEYS],
+            label="MVN-CIM",
+            c="black",
+            linestyle="--",
+            linewidth=sr.constants.FIG_LINEWIDTH,
+        )
+
+    for i, (cur_key, cur_group) in enumerate(gnn_residual_corr_residual_groups):
+        ax1.semilogx(
+            sr.constants.PERIODS,
+            gnn_residual_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            label=f"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
+            c=sr.constants.LN_VS30_DIFF_COLORS[i],
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+        )
+        if cim_corr_res_bias is not None:
+            ax1.semilogx(
+                sr.constants.PERIODS,
+                cim_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+                c=sr.constants.LN_VS30_DIFF_COLORS[i],
+                linestyle="--",
+                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            )
+    
+    # ax1.legend()
+        ax1.text(
+        0.03,
+        0.03,
+        "Overprediction",
+        transform=ax1.transAxes,
+        fontsize=sr.constants.FIG_FONT_SIZE,
+        va="bottom",
+        ha="left",
+    )
+    ax1.text(
+        0.03,
+        0.97,
+        "Underprediction",
+        transform=ax1.transAxes,
+        fontsize=sr.constants.FIG_FONT_SIZE,
+        va="top",
+        ha="left",
+    )
+    if plot_labels is not None:
+        ax1.text(
+            -0.175,
+            0.98,
+            plot_labels[1],
+            transform=ax1.transAxes,
+            va="center",
+            ha="left",
+            fontsize=14,
+        )
+
+    # Residual Standard Deviation
+    ax2.plot(
+        sr.constants.PERIODS,
+        gnn_residual_corr_res_std[sr.constants.PSA_KEYS],
+        label="GNN-Residual",
+        c="black",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+    if cim_corr_residuals is not None:
+        ax2.plot(
+            sr.constants.PERIODS,
+            cim_corr_res_std[sr.constants.PSA_KEYS],
+            label="MVN-CIM",
+            c="black",
+            linestyle="--",
+            linewidth=sr.constants.FIG_LINEWIDTH,
+        )
+
+    for i, (cur_key, cur_group) in enumerate(gnn_residual_corr_residual_groups):
+        ax2.semilogx(
+            sr.constants.PERIODS,
+            gnn_residual_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+            label=f"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
+            c=sr.constants.LN_VS30_DIFF_COLORS[i],
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+        )
+        if cim_corr_res_std is not None:
+            ax2.semilogx(
+                sr.constants.PERIODS,
+                cim_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+                c=sr.constants.LN_VS30_DIFF_COLORS[i],
+                linestyle="--",
+                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            )
+    
+    ax2.legend()
+    fig.savefig(
+        output_dir / f"spatial_corr_vs30_gnn_residual.{sr.constants.FIG_FORMAT}"
+    )
     plt.close(fig)
 
 
