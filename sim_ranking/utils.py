@@ -3,8 +3,9 @@ from typing import Sequence, NamedTuple, Tuple, TYPE_CHECKING
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from sklearn.metrics.pairwise import haversine_distances
 
-from qcore.src_site_dist import calc_rrup_rjb
+from . import constants
 
 if TYPE_CHECKING:
     from .data_classes import LBSiteCorrelationData
@@ -21,15 +22,17 @@ def reverse_im_filename(im: str):
         return im[::-1].replace("p", ".", 1)[::-1]
     return im
 
+
 def get_im_filename(im: str):
     if im.startswith("pSA"):
         return im.replace(".", "p", 1)
     return im
 
+
 def get_nice_im_name(im: str, use_latex: bool = False):
     if im.startswith("pSA"):
         return f"pSA({im.split('_')[-1]}s)"
-    
+
     if use_latex:
         match im.lower():
             case "ds595":
@@ -40,20 +43,22 @@ def get_nice_im_name(im: str, use_latex: bool = False):
                 return im
     return im
 
+
 def get_pSA_period(im: str):
     if im.startswith("pSA"):
         return float(im.split("_")[-1])
     return None
 
+
 def get_emp_gm_mean_im_keys(ims: Sequence[str]):
     return [f"{im}_mean" for im in ims]
+
 
 def calculate_distance_matrix(
     stations: Sequence[str],
     locations_df: pd.DataFrame,
     site_lon_col: str = "lon",
     site_lat_col: str = "lat",
-    verbose: bool = False,
 ):
     """
     Given a set of stations and their locations (in lat, lon format),
@@ -69,29 +74,13 @@ def calculate_distance_matrix(
     site_lat_col: str
     site_lon_col: str
     """
-    distance_matrix = -1 * np.ones((len(stations), len(stations)), dtype=np.float32)
-    for i, station in tqdm(enumerate(stations), disable=not verbose, total=len(stations)):
-        cur_dist, _ = calc_rrup_rjb(
-            np.asarray(
-                [
-                    [
-                        locations_df.loc[station, site_lon_col],
-                        locations_df.loc[station, site_lat_col],
-                        0,
-                    ]
-                ]
-            ),
-            np.stack(
-                (
-                    locations_df.loc[stations, site_lon_col],
-                    locations_df.loc[stations, site_lat_col],
-                    np.zeros(len(stations)),
-                ),
-                axis=1,
-            ),
+    dist_matrix = (
+        haversine_distances(
+            np.radians(locations_df.loc[stations, [site_lat_col, site_lon_col]].values)
         )
-        distance_matrix[i, :] = cur_dist
-    return pd.DataFrame(index=stations, data=distance_matrix, columns=stations)
+        * constants.R_EARTH
+    )
+    return pd.DataFrame(data=dist_matrix, index=stations, columns=stations)
 
 
 def compute_degree_of_constraint(
@@ -133,3 +122,4 @@ def compute_degree_of_constraint(
         )
 
     return result_df
+

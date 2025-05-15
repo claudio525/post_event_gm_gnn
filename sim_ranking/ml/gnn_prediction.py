@@ -34,6 +34,7 @@ def predict_event(
     emp_gm_params: pd.DataFrame = None,
     obs_emp_res_df: pd.DataFrame = None,
     allow_self: bool = True,
+    verbose: bool = True,
 ):
     """
     Perform predictions using a trained GNN model for a specific event.
@@ -49,6 +50,15 @@ def predict_event(
     pred_site_df : pd.DataFrame
         DataFrame containing prediction site information.
         Also needs to include the required event-site information, such as rrup
+
+        Required columns:
+        - lon: Longitude of the site
+        - lat: Latitude of the site
+        - vs30: Vs30 value of the site in m/s
+        - z1p0: Z1.0 value of the site in metres
+        - z2p5: Z2.5 value of the site in kilometres
+        - rrup: R_Rup in kilometres
+        
     obs_site_df : pd.DataFrame
         DataFrame containing observation site information.
     obs_event_site_df : pd.DataFrame
@@ -63,6 +73,8 @@ def predict_event(
         Only used if run_config.use_emp_gm_model is True.
     allow_self : bool
         Whether to allow the prediction site to be one of the observation sites.
+    verbose : bool
+        Whether to print progress messages.
 
     Returns
     -------
@@ -103,7 +115,7 @@ def predict_event(
         ),
         axis=0,
     )
-    assert np.all(np.isin(all_sites, comb_site_df.index))
+    assert np.all(mlt.array_utils.pandas_isin(all_sites, comb_site_df.index.values.astype(str)))
 
     pred_event_site_df = pred_site_df.loc[:, "rrup"].copy().to_frame()
     pred_event_site_df["event_id"] = event_id
@@ -127,13 +139,15 @@ def predict_event(
         axis=0,
     )
 
-    print("Computing distance matrix")
-    dist_matrix = utils.calculate_distance_matrix(all_sites, comb_site_df)
+    if verbose:
+        print("Computing distance matrix")
+    dist_matrix = utils.calculate_distance_matrix(all_sites, comb_site_df).astype(np.float32)
 
     event_sites = {event_id: all_sites}
     event_int_sites = {event_id: int_sites}
 
-    print("Getting scalar features")
+    if verbose:
+        print("Getting scalar features")
     scalar_features = features.get_scalar_features(
         event_sites,
         event_info.to_frame().T,
@@ -142,10 +156,12 @@ def predict_event(
         run_config,
         constants.SCALAR_FEATURE_KEYS,
         dist_matrix,
+        verbose=verbose,
     )
 
     # Site combinations
-    print("Computing site combinations")
+    if verbose:
+        print("Computing site combinations")
     event_site_combs, event_used_sites = ml_data.compute_site_combinations(
         event_sites,
         event_int_sites,
@@ -160,8 +176,9 @@ def predict_event(
         allow_self=allow_self,
     )
     site_combs, used_sites = event_site_combs[event_id], event_used_sites[event_id]
-
-    print("Creating scalar feature dataframes")
+    
+    if verbose:
+        print("Creating scalar feature dataframes")
     event_scalar_feature_dfs, _ = ml_data.create_event_scalar_feature_dfs(
         event_used_sites, scalar_features, event_site_combs
     )
@@ -187,7 +204,7 @@ def predict_event(
         graph_data.append(cur_graph_data)
 
     result_df = _run_prediction(
-        model, graph_data, run_config, emp_gm_params=emp_gm_params
+        model, graph_data, run_config, emp_gm_params=emp_gm_params, verbose=verbose
     )
 
     # Add site information
@@ -421,6 +438,7 @@ def _run_prediction(
     graph_data: list[gdata.HeteroData],
     run_config: gnn_gm.RunConfig,
     emp_gm_params: pd.DataFrame = None,
+    verbose: bool = True,
 ):
 
     pred_im_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred")
@@ -429,7 +447,7 @@ def _run_prediction(
 
     results = []
     loader = gloader.DataLoader(graph_data, batch_size=1024, shuffle=False)
-    for cur_batch in tqdm(loader, desc="Running predictions"):
+    for cur_batch in tqdm(loader, desc="Running predictions", disable=not verbose):
         cur_batch = cur_batch.to(run_config.device)
 
         # Get predictions

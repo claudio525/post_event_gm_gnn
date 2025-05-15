@@ -3,6 +3,8 @@ from enum import Enum, auto, StrEnum
 
 import numpy as np
 
+R_EARTH = 6378.139
+
 class ObsDataSource(StrEnum):
     NZGMDB = "NZGMDB"
     NGAWest2 = "NGAWest2"
@@ -166,6 +168,8 @@ LN_VS30_DIFF_BIN_LABELS = ["0 - 0.25", "0.25 - 0.75", "0.75 - 2.5"]
 LN_VS30_DIFF_COLORS = ["blue", "purple", "red"]
 
 
+CHCH_REGION_EXTENDED = [172.334220, 172.821381, -43.669494, -43.275246]
+CHCH_REGION = [172.5, 172.821381, -43.669494, -43.42]
 CANTERBURY_REGION = [171.54, 173.12, -43.95, -43.22]
 CANTERBURY_REGION_EXTENDED = [171.57297981348268, 173.21996004180335, -43.95952294853966, -42.88754722262727]
 WELLINGTON_REGION = [172.639, 176.35, -42.427, -40.475]
@@ -174,6 +178,8 @@ REGION_MAPPINGS = {
     "canterbury": CANTERBURY_REGION,
     "canterbury_extended": CANTERBURY_REGION_EXTENDED,
     "wellington": WELLINGTON_REGION,
+    "chch_extended": CHCH_REGION_EXTENDED,
+    "chch": CHCH_REGION,
 }
 
 STATION_FN_NAME = "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land"

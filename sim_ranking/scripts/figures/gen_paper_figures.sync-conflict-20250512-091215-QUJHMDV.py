@@ -1349,37 +1349,23 @@ def spatial_corr_trends(
     assert gnn_only_results.index.equals(gnn_residual_results.index), "Index mismatch"
 
     # Get the correlations
-    print("Computing correlations")
     (
-        gnn_only_site_pair_corrs,
-        obs_site_pair_corrs,
-        cim_site_pair_corrs,
+        gnn_only_corr_residuals,
+        cim_corr_residuals,
+        _,
+        __,
+        ___,
         site_pairs_df,
     ) = sr.analysis.compute_site_int_obs_correlation_residuals(
         gnn_only_results, obs_data, emp_gm_params, cim_results=cim_results
     )
 
     (
-        gnn_residual_site_pair_corrs,
-        obs_site_pair_corrs_2,
+        gnn_residual_corr_residuals,
         *_,
     ) = sr.analysis.compute_site_int_obs_correlation_residuals(
         gnn_residual_results, obs_data, emp_gm_params
     )
-    assert obs_site_pair_corrs_2.equals(obs_site_pair_corrs)
-
-    # Compute fisher transform residuals
-    gnn_only_corr_residuals = sr.analysis.get_fisher_transform_residuals(
-        gnn_only_site_pair_corrs, obs_site_pair_corrs
-    )
-    gnn_residual_corr_residuals = sr.analysis.get_fisher_transform_residuals(
-        gnn_residual_site_pair_corrs, obs_site_pair_corrs
-    )
-    cim_corr_residuals = None
-    if cim_results is not None:
-        cim_corr_residuals = sr.analysis.get_fisher_transform_residuals(
-            cim_site_pair_corrs, obs_site_pair_corrs
-        )
 
     # Add site-to-site distance
     dist_matrix = sr.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
@@ -1419,7 +1405,6 @@ def spatial_corr_trends(
         cim_corr_res_std = cim_corr_residuals.std(axis=0)
 
     # Plot total bias and residual standard deviation
-    print("Plotting")
     fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
         sr.constants.FIG_SIZE,
         main_wspace=0.175,

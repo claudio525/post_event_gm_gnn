@@ -191,10 +191,11 @@ def predict_event_cIM(
     gm_params_df: pd.DataFrame,
     int_sites: np.ndarray[str],
     output_ffp: Path,
+    allow_self: bool = False,
 ):
     """
     Predict conditional IM distributions for a given event.
-    
+
     Parameters:
     -----------
     event_id : str
@@ -209,24 +210,33 @@ def predict_event_cIM(
         Sites for which to predict the conditional IM distributions.
     output_ffp : Path
         File path to save the resulting DataFrame in Parquet format.
+    allow_self : bool, optional
+        If True, allows the site of interest to be used
+        as an observation site for itself. Default is False.
     """
     assert np.all(gm_params_df["event_id"].values == event_id), "Mismatch in event_id"
     all_sites = np.union1d(int_sites, obs_sites)
-    assert np.all(mlt.array_utils.pandas_isin(all_sites, gm_params_df["site_id"])), "Missing GM parameters"
+    assert np.all(
+        mlt.array_utils.pandas_isin(all_sites, gm_params_df["site_id"])
+    ), "Missing GM parameters"
 
     # Compute distance matrix and correlations
     comb_site_df = pd.concat(
         [
             obs_data.site_df[["lon", "lat"]],
-            sites_df.loc[gm_params_df.loc[~np.isin(gm_params_df["site_id"], obs_data.site_df.index), "site_id"].values, ["lon", "lat"]],
+            sites_df.loc[
+                ~np.isin(sites_df.index, obs_data.site_df.index),
+                ["lon", "lat"],
+            ],
         ],
         axis=0,
     )
     print(f"Computing distance matrix for {len(all_sites)} sites")
-    dist_matrix = utils.calculate_distance_matrix(all_sites, comb_site_df, verbose=True)
+    dist_matrix = utils.calculate_distance_matrix(all_sites, comb_site_df)
     corr_data = DynamicLBSiteCorrelationsData(dist_matrix)
 
     # Compute conditional IM distributions
+    print(f"Computing conditional IM distributions for {len(int_sites)} sites")
     result_df = run_event_cim(
         event_id,
         int_sites,
@@ -239,9 +249,12 @@ def predict_event_cIM(
         obs_sites=obs_sites,
         allow_int_as_obs=True,
         verbose=True,
+        allow_self=allow_self,
     )
 
-    result_df[["lon", "lat"]] = comb_site_df.loc[result_df["site_int"], ["lon", "lat"]].values
+    result_df[["lon", "lat"]] = comb_site_df.loc[
+        result_df["site_int"], ["lon", "lat"]
+    ].values
     result_df.to_parquet(output_ffp)
 
 
@@ -267,6 +280,7 @@ def run_event_cim(
     obs_sites: np.ndarray[str] = None,
     allow_int_as_obs: bool = False,
     verbose: bool = False,
+    allow_self: bool = False,
 ):
     """
     Computes the conditional IM distribution for
@@ -293,10 +307,21 @@ def run_event_cim(
          IM distributions
     n_obs_sites: int
         Number of observation sites to use
+    obs_sites: array of strings, optional
+        Sites to use as observation sites.
+        If None, then uses all available sites
+        for the event.
     allow_int_as_obs: bool, optional
         If True then allows sites of interest to be used
         as observation sites for other sites of interest
         when computing the conditional IM distribution
+        Default is False.
+    verbose: bool, optional
+        If True, then prints progress
+    allow_self: bool, optional
+        If True, then allows the site of interest to be used
+        as an observation site for itself.
+        Default is False.
 
     Returns
     -------
@@ -304,6 +329,8 @@ def run_event_cim(
         The conditional IM distribution
         for the sites of interest and specified IMs
     """
+    assert (allow_self and allow_int_as_obs) or not allow_self
+
     obs_sites = obs_data.event_sites[event_id] if obs_sites is None else obs_sites
     if not allow_int_as_obs:
         obs_sites = obs_sites[~np.isin(obs_sites, int_sites)]
@@ -311,7 +338,11 @@ def run_event_cim(
     # Get the mask for the observations sites,
     # based on the observation sites selection algorithm
     obs_site_mask = get_observation_sites_mask(
-        n_obs_sites, int_sites, obs_sites, dist_matrix
+        n_obs_sites,
+        int_sites,
+        obs_sites,
+        dist_matrix,
+        allow_self=allow_self,
     )
 
     # Get the observed data for the observation sites
@@ -349,7 +380,12 @@ def run_event_cim(
             cur_obs_sites = obs_sites[
                 obs_site_mask.sel[cur_site_int, :, cur_im].values
             ].tolist()
-            cur_rel_sites = cur_obs_sites + [cur_site_int]
+            
+            # Get all relevant sites
+            if allow_self and cur_site_int in cur_obs_sites:
+                cur_rel_sites = cur_obs_sites
+            else:
+                cur_rel_sites = cur_obs_sites + [cur_site_int]
 
             # No observation sites, use marginal distribution
             if len(cur_obs_sites) == 0:
@@ -378,12 +414,25 @@ def run_event_cim(
 
             # Compute the conditional IM distribution
             cond_lnIM_mu, cond_lnIM_sigma = compute_cond_lnIM_dist(
-                cur_site_int, cur_gm_params_df, cur_obs_data, cur_R
+                cur_site_int,
+                cur_gm_params_df,
+                cur_obs_data,
+                cur_R,
+                allow_self=allow_self,
             )
 
             result_df.loc[cur_site_int, f"{cur_im}_cond_mean"] = cond_lnIM_mu
             result_df.loc[cur_site_int, f"{cur_im}_cond_std"] = cond_lnIM_sigma
             result_df.loc[cur_site_int, f"{cur_im}_n_obs_sites"] = len(cur_obs_sites)
+
+            assert (
+                not allow_self
+                or cur_site_int not in obs_sites
+                or (
+                    np.isclose(cond_lnIM_sigma, 0.0, atol=1e-4)
+                    and np.isclose(cond_lnIM_mu, cur_obs_data.loc[cur_site_int])
+                )
+            )
 
         result_df.at[cur_site_int, "n_obs_sites"] = result_df.at[
             cur_site_int, "obs_sites"
@@ -392,7 +441,9 @@ def run_event_cim(
     # Add the actual observed IMs at the site of interests
     int_sites_with_obs = int_sites[np.isin(int_sites, obs_data.event_sites[event_id])]
     result_df.loc[int_sites_with_obs, ims] = np.log(
-        obs_data.get_event_data(event_id, int_sites_with_obs).loc[int_sites_with_obs, ims]
+        obs_data.get_event_data(event_id, int_sites_with_obs).loc[
+            int_sites_with_obs, ims
+        ]
     )
 
     result_df["site_int"] = result_df.index.values.astype(str)
@@ -411,6 +462,7 @@ def get_observation_sites_mask(
     int_sites: np.ndarray,
     obs_sites: np.ndarray,
     distance_matrix: pd.DataFrame,
+    allow_self: bool = False,
 ):
     """
     Returns the observation site filter for
@@ -426,11 +478,15 @@ def get_observation_sites_mask(
         Array of observation sites.
     distance_matrix: pd.DataFrame
         DataFrame containing the distance matrix between sites.
+    allow_self: bool, optional
+        If True, allows the site of interest to be used
+        as an observation site for itself.
+        Default is False.
 
     Returns
     -------
     pd.DataFrame
-        DataFrame with boolean values indicating the 
+        DataFrame with boolean values indicating the
         selected observation sites for each site of interest.
     """
     # Less observation sites than required
@@ -461,9 +517,10 @@ def get_observation_sites_mask(
         )
 
     # Don't include stations of interest
-    int_obs_sites = int_sites[np.isin(int_sites, obs_sites)]
-    for cur_station in int_obs_sites:
-        obs_station_mask_df.loc[cur_station, cur_station] = False
+    if not allow_self:
+        int_obs_sites = int_sites[np.isin(int_sites, obs_sites)]
+        for cur_station in int_obs_sites:
+            obs_station_mask_df.loc[cur_station, cur_station] = False
 
     return obs_station_mask_df
 
@@ -473,6 +530,7 @@ def compute_cond_lnIM_dist(
     gm_params_df: pd.DataFrame,
     obs_lnIM_series: pd.Series,
     R: pd.DataFrame,
+    allow_self: bool = False,
 ):
     """
     Computes the lnIM distribution for a site of interest
@@ -509,11 +567,16 @@ def compute_cond_lnIM_dist(
 
     # Sanity checks
     assert np.all(np.isin(obs_stations, gm_params_df.index))
-    assert site_id in gm_params_df.index and site_id not in obs_stations
+    assert allow_self or site_id in gm_params_df.index and site_id not in obs_stations
 
     # Relevant stations (Observation sites & Sites of interest)
+    # rel_stations = obs_stations if allow_self else np.concatenate(([site_id], obs_stations))
     rel_stations = np.concatenate(([site_id], obs_stations))
-    gm_params_df = gm_params_df.loc[rel_stations]
+
+    if allow_self and site_id in obs_stations:
+        gm_params_df = gm_params_df.loc[obs_stations]
+    else:
+        gm_params_df = gm_params_df.loc[rel_stations]
 
     # Compute covariance matrix of within-event residuals
     # C_c(i,j) = rho_{i,j} * \delta_{W_i} * \delta_{W_j}
@@ -544,20 +607,14 @@ def compute_cond_lnIM_dist(
         obs_lnIM_series.loc[obs_stations] - gm_params_df.loc[obs_stations, "mu"]
     )
 
-    if np.all(gm_params_df.sigma_between == 0):
-        # Between-event residual is zero
-        # when the GM parameters are computed
-        # from simulation realisations
-        between_residual = 0.0
-    else:
-        # Compute the between event-residual using the observation stations
-        # First part of Equation 3 numerator is just row-wise sum of inverse C_c
-        numerator = np.einsum("ki, i -> ", C_c_inv, total_residual)
-        denom = np.sum(
-            (1 / gm_params_df.loc[obs_stations].sigma_between.values ** 2)
-            + np.sum(C_c_inv, axis=1)
-        )
-        between_residual = numerator / denom
+    # Compute the between event-residual using the observation stations
+    # First part of Equation 3 numerator is just row-wise sum of inverse C_c
+    numerator = np.einsum("ki, i -> ", C_c_inv, total_residual)
+    denom = np.sum(
+        (1 / gm_params_df.loc[obs_stations].sigma_between.values**2)
+        + np.sum(C_c_inv, axis=1)
+    )
+    between_residual = numerator / denom
 
     # Compute the within-event residual
     within_residual = total_residual - between_residual
@@ -592,12 +649,15 @@ def compute_cond_lnIM_dist(
         within_residual.values,
     )
     cond_within_residual_sigma = np.sqrt(
-        gm_params_df.loc[site_id, "sigma_within"] ** 2
-        - np.einsum(
-            "i, ij, j -> ",
-            within_residual_cov.values[0, 1:],
-            C_c_inv,
-            within_residual_cov.values[1:, 0],
+        max(
+            gm_params_df.loc[site_id, "sigma_within"] ** 2
+            - np.einsum(
+                "i, ij, j -> ",
+                within_residual_cov.values[0, 1:],
+                C_c_inv,
+                within_residual_cov.values[1:, 0],
+            ),
+            0.0,
         )
     )
 

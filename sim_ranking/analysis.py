@@ -195,7 +195,7 @@ def compute_site_int_obs_correlations(
 
             site_pair_corrs.loc[cur_ix, cur_im] = cur_corr
 
-    return site_pair_corrs
+    return site_pair_corrs.astype("float")
 
 
 def compute_site_int_obs_correlation_residuals(
@@ -204,7 +204,6 @@ def compute_site_int_obs_correlation_residuals(
     emp_gm_params: pd.DataFrame,
     cim_results: pd.DataFrame = None,
 ):
-    
     # Get the site-pairs with at least 10 predictions/records
     site_pairs_df, site_pair_events = compute_corr_site_pairs(gnn_results)
 
@@ -251,11 +250,43 @@ def compute_site_int_obs_correlation_residuals(
     assert emp_cim_res_site_pair_corrs is None or np.all(emp_gnn_res_site_pair_corrs.index == emp_cim_res_site_pair_corrs.index)
     assert np.all(emp_gnn_res_site_pair_corrs.index == site_pairs_df.index)
 
-    # Compute correlation residuals with respect to observed correlations
-    gnn_corr_residuals = emp_obs_res_site_pair_corrs - emp_gnn_res_site_pair_corrs
+    return emp_gnn_res_site_pair_corrs, emp_obs_res_site_pair_corrs, emp_cim_res_site_pair_corrs, site_pairs_df
 
-    cim_corr_residuals = None
-    if emp_cim_res_site_pair_corrs is not None:
-        cim_corr_residuals = emp_obs_res_site_pair_corrs - emp_cim_res_site_pair_corrs
 
-    return gnn_corr_residuals, cim_corr_residuals, emp_gnn_res_site_pair_corrs, emp_obs_res_site_pair_corrs, emp_cim_res_site_pair_corrs, site_pairs_df
+def fisher_transform(rho: np.ndarray) -> np.ndarray:
+    """
+    Fisher transform for correlation coefficients.
+    Transforms the correlation coefficient to a z-score.
+
+    Parameters
+    ----------
+    rho: np.ndarray
+        Correlation coefficient
+
+    Returns
+    -------
+    np.ndarray
+        Fisher transformed z-score
+    """
+    return 0.5 * np.log((1 + rho) / (1 - rho))
+
+
+def get_fisher_transform_residuals(
+    pred_site_pair_corrs: pd.DataFrame,
+    obs_site_pair_corrs: pd.DataFrame,
+):
+    # Apply Fisher transform to the correlations
+    pred_site_pair_corrs = pd.DataFrame(
+        data=fisher_transform(pred_site_pair_corrs.values),
+        index=pred_site_pair_corrs.index,
+        columns=pred_site_pair_corrs.columns,
+    )
+    obs_site_pair_corrs = pd.DataFrame(
+        data=fisher_transform(obs_site_pair_corrs.values),
+        index=obs_site_pair_corrs.index,
+        columns=obs_site_pair_corrs.columns,
+    )
+
+    # Compute the residuals
+    res_site_pair_corrs = obs_site_pair_corrs - pred_site_pair_corrs
+    return res_site_pair_corrs

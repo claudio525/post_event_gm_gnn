@@ -10,7 +10,8 @@ import numpy as np
 
 from qcore import src_site_dist, grid
 from source_modelling import srf
-import empirical.util.estimations as emp_estimations
+# import empirical.util.estimations as emp_estimations
+import oq_wrapper as oqw
 import ml_tools as mlt
 
 from . import constants
@@ -502,7 +503,7 @@ def add_srf_site_to_source_distances(
         nodal_plane_info["strike"],
         nodal_plane_info["dip"],
         nodal_plane_info["rake"],
-    ) = emp_estimations.calculate_avg_strike_dip_rake(
+    ) = oqw.estimations.calculate_avg_strike_dip_rake(
         srf_model.planes, avg_rake, total_slip
     )
 

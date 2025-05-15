@@ -26,7 +26,7 @@ def get_obs_sites(
 
 
 def exp_formatter(y, pos):
-    return f"{np.exp(y):.4f}"
+    return f"{np.exp(y):.3f}"
     # return f"{np.exp(y):.2e}"
 
 

@@ -1,13 +1,9 @@
-import os.path
 from pathlib import Path
-from typing import List, Dict, Any
 
 import pandas as pd
 import numpy as np
 import typer
-from tqdm import tqdm
 
-import ml_tools as mlt
 import sim_ranking as sr
 
 app = typer.Typer()
@@ -51,6 +47,7 @@ def predict_event_cIM(
     output_ffp: Path,
     non_uniform_grid_dir: Path = None,
     uniform_site_ffp: Path = None,
+    allow_self: bool = False,
 ):
     """Compute single event conditional IM distribution for the non-uniform grid sites"""
     assert (
@@ -92,8 +89,10 @@ def predict_event_cIM(
         obs_data,
         obs_data.get_event_data(event_id).index.values.astype(str),
         gm_params_df,
-        grid_gm_params_df["site_id"].values.astype(str),
+        # site_df.index.values.astype(str),
+        np.asarray(["KPOC"]),
         output_ffp,
+        allow_self=allow_self,
     )
 
 

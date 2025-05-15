@@ -31,8 +31,6 @@ def event_site_map(
     """
     Create a map plot of the event and the site locations
     """
-    from pygmt_helper import plotting
-
     assert max_lon is None or min_lon is not None
 
     obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
@@ -63,7 +61,7 @@ def event_site_map(
         region=(min_lon, max_lon, min_lat, max_lat),
         map_data=map_data,
         plot_kwargs={
-            "topo_cmap": "gray",  
+            "topo_cmap": "gray",
             "topo_cmap_min": 0,
             "topo_cmap_max": 1500,
             "topo_cmap_inc": 25,
@@ -148,16 +146,17 @@ def plot_event_cim_predictions(
     event_id: str,
     output_dir: Path,
     ims: List[str],
-    map_data_ffp: Path = None,
-    region: tuple[float, float, float, float] = sr.constants.CANTERBURY_REGION,
+    region_key: str = "canterbury",
+    use_map_data: bool = False,
+    use_high_res_topo: bool = False,
 ):
+    region = sr.constants.REGION_MAPPINGS[region_key]
+
     # Load map data
-    print(f"Loading map data from {map_data_ffp}")
-    map_data = (
-        plotting.NZMapData.load(map_data_ffp, high_res_topo=True)
-        if map_data_ffp is not None
-        else None
-    )
+    map_data = None
+    if use_map_data:
+        print("Loading map data")
+        map_data = plotting.NZMapData.load(high_res_topo=use_high_res_topo)
 
     sr.plot_spatial.plot_event_cim_predictions(
         cim_results_ffp,
@@ -177,16 +176,17 @@ def plot_event_gmm_predictions(
     event_id: str,
     output_dir: Path,
     ims: List[str],
-    map_data_ffp: Path = None,
-    region: tuple[float, float, float, float] = sr.constants.CANTERBURY_REGION,
+    region_key: str = "canterbury",
+    use_map_data: bool = False,
+    use_high_res_topo: bool = False,
 ):
+    region = sr.constants.REGION_MAPPINGS[region_key]
+
     # Load map data
-    print(f"Loading map data from {map_data_ffp}")
-    map_data = (
-        plotting.NZMapData.load(map_data_ffp, high_res_topo=True)
-        if map_data_ffp is not None
-        else None
-    )
+    map_data = None
+    if use_map_data:
+        print("Loading map data")
+        map_data = plotting.NZMapData.load(high_res_topo=use_high_res_topo)
 
     sr.plot_spatial.plot_event_gmm_predictions(
         emp_gm_params_ffp,
@@ -205,16 +205,17 @@ def plot_event_gnn_predictions(
     event_predictions_ffp: Path,
     output_dir: Path,
     ims: List[str],
-    map_data_ffp: Path = None,
-    region: tuple[float, float, float, float] = sr.constants.CANTERBURY_REGION,
+    region_key: str = "canterbury",
+    use_map_data: bool = False,
+    use_high_res_topo: bool = False,
 ):
+    region = sr.constants.REGION_MAPPINGS[region_key]
+
     # Load map data
-    print(f"Loading map data from {map_data_ffp}")
-    map_data = (
-        plotting.NZMapData.load(map_data_ffp, high_res_topo=True)
-        if map_data_ffp is not None
-        else None
-    )
+    map_data = None
+    if use_map_data:
+        print("Loading map data")
+        map_data = plotting.NZMapData.load(high_res_topo=use_high_res_topo)
 
     sr.plot_spatial.plot_event_gnn_predictions(
         model_dir,
@@ -224,6 +225,7 @@ def plot_event_gnn_predictions(
         map_data=map_data,
         region=region,
     )
+
 
 @app.command("gen-event-prediction-plots")
 def get_event_prediction_plots(
@@ -237,16 +239,17 @@ def get_event_prediction_plots(
     nzgmdb_ffp: Path,
     event_id: str,
     ims: List[str],
-    map_data_ffp: Path = None,
-    region: tuple[float, float, float, float] = sr.constants.CANTERBURY_REGION,
+    region_key: str = "canterbury",
+    use_map_data: bool = False,
+    use_high_res_topo: bool = False,
 ):
+    region = sr.constants.REGION_MAPPINGS[region_key]
+
     # Load map data
-    print(f"Loading map data from {map_data_ffp}")
-    map_data = (
-        plotting.NZMapData.load(map_data_ffp, high_res_topo=True)
-        if map_data_ffp is not None
-        else None
-    )
+    map_data = None
+    if use_map_data:
+        print("Loading map data")
+        map_data = plotting.NZMapData.load(high_res_topo=use_high_res_topo)
 
     print("Plotting GNN predictions")
     sr.plot_spatial.plot_event_gnn_predictions(
@@ -275,6 +278,36 @@ def get_event_prediction_plots(
         nzgmdb_ffp,
         event_id,
         cim_out_dir,
+        ims,
+        map_data=map_data,
+        region=region,
+    )
+
+
+@app.command("plot-event-cim-gnn-residuals")
+def plot_event_cim_gnn_residuals(
+    gnn_model_dir: Path,
+    gnn_results_ffp: Path,
+    cim_results_ffp: Path,
+    output_dir: Path,
+    ims: List[str],
+    region_key: str = "canterbury",
+    use_map_data: bool = False,
+    use_high_res_topo: bool = False,
+):
+    region = sr.constants.REGION_MAPPINGS[region_key]
+
+    # Load map data
+    map_data = None
+    if use_map_data:
+        print("Loading map data")
+        map_data = plotting.NZMapData.load(high_res_topo=use_high_res_topo)
+
+    sr.plot_spatial.plot_event_cim_gnn_residuals(
+        gnn_model_dir,
+        gnn_results_ffp,
+        cim_results_ffp,
+        output_dir,
         ims,
         map_data=map_data,
         region=region,
