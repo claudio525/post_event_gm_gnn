@@ -16,7 +16,6 @@ import ml_tools as mlt
 
 from . import constants
 from .data_classes import ObservedData
-from . import data
 
 SRF_POINTS_PER_KM = 10
 
@@ -210,7 +209,7 @@ def compute_event_sites_emp_gm_params(
     obs_event_data = obs_data.get_event_data(event_id)
 
     # Load non-uniform grid data
-    rupture_df = data.add_srf_site_to_source_distances(
+    rupture_df = add_srf_site_to_source_distances(
         site_df,
         srf_ffp,
         event_id,
@@ -379,7 +378,7 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
             & (obs_data.record_df.mag >= 4.5)
         ].index.values.astype(str)
     )
-
+    
     obs_data.filter_record_ids(records_to_keep)
 
     # Drop duplicates

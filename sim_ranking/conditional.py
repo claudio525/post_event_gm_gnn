@@ -553,6 +553,10 @@ def compute_cond_lnIM_dist(
     R: dataframe
         Correlation matrix for all
         relevant sites (site of interest + observation sites)
+    allow_self: bool, optional
+        If True, allows the site of interest to be used
+        as an observation site for itself.
+        Default is False.
 
     Returns
     -------

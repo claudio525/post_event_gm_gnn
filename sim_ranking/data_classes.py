@@ -229,8 +229,7 @@ class ObservedData:
 
     def metadata_filter(
         self,
-        filter_dict: dict[str, tuple[float, float]] = None,
-        record_ids: Sequence[str] = None,
+        filter_dict: dict[str, tuple[float, float]],
     ):
         """
         Performs filtering on the record metadata.
@@ -243,25 +242,19 @@ class ObservedData:
             value (tuple, bool) to filter on.
             E.g. {"mag": (5.0, 6.0), "rrup": (0.0, 10.0),
             "is_ground_level": True}
-        record_ids: array of strings
-            Record IDs to keep.
         """
-        if filter_dict is not None:
-            for cur_key, cur_filter in filter_dict.items():
-                if isinstance(cur_filter, tuple):
-                    self.record_df = self.record_df[
-                        (self.record_df[cur_key] >= cur_filter[0])
-                        & (self.record_df[cur_key] <= cur_filter[1])
-                    ]
-                elif isinstance(cur_filter, bool):
-                    self.record_df = self.record_df.loc[
-                        self.record_df[cur_key] == cur_filter
-                    ]
-                else:
-                    raise ValueError(f"Unknown filter type: {type(cur_filter)}")
-
-        if record_ids is not None:
-            self.record_df = self.record_df[self.record_df.index.isin(record_ids)]
+        for cur_key, cur_filter in filter_dict.items():
+            if isinstance(cur_filter, tuple):
+                self.record_df = self.record_df[
+                    (self.record_df[cur_key] >= cur_filter[0])
+                    & (self.record_df[cur_key] <= cur_filter[1])
+                ]
+            elif isinstance(cur_filter, bool):
+                self.record_df = self.record_df.loc[
+                    self.record_df[cur_key] == cur_filter
+                ]
+            else:
+                raise ValueError(f"Unknown filter type: {type(cur_filter)}")
 
         self.__reset_cache()
         return self

@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.interpolate import LinearNDInterpolator, RegularGridInterpolator
+from scipy.interpolate import RegularGridInterpolator
 
 # Short range coregionalization matrix, B1
 B1 = np.array(

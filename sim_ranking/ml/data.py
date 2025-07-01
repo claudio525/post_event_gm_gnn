@@ -348,6 +348,8 @@ def get_valid_site_ints_Lee2024(
         at least one event
     valid_event_int_sites: dict
         Valid sites of interests per event
+    record_ids: np.ndarray
+        Valid record ids
 
     References
     ----------

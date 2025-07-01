@@ -40,14 +40,23 @@ def plot_im_values(
     fig = plotting.gen_region_fig(
         region=region,
         map_data=map_data,
-        # plot_kwargs=dict(frame_args=["+n"]),
+        plot_kwargs={
+            "topo_cmap": "gray",
+            "topo_cmap_min": 0,
+            "topo_cmap_max": 1500,
+            "topo_cmap_inc": 25,
+            "topo_cmap_reverse": True,
+            "land_color": "white",
+            "road_pen_color": "black",
+            "highway_pen_color": "orange",
+        },
         config_options=dict(
-            MAP_FRAME_TYPE="graph",
+            MAP_FRAME_TYPE="plain",
             FORMAT_GEO_MAP="ddd.xx",
             MAP_GRID_PEN="0.5p,gray",
             MAP_TICK_PEN_PRIMARY="1p,black",
-            MAP_FRAME_PEN="thinner,black",
-            MAP_FRAME_AXES="WSEN",
+            MAP_FRAME_PEN="1p,black",
+            MAP_FRAME_AXES="WSne",
             # FONT_ANNOT_PRIMARY="7p,Helvetica,black",
             # FONT_LABEL="7p",  # Font size for axis labels
             # FONT_TITLE="9p",  # Font size for the title
@@ -67,7 +76,7 @@ def plot_im_values(
         continuous_cmap=True,
         reverse_cmap=True,
         plot_contours=True,
-        transparency=50,
+        transparency=25,
     )
 
     # Plot the prediction sites
@@ -267,7 +276,7 @@ def plot_event_gnn_predictions(
             obs_site_df.loc[cur_obs_sites],
             region,
             map_data=map_data,
-            output_ffp=output_dir / f"{event_id}_{utils.get_im_filename(cur_im)}.png",
+            output_ffp=output_dir / f"gnn_{event_id}_{utils.get_im_filename(cur_im)}.png",
         )
 
 
@@ -304,7 +313,7 @@ def plot_event_gmm_predictions(
             obs_site_df,
             region,
             map_data=map_data,
-            output_ffp=output_dir / f"{event_id}_{utils.get_im_filename(cur_im)}.png",
+            output_ffp=output_dir / f"gmm_{event_id}_{utils.get_im_filename(cur_im)}.png",
         )
 
 
@@ -380,7 +389,7 @@ def plot_event_cim_predictions(
             obs_site_df.loc[cur_obs_sites],
             region,
             map_data=map_data,
-            output_ffp=output_dir / f"{event_id}_{utils.get_im_filename(cur_im)}.png",
+            output_ffp=output_dir / f"cim_{event_id}_{utils.get_im_filename(cur_im)}.png",
         )
 
 

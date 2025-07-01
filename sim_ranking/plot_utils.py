@@ -13,7 +13,7 @@ def get_pSA_bias_residual_fig(
     std_y_axis_limits: tuple[float, float] = (0.0, 1.0),
 ):
     """
-    Create a figure for bias and residual standard deviation plots.
+    Create a figure for pSA bias and residual standard deviation plots.
 
     Parameters
     ----------

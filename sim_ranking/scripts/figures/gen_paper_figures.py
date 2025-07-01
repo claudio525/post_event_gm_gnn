@@ -27,18 +27,38 @@ def mag_rrup_scatter(
     print("Using figure size: ", sr.constants.FIG_SIZE)
     print("Using figure format: ", sr.constants.FIG_FORMAT)
 
-    nzgmdb_df = pd.read_csv(
-        nzgmdb_ffp,
-        dtype={"evid": str, "loc": str},
-        engine="c",
-        index_col="record_id",
-    ).sort_index()
+    # nzgmdb_df = pd.read_csv(
+    #     nzgmdb_ffp,
+    #     dtype={"evid": str, "loc": str},
+    #     engine="c",
+    #     index_col="record_id",
+    # ).sort_index()
 
     obs_data = sr.ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
+    obs_data = obs_data.to_event_site_index()
+    # obs_data = obs_data.drop_nan()
 
+    # # Ignore tectonic types other than 
+    # # crustal, subduction interface, and subduction slab
+    # records_to_keep = obs_data.record_df[
+    #     obs_data.record_df["tect_type"].isin(
+    #         [
+    #             sr.constants.TectonicType.CRUSTAL,
+    #             sr.constants.TectonicType.SUBDUCTION_INTERFACE,
+    #             sr.constants.TectonicType.SUBDUCTION_SLAB,
+    #         ]
+    #     )
+    # ].index.values.astype(str)
+    # obs_data = obs_data.filter_record_ids(records_to_keep)
+
+    # Load basic filtered data
+    filtered_obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
+
+    # Apply Lee magnitude-distance filter
     _, __, valid_record_ids = sr.ml.data.get_valid_site_ints_Lee2024(
-        obs_data.event_sites, obs_data.record_df.drop(columns=obs_data.ims)
+    filtered_obs_data.event_sites, filtered_obs_data.record_df.drop(columns=filtered_obs_data.ims)
     )
+    filtered_obs_data = filtered_obs_data.filter_record_ids(valid_record_ids)
 
     fig, axs = plt.subplot_mosaic(
         [["histx", "."], ["scatter", "histy"]],
@@ -53,20 +73,20 @@ def mag_rrup_scatter(
 
     # Scatter plot
     ax_scatter.scatter(
-        nzgmdb_df["r_rup"],
-        nzgmdb_df["mag"],
+        obs_data.record_df["rrup"],
+        obs_data.record_df["mag"],
         s=2.5,
         c="grey",
         alpha=0.5,
-        label=f"All records - N: {nzgmdb_df.shape[0]}",
+        label=f"All records - N: {obs_data.n_records}",
     )
     ax_scatter.scatter(
-        obs_data.record_df.loc[valid_record_ids, "rrup"],
-        obs_data.record_df.loc[valid_record_ids, "mag"],
+        filtered_obs_data.record_df["rrup"],
+        filtered_obs_data.record_df["mag"],
         s=2.5,
         c="red",
         alpha=0.5,
-        label=f"Filtered records - N: {valid_record_ids.shape[0]}",
+        label=f"Filtered records - N: {filtered_obs_data.n_records}",
     )
     ax_scatter.plot(
         sr.constants.MW_RRUP_LIMITS[:, 1],
@@ -84,7 +104,7 @@ def mag_rrup_scatter(
     ax_scatter.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
 
     ax_histx.hist(
-        obs_data.record_df.loc[valid_record_ids, "rrup"],
+        filtered_obs_data.record_df["rrup"],
         bins=np.logspace(np.log10(0.1), np.log10(1000), n_rrup_bins),
         color="red",
     )
@@ -94,7 +114,7 @@ def mag_rrup_scatter(
     ax_histx.set_xticklabels([])
 
     ax_histy.hist(
-        obs_data.record_df.loc[valid_record_ids, "mag"],
+        filtered_obs_data.record_df["mag"],
         bins=n_mag_bins,
         color="red",
         orientation="horizontal",
@@ -2077,15 +2097,8 @@ def ind_scenario_pSA(
 
     dist_matrix = sr.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
 
-    # obs_site_cmap = LinearSegmentedColormap.from_list(
-    # "gray_to_black", [(0, "gray"), (1, "black")], N=256,
-    # )
-
     obs_color_boundaries = np.array([0, 1.0, 2.5, 5.0, 10.0, 30.0])
-    # obs_colors = sns.color_palette("viridis_r", n_colors=5)
     obs_colors = sns.color_palette("hls", 5)
-    # cmap = ListedColormap(t)
-    # obs_site_cmap = BoundaryNorm(color_boundaries, cmap.N)
 
     site_ints = obs_data.event_sites[event_id]
     for cur_site_int in tqdm(site_ints):
@@ -2105,7 +2118,7 @@ def ind_scenario_pSA(
         for cur_obs_site in cur_obs_sites:
             cur_obs_site_id = f"{event_id}_{cur_obs_site}"
 
-            cur_line,  = ax.plot(
+            (cur_line,) = ax.plot(
                 sr.constants.PERIODS,
                 np.log(
                     obs_data.record_df.loc[
@@ -2126,7 +2139,7 @@ def ind_scenario_pSA(
             obs_lines.append(cur_line)
 
         # Empirical GM
-        emp_line, = ax.plot(
+        (emp_line,) = ax.plot(
             sr.constants.PERIODS,
             emp_gm_params.loc[cur_id, sr.constants.GMM_PRED_PSA_KEYS],
             label="Empirical GM",
@@ -2135,7 +2148,7 @@ def ind_scenario_pSA(
         )
 
         # cIM
-        cim_line, = ax.plot(
+        (cim_line,) = ax.plot(
             sr.constants.PERIODS,
             cim_results.loc[cur_id, sr.constants.CIM_PRED_PSA_KEYS],
             label="MVN-CIM",
@@ -2174,10 +2187,10 @@ def ind_scenario_pSA(
         # )
 
         # # GNN Only
-        # ax.plot(
+        # gnn_line, = ax.plot(
         #     sr.constants.PERIODS,
         #     gnn_only_pred_df.loc[cur_id, sr.constants.GNN_PRED_PSA_KEYS],
-        #     label="GNN-Only",
+        #     label="GNN",
         #     c="blue",
         #     linewidth=sr.constants.FIG_LINEWIDTH,
         # )
@@ -2199,7 +2212,7 @@ def ind_scenario_pSA(
         # )
 
         # GNN Residual
-        gnn_res_line, = ax.plot(
+        (gnn_line,) = ax.plot(
             sr.constants.PERIODS,
             gnn_residual_pred_df.loc[cur_id, sr.constants.GNN_PRED_PSA_KEYS],
             label="GNN-Residual",
@@ -2223,6 +2236,7 @@ def ind_scenario_pSA(
             color="purple",
             alpha=0.2,
         )
+
         # ax.plot(
         #     sr.constants.PERIODS,
         #     gnn_residual_pred_df.loc[cur_id, sr.constants.GNN_PRED_PSA_KEYS].values
@@ -2241,7 +2255,7 @@ def ind_scenario_pSA(
         # )
 
         # Observed
-        obs_line, = ax.plot(
+        (obs_line,) = ax.plot(
             sr.constants.PERIODS,
             np.log(
                 obs_data.record_df.loc[cur_id, sr.constants.PSA_KEYS].values.astype(
@@ -2266,7 +2280,9 @@ def ind_scenario_pSA(
 
         ax.set_ylim(np.log(0.005), np.log(5.0))
 
-        legend_1 = ax.legend(handles=[emp_line, obs_line, gnn_res_line, cim_line], loc="upper right")
+        legend_1 = ax.legend(
+            handles=[emp_line, obs_line, gnn_line, cim_line], loc="upper right"
+        )
         ax.add_artist(legend_1)
 
         ax.legend(handles=obs_lines, loc="lower left")

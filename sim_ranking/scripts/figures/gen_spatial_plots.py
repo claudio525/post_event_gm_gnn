@@ -16,23 +16,18 @@ app = typer.Typer()
 @app.command("event-site-map")
 def event_site_map(
     event: str,
-    max_lon: float,
-    min_lon: float,
-    max_lat: float,
-    min_lat: float,
     nzgmdb_ffp: Path,
     output_ffp: Path,
     site_int_lon: float = None,
     site_int_lat: float = None,
     site_int_ids: List[str] = None,
     val_int_site_ids_ffp: Path = None,
+    region_key: str = "canterbury",
     use_map_data: bool = False,
 ):
     """
     Create a map plot of the event and the site locations
     """
-    assert max_lon is None or min_lon is not None
-
     obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
     obs_sites = obs_data.record_df.loc[
         obs_data.record_df.event_id == event, "site_id"
@@ -58,7 +53,7 @@ def event_site_map(
 
     # Create figure
     fig = plotting.gen_region_fig(
-        region=(min_lon, max_lon, min_lat, max_lat),
+        region = sr.constants.REGION_MAPPINGS[region_key],
         map_data=map_data,
         plot_kwargs={
             "topo_cmap": "gray",
@@ -70,23 +65,16 @@ def event_site_map(
             "road_pen_color": "black",
             "highway_pen_color": "orange",
         },
-        # plot_kwargs=dict(frame_args=["+n"]),
-        # config_options=dict(
-        #     MAP_FRAME_TYPE="plain",
-        #     FORMAT_GEO_MAP="ddd.xx",
-        #     MAP_FRAME_PEN="thinner,black",
-        #     FONT_ANNOT_PRIMARY="6p,Helvetica,black",
-        # ),
         config_options=dict(
-            MAP_FRAME_TYPE="graph",
+            MAP_FRAME_TYPE="plain",
             FORMAT_GEO_MAP="ddd.xx",
             MAP_GRID_PEN="0.5p,gray",
             MAP_TICK_PEN_PRIMARY="1p,black",
-            MAP_FRAME_PEN="thinner,black",
-            MAP_FRAME_AXES="WSEN",
-            FONT_ANNOT_PRIMARY="7p,Helvetica,black",
-            FONT_LABEL="7p",  # Font size for axis labels
-            FONT_TITLE="9p",  # Font size for the title
+            MAP_FRAME_PEN="1p,black",
+            MAP_FRAME_AXES="WSne",
+            # FONT_ANNOT_PRIMARY="7p,Helvetica,black",
+            # FONT_LABEL="7p",  # Font size for axis labels
+            # FONT_TITLE="9p",  # Font size for the title
         ),
     )
 
@@ -97,7 +85,7 @@ def event_site_map(
             rake=event_data.rake,
             magnitude=event_data.mag,
         ),
-        scale=f"{0.05 * event_data.mag}c",
+        scale=f"{0.1 * event_data.mag}c",
         longitude=event_data.lon,
         latitude=event_data.lat,
         depth=event_data.depth,
@@ -109,7 +97,7 @@ def event_site_map(
     fig.plot(
         x=obs_data.site_df.loc[obs_sites, "lon"].values,
         y=obs_data.site_df.loc[obs_sites, "lat"].values,
-        style="t0.25c",
+        style="t0.4c",
         fill="darkblue",
         pen="0.1p,darkblue",
     )
@@ -119,7 +107,7 @@ def event_site_map(
         fig.plot(
             x=obs_data.site_df.loc[site_int_ids, "lon"].values,
             y=obs_data.site_df.loc[site_int_ids, "lat"].values,
-            style="a0.3c",
+            style="a0.5c",
             fill="red",
             pen="0.1p,black",
         )
@@ -127,7 +115,7 @@ def event_site_map(
         fig.plot(
             x=site_int_lon,
             y=site_int_lat,
-            style="a0.3c",
+            style="a0.5c",
             fill="red",
             pen="0.1p,black",
         )

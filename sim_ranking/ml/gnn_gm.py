@@ -633,7 +633,7 @@ def run_model_training(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # TMP
-    pd.to_pickle(train_graph_data, out_dir / "train_graph_data.pickle")
+    # pd.to_pickle(train_graph_data, out_dir / "train_graph_data.pickle")
 
     # Save the training sites and validation sites
     np.save(out_dir / "val_int_sites.npy", val_int_sites)
