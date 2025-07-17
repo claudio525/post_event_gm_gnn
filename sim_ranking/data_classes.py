@@ -1,13 +1,11 @@
 from typing import Sequence, Optional
 from pathlib import Path
-from enum import StrEnum, Enum, auto
+from enum import StrEnum
 
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
 
 import ml_tools as mlt
-import sha_calc as sha
 from labelled_data_array import LabelledDataArray
 
 from . import constants

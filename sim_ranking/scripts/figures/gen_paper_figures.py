@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
-from matplotlib.colors import LinearSegmentedColormap, ListedColormap, BoundaryNorm
 import typer
 import seaborn as sns
 from tqdm import tqdm
@@ -26,17 +25,10 @@ def mag_rrup_scatter(
     """
     print("Using figure size: ", sr.constants.FIG_SIZE)
     print("Using figure format: ", sr.constants.FIG_FORMAT)
-
-    # nzgmdb_df = pd.read_csv(
-    #     nzgmdb_ffp,
-    #     dtype={"evid": str, "loc": str},
-    #     engine="c",
-    #     index_col="record_id",
-    # ).sort_index()
+    print("Using figure dpi: ", sr.constants.FIG_DPI)
 
     obs_data = sr.ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
     obs_data = obs_data.to_event_site_index()
-    # obs_data = obs_data.drop_nan()
 
     # # Ignore tectonic types other than 
     # # crustal, subduction interface, and subduction slab
@@ -66,6 +58,7 @@ def mag_rrup_scatter(
         height_ratios=(1, 4),
         layout="constrained",
         figsize=sr.constants.FIG_SIZE,
+        dpi=sr.constants.FIG_DPI,
     )
     ax_scatter = axs["scatter"]
     ax_histx = axs["histx"]
@@ -78,7 +71,7 @@ def mag_rrup_scatter(
         s=2.5,
         c="grey",
         alpha=0.5,
-        label=f"All records - N: {obs_data.n_records}",
+        label=f"All - N: {obs_data.n_records:,}",
     )
     ax_scatter.scatter(
         filtered_obs_data.record_df["rrup"],
@@ -86,7 +79,7 @@ def mag_rrup_scatter(
         s=2.5,
         c="red",
         alpha=0.5,
-        label=f"Filtered records - N: {filtered_obs_data.n_records}",
+        label=f"Filtered - N: {filtered_obs_data.n_records:,}",
     )
     ax_scatter.plot(
         sr.constants.MW_RRUP_LIMITS[:, 1],
@@ -96,7 +89,7 @@ def mag_rrup_scatter(
         linewidth=sr.constants.FIG_LINEWIDTH,
     )
 
-    ax_scatter.set_xlabel("Source-to-site distance, $R_{Rup}$ (km)")
+    ax_scatter.set_xlabel("Source-to-site distance, $R_{rup}$ (km)")
     ax_scatter.set_ylabel("Magnitude, $M_{W}$")
     ax_scatter.legend()
     ax_scatter.set_xscale("log")
@@ -1869,7 +1862,7 @@ def spatial_corr_trends(
         ax1.semilogx(
             sr.constants.PERIODS,
             gnn_only_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
+            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
             c=sr.constants.LN_VS30_DIFF_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )
@@ -1934,7 +1927,7 @@ def spatial_corr_trends(
         ax2.semilogx(
             sr.constants.PERIODS,
             gnn_only_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
+            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
             c=sr.constants.LN_VS30_DIFF_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )
@@ -1984,7 +1977,7 @@ def spatial_corr_trends(
         ax1.semilogx(
             sr.constants.PERIODS,
             gnn_residual_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
+            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
             c=sr.constants.LN_VS30_DIFF_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )
@@ -2049,7 +2042,7 @@ def spatial_corr_trends(
         ax2.semilogx(
             sr.constants.PERIODS,
             gnn_residual_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
+            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
             c=sr.constants.LN_VS30_DIFF_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )

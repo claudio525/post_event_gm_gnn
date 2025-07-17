@@ -1,14 +1,13 @@
 from pathlib import Path
 from typing import List
 
+import xarray as xr
 import pandas as pd
 import numpy as np
 import typer
-from tqdm import tqdm
+
 from pygmt_helper import plotting
-
 import sim_ranking as sr
-
 
 app = typer.Typer()
 
@@ -24,10 +23,17 @@ def event_site_map(
     val_int_site_ids_ffp: Path = None,
     region_key: str = "canterbury",
     use_map_data: bool = False,
+    emp_gm_params_ffp: Path = None,
 ):
     """
     Create a map plot of the event and the site locations
     """
+
+    def custom_shading_fn(
+        topo_grid: xr.DataArray, topo_shading_grid: xr.DataArray
+    ) -> xr.DataArray:
+        return topo_shading_grid.where(topo_shading_grid > 0.1, np.nan)
+
     obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
     obs_sites = obs_data.record_df.loc[
         obs_data.record_df.event_id == event, "site_id"
@@ -44,17 +50,10 @@ def event_site_map(
         )
         obs_sites = obs_sites[~np.isin(obs_sites, val_int_sites)]
 
-    # Load map data
-    map_data = (
-        plotting.NZMapData.load(high_res_topo=True)
-        if use_map_data is not None
-        else None
-    )
-
     # Create figure
+    region = sr.constants.REGION_MAPPINGS[region_key]
     fig = plotting.gen_region_fig(
-        region = sr.constants.REGION_MAPPINGS[region_key],
-        map_data=map_data,
+        region=region,
         plot_kwargs={
             "topo_cmap": "gray",
             "topo_cmap_min": 0,
@@ -68,15 +67,49 @@ def event_site_map(
         config_options=dict(
             MAP_FRAME_TYPE="plain",
             FORMAT_GEO_MAP="ddd.xx",
-            MAP_GRID_PEN="0.5p,gray",
+            # MAP_GRID_PEN="0.5p,gray",
             MAP_TICK_PEN_PRIMARY="1p,black",
             MAP_FRAME_PEN="1p,black",
             MAP_FRAME_AXES="WSne",
-            # FONT_ANNOT_PRIMARY="7p,Helvetica,black",
-            # FONT_LABEL="7p",  # Font size for axis labels
-            # FONT_TITLE="9p",  # Font size for the title
+            FONT_ANNOT_PRIMARY="11p,Helvetica,black",
+            FONT_LABEL="12p,Helvetica,black",
         ),
+        high_res_topo=True,
+        high_quality=True,
+        plot_roads=True,
+        custom_shading_fn=custom_shading_fn,
     )
+
+    if emp_gm_params_ffp is not None:
+        emp_gm_params = pd.read_parquet(emp_gm_params_ffp)
+        emp_gm_params[sr.constants.GMM_PRED_PSA_KEYS] = np.exp(
+            emp_gm_params[sr.constants.GMM_PRED_PSA_KEYS]
+        )
+        im = "pSA_0.01"
+
+        grid = plotting.create_grid(
+            emp_gm_params[["lon", "lat", f"{im}_mean"]].rename(
+                columns={f"{im}_mean": "im_value"}
+            ),
+            "im_value",
+            region=region,
+            grid_spacing="10e/10e",
+            # grid_spacing="25e/25e",
+            high_quality=True
+        )
+
+        plotting.plot_grid(
+            fig,
+            grid,
+            "hot",
+            sr.plot_spatial.IM_LIMITS_MAPPING[im],
+            ("white", "black"),
+            sr.utils.get_nice_im_name(im),
+            continuous_cmap=True,
+            reverse_cmap=True,
+            plot_contours=True,
+            transparency=65,
+        )
 
     fig.meca(
         spec=dict(
@@ -85,21 +118,28 @@ def event_site_map(
             rake=event_data.rake,
             magnitude=event_data.mag,
         ),
-        scale=f"{0.1 * event_data.mag}c",
+        scale=f"{0.075 * event_data.mag}c",
         longitude=event_data.lon,
         latitude=event_data.lat,
         depth=event_data.depth,
-        G="red",
-        W="0.05p,black,solid",
+        compressionfill="red",
+        pen="0.05p,black,solid",
+    )
+
+    fig.text(
+        text=["Earthquake", "rupture"],
+        x=[event_data.lon + 0.0275, event_data.lon + 0.0275],
+        y=[event_data.lat + 0.0025, event_data.lat - 0.0025],
     )
 
     # Plot the observation sites
     fig.plot(
         x=obs_data.site_df.loc[obs_sites, "lon"].values,
         y=obs_data.site_df.loc[obs_sites, "lat"].values,
-        style="t0.4c",
+        style="t0.3c",
         fill="darkblue",
         pen="0.1p,darkblue",
+        label="Observation sites",
     )
 
     # Plot the sites of interest
@@ -110,6 +150,7 @@ def event_site_map(
             style="a0.5c",
             fill="red",
             pen="0.1p,black",
+            label="Location of interest",
         )
     elif site_int_lat and site_int_lon:
         fig.plot(
@@ -118,7 +159,10 @@ def event_site_map(
             style="a0.5c",
             fill="red",
             pen="0.1p,black",
+            label="Location of interest",
         )
+
+    fig.legend(box="+gwhite+p1p")
 
     fig.savefig(
         output_ffp,

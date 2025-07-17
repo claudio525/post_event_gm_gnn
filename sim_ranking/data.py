@@ -10,7 +10,6 @@ import numpy as np
 
 from qcore import src_site_dist, grid
 from source_modelling import srf
-# import empirical.util.estimations as emp_estimations
 import oq_wrapper as oqw
 import ml_tools as mlt
 

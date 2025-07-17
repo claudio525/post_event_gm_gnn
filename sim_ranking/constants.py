@@ -194,6 +194,10 @@ FIG_FORMAT = "png"
 if (env_fig_format := os.environ.get("fig_format")) is not None:
     FIG_FORMAT = env_fig_format
 
+FIG_DPI = 300
+if (env_fig_dpi := os.environ.get("fig_dpi")) is not None:
+    FIG_DPI = int(env_fig_dpi)
+
 FIG_FONT_SIZE = None
 if (env_fig_font_size := os.environ.get("fig_font_size")) is not None:
     FIG_FONT_SIZE = int(env_fig_font_size)
@@ -205,6 +209,7 @@ if (env_fig_linewidth := os.environ.get("fig_linewidth")) is not None:
 FIG_GROUP_LINEWIDTH = None
 if (env_fig_group_linewidth := os.environ.get("fig_group_linewidth")) is not None:
     FIG_GROUP_LINEWIDTH = float(env_fig_group_linewidth)
+
 
 
 MW_RRUP_LIMITS = np.array([
