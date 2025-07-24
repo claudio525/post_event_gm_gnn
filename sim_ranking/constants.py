@@ -18,7 +18,7 @@ class NZGMDBVersion(StrEnum):
     v4p1 = "v4.1"
     v4p2 = "v4.2"
     v4p3 = "v4.3"
-
+    v4p3_final = "v4.3_final"
 
 class TectonicType(StrEnum):
     CRUSTAL = "crustal"

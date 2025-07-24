@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import xarray as xr
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -20,26 +21,32 @@ IM_LIMITS_MAPPING = {
 }
 
 
+def custom_shading_fn(
+    topo_grid: xr.DataArray, topo_shading_grid: xr.DataArray
+) -> xr.DataArray:
+    return topo_shading_grid.where(topo_shading_grid > 0.1, np.nan)
+
+
 def plot_im_values(
     im_values: pd.DataFrame,
     im: str,
     event_info: pd.Series,
     obs_site_df: pd.DataFrame,
     region: tuple[float, float, float, float],
-    map_data: plotting.NZMapData,
     output_ffp,
+    grid_spacing: str = "25e/25e",
 ):
     grid = plotting.create_grid(
         im_values,
         "im_value",
         region=region,
-        grid_spacing="25e/25e",
+        grid_spacing=grid_spacing,
+        high_quality=True,
     )
 
     # Create figure
     fig = plotting.gen_region_fig(
         region=region,
-        map_data=map_data,
         plot_kwargs={
             "topo_cmap": "gray",
             "topo_cmap_min": 0,
@@ -53,14 +60,17 @@ def plot_im_values(
         config_options=dict(
             MAP_FRAME_TYPE="plain",
             FORMAT_GEO_MAP="ddd.xx",
-            MAP_GRID_PEN="0.5p,gray",
+            # MAP_GRID_PEN="0.5p,gray",
             MAP_TICK_PEN_PRIMARY="1p,black",
             MAP_FRAME_PEN="1p,black",
-            MAP_FRAME_AXES="WSne",
-            # FONT_ANNOT_PRIMARY="7p,Helvetica,black",
-            # FONT_LABEL="7p",  # Font size for axis labels
-            # FONT_TITLE="9p",  # Font size for the title
+            MAP_FRAME_AXES="wsne",
+            FONT_ANNOT_PRIMARY="11p,Helvetica,black",
+            FONT_LABEL="12p,Helvetica,black",
         ),
+        high_res_topo=True,
+        high_quality=True,
+        plot_roads=True,
+        custom_shading_fn=custom_shading_fn,
     )
 
     # Plot the IM values
@@ -76,7 +86,10 @@ def plot_im_values(
         continuous_cmap=True,
         reverse_cmap=True,
         plot_contours=True,
-        transparency=25,
+        transparency=30,
+        encode_cb_label=False,
+        cb_position="JBC+o0c/0.25c",
+        cb_box="+gwhite+c0c/0c/0.3c/0c" 
     )
 
     # Plot the prediction sites
@@ -96,7 +109,7 @@ def plot_im_values(
             rake=event_info.rake,
             magnitude=event_info.mag,
         ),
-        scale=f"{0.04 * event_info.mag}c",
+        scale=f"{0.075 * event_info.mag}c",
         longitude=event_info.lon,
         latitude=event_info.lat,
         depth=event_info.depth,
@@ -108,7 +121,7 @@ def plot_im_values(
     fig.plot(
         x=obs_site_df["lon"].values,
         y=obs_site_df["lat"].values,
-        style="t0.2c",
+        style="t0.3c",
         fill="darkblue",
         pen="0.1p,darkblue",
     )
@@ -126,45 +139,61 @@ def plot_res_values(
     event_info: pd.Series,
     obs_site_df: pd.DataFrame,
     region: tuple[float, float, float, float],
-    map_data: plotting.NZMapData,
     output_ffp: Path,
+    grid_spacing: str = "25e/25e",
 ):
     grid = plotting.create_grid(
         res_values,
         "im_value",
         region=region,
-        grid_spacing="25e/25e",
+        grid_spacing=grid_spacing,
+        high_quality=True,
     )
 
     # Create figure
     fig = plotting.gen_region_fig(
         region=region,
-        map_data=map_data,
-        # plot_kwargs=dict(frame_args=["+n"]),
+        plot_kwargs={
+            "topo_cmap": "gray",
+            "topo_cmap_min": 0,
+            "topo_cmap_max": 1500,
+            "topo_cmap_inc": 25,
+            "topo_cmap_reverse": True,
+            "land_color": "white",
+            "road_pen_color": "black",
+            "highway_pen_color": "orange",
+        },
         config_options=dict(
-            MAP_FRAME_TYPE="graph",
+            MAP_FRAME_TYPE="plain",
             FORMAT_GEO_MAP="ddd.xx",
-            MAP_GRID_PEN="0.5p,gray",
+            # MAP_GRID_PEN="0.5p,gray",
             MAP_TICK_PEN_PRIMARY="1p,black",
-            MAP_FRAME_PEN="thinner,black",
-            MAP_FRAME_AXES="WSEN",
-            # FONT_ANNOT_PRIMARY="7p,Helvetica,black",
-            # FONT_LABEL="7p",  # Font size for axis labels
-            # FONT_TITLE="9p",  # Font size for the title
+            MAP_FRAME_PEN="1p,black",
+            MAP_FRAME_AXES="wsne",
+            FONT_ANNOT_PRIMARY="11p,Helvetica,black",
+            FONT_LABEL="12p,Helvetica,black",
         ),
+        high_res_topo=True,
+        high_quality=True,
+        plot_roads=True,
+        custom_shading_fn=custom_shading_fn,
     )
 
     # Plot residuals
+    label_math = r"\mu_{\text{lnIM}}^{(\text{cIM})} - \mu_{\text{lnIM}}^{(\text{GNN})}"
     plotting.plot_grid(
         fig,
         grid,
         "polar",
         (-0.5, 0.5, 0.1),
         ("darkred", "darkblue"),
-        utils.get_nice_im_name(im),
+        f"{utils.get_nice_im_name(im)} Differences (@[ {label_math}  @[)",
         continuous_cmap=True,
         transparency=50,
         reverse_cmap=True,
+        encode_cb_label=False,
+        cb_position="JBC+o0c/0.25c",
+        cb_box="+gwhite+c0c/0c/0.3c/0c" 
     )
 
     # Plot the prediction sites
@@ -184,7 +213,7 @@ def plot_res_values(
             rake=event_info.rake,
             magnitude=event_info.mag,
         ),
-        scale=f"{0.04 * event_info.mag}c",
+        scale=f"{0.075 * event_info.mag}c",
         longitude=event_info.lon,
         latitude=event_info.lat,
         depth=event_info.depth,
@@ -196,7 +225,7 @@ def plot_res_values(
     fig.plot(
         x=obs_site_df["lon"].values,
         y=obs_site_df["lat"].values,
-        style="t0.2c",
+        style="t0.3c",
         fill="darkblue",
         pen="0.1p,darkblue",
     )
@@ -207,12 +236,12 @@ def plot_res_values(
         anti_alias=True,
     )
 
+
 def plot_event_gnn_predictions(
     model_dir: Path,
     event_predictions_ffp: Path,
     output_dir: Path,
     ims: list[str],
-    map_data: plotting.NZMapData,
     region: tuple[float, float, float, float] = constants.CANTERBURY_REGION,
     use_obs_at_int_sites: bool = True,
 ):
@@ -229,9 +258,6 @@ def plot_event_gnn_predictions(
         The directory where the output plots will be saved.
     ims : list[str]
         The list of IMs to plot.
-    map_data : plotting.NZMapData
-        The map data to use for plotting.
-        Set to None to use the default (pygmt) map data.
     region : tuple[float, float, float, float], optional
         The region to plot.
     use_obs_at_int_sites : bool, optional
@@ -275,8 +301,8 @@ def plot_event_gnn_predictions(
             event_data,
             obs_site_df.loc[cur_obs_sites],
             region,
-            map_data=map_data,
-            output_ffp=output_dir / f"gnn_{event_id}_{utils.get_im_filename(cur_im)}.png",
+            output_ffp=output_dir
+            / f"gnn_{event_id}_{utils.get_im_filename(cur_im)}.png",
         )
 
 
@@ -286,7 +312,6 @@ def plot_event_gmm_predictions(
     event_id: str,
     output_dir: Path,
     ims: list[str],
-    map_data: plotting.NZMapData,
     region: tuple[float, float, float, float] = constants.CANTERBURY_REGION,
 ):
     emp_gm_params = pd.read_parquet(emp_gm_params_ffp)
@@ -312,8 +337,8 @@ def plot_event_gmm_predictions(
             event_data,
             obs_site_df,
             region,
-            map_data=map_data,
-            output_ffp=output_dir / f"gmm_{event_id}_{utils.get_im_filename(cur_im)}.png",
+            output_ffp=output_dir
+            / f"gmm_{event_id}_{utils.get_im_filename(cur_im)}.png",
         )
 
 
@@ -323,7 +348,6 @@ def plot_event_cim_predictions(
     event_id: str,
     output_dir: Path,
     ims: list[str],
-    map_data: plotting.NZMapData,
     region: tuple[float, float, float, float] = constants.CANTERBURY_REGION,
     use_obs_at_int_sites: bool = True,
 ):
@@ -342,9 +366,6 @@ def plot_event_cim_predictions(
         The directory where the output plots will be saved.
     ims : list[str]
         The list of IMs to plot.
-    map_data : plotting.NZMapData
-        The map data to use for plotting.
-        Set to None to use the default (pygmt) map data.
     region : tuple[float, float, float, float], optional
         The region to plot.
     use_obs_at_int_sites : bool, optional
@@ -388,8 +409,8 @@ def plot_event_cim_predictions(
             event_data,
             obs_site_df.loc[cur_obs_sites],
             region,
-            map_data=map_data,
-            output_ffp=output_dir / f"cim_{event_id}_{utils.get_im_filename(cur_im)}.png",
+            output_ffp=output_dir
+            / f"cim_{event_id}_{utils.get_im_filename(cur_im)}.png",
         )
 
 
@@ -399,7 +420,6 @@ def plot_event_cim_gnn_residuals(
     cim_event_results_ffp: Path,
     output_dir: Path,
     ims: list[str],
-    map_data: plotting.NZMapData,
     region: tuple[float, float, float, float] = constants.CANTERBURY_REGION,
     use_obs_at_int_sites: bool = True,
 ):
@@ -448,13 +468,11 @@ def plot_event_cim_gnn_residuals(
         ]
 
         plot_res_values(
-            res_df[["lon", "lat", cur_im]].rename(
-                columns={cur_im: "im_value"}
-            ),
+            res_df[["lon", "lat", cur_im]].rename(columns={cur_im: "im_value"}),
             cur_im,
             obs_data.event_df.loc[event_id],
             obs_data.site_df.loc[cur_obs_sites],
             region,
-            map_data=map_data,
-            output_ffp=output_dir / f"cim_gnn_res_{event_id}_{utils.get_im_filename(cur_im)}.png",
+            output_ffp=output_dir
+            / f"cim_gnn_res_{event_id}_{utils.get_im_filename(cur_im)}.png",
         )

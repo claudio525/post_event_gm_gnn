@@ -43,6 +43,10 @@ class ObservedData:
         RX = "rx"
 
     class OtherColEnums(StrEnum):
+        FHP_HORIZONTAL = "HPF_h"
+        """High-pass filter frequency for horizontal components"""
+        FHP_VERTICAL = "HPF_v"
+        """High-pass filter frequency for vertical components"""
         FHP = "fhp"
         """High-pass filter frequency"""
         TMAX = "tmax"
@@ -339,6 +343,8 @@ class ObservedData:
             "r_x": cls.EventSiteColEnums.RX,
         }
         other_map = {
+            "HPF_h": cls.OtherColEnums.FHP_HORIZONTAL,
+            "HPF_v": cls.OtherColEnums.FHP_VERTICAL, 
             "fmin_X": cls.OtherColEnums.FMIN_H1,
             "fmin_Y": cls.OtherColEnums.FMIN_H2,
             "fmin_Z": cls.OtherColEnums.FMIN_V,
@@ -451,6 +457,10 @@ class ObservedData:
                 engine="c",
                 index_col="record_id",
             ).sort_index()
+
+            if version is constants.NZGMDBVersion.v4p3_final:
+                # Add fmin column
+                record_df[cls.OtherColEnums.FMIN] = record_df[cls.OtherColEnums.FHP_HORIZONTAL] * 1.25
 
             # Renaming
             record_df = record_df.rename(columns=mapping_dict)

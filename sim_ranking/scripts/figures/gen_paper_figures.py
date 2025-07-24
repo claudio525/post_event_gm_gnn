@@ -71,7 +71,7 @@ def mag_rrup_scatter(
         s=2.5,
         c="grey",
         alpha=0.5,
-        label=f"All - N: {obs_data.n_records:,}",
+        label=f"All (N={obs_data.n_records:,})",
     )
     ax_scatter.scatter(
         filtered_obs_data.record_df["rrup"],
@@ -79,7 +79,7 @@ def mag_rrup_scatter(
         s=2.5,
         c="red",
         alpha=0.5,
-        label=f"Filtered - N: {filtered_obs_data.n_records:,}",
+        label=f"Filtered (N={filtered_obs_data.n_records:,})",
     )
     ax_scatter.plot(
         sr.constants.MW_RRUP_LIMITS[:, 1],
@@ -313,6 +313,7 @@ def bias_res_std(
 
     fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
         figsize=sr.constants.FIG_SIZE,
+        fig_dpi=sr.constants.FIG_DPI,
         left=0.08,
         main_wspace=0.175,
         sub_wspace=0.05,
@@ -499,7 +500,7 @@ def mag_bias_res_std(
         bins=sr.constants.MAG_BINS,
         labels=sr.constants.MAG_BIN_LABELS,
     )
-    gnn_res_mag_groups = gnn_res_df.groupby("mag_bin")
+    gnn_res_mag_groups = gnn_res_df.groupby("mag_bin", observed=True)
     gnn_res_mag_bias = gnn_res_mag_groups[gnn_run_config.ims].mean()
     gnn_res_mag_std = gnn_res_mag_groups[gnn_run_config.ims].std()
 
@@ -509,7 +510,7 @@ def mag_bias_res_std(
         bins=sr.constants.MAG_BINS,
         labels=sr.constants.MAG_BIN_LABELS,
     )
-    cim_res_mag_groups = cim_res_df.groupby("mag_bin")
+    cim_res_mag_groups = cim_res_df.groupby("mag_bin", observed=True)
     cim_res_mag_bias = cim_res_mag_groups[sr.constants.PSA_KEYS].mean()
     cim_res_mag_std = cim_res_mag_groups[sr.constants.PSA_KEYS].std()
 
@@ -521,6 +522,7 @@ def mag_bias_res_std(
     if gnn_run_config.non_pSA_ims is not None:
         fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
             sr.constants.FIG_SIZE,
+            fig_dpi=sr.constants.FIG_DPI,
             left=0.08,
             main_wspace=0.175,
             sub_wspace=0.05,
@@ -532,6 +534,7 @@ def mag_bias_res_std(
     else:
         fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
             sr.constants.FIG_SIZE,
+            fig_dpi=sr.constants.FIG_DPI,
             main_wspace=0.175,
             left=0.08,
             right=0.99,
@@ -567,7 +570,7 @@ def mag_bias_res_std(
         ax1.semilogx(
             sr.constants.PERIODS,
             gnn_res_mag_bias.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"{cur_key}, N: {gnn_res_mag_groups.size()[cur_key]}",
+            label=f"{cur_key} (N={gnn_res_mag_groups.size()[cur_key]:,})",
             c=group_colors[i],
             linewidth=group_linewidth,
         )
@@ -655,7 +658,7 @@ def mag_bias_res_std(
             gnn_res_mag_std.loc[cur_key, sr.constants.PSA_KEYS],
             c=group_colors[i],
             linewidth=group_linewidth,
-            label=f"{cur_key}, N: {gnn_res_mag_groups.size()[cur_key]}",
+            label=f"{cur_key} (N={gnn_res_mag_groups.size()[cur_key]:,})",
         )
 
     if show_legend and legend_ax == 3:
@@ -779,7 +782,7 @@ def rrup_bias_res_std(
         labels=sr.constants.RRUP_BIN_LABELS,
     )
 
-    gnn_res_rrup_groups = gnn_res_df.groupby("rrup_bin")
+    gnn_res_rrup_groups = gnn_res_df.groupby("rrup_bin", observed=True)
     gnn_res_rrup_bias = gnn_res_rrup_groups[gnn_run_config.ims].mean()
     gnn_res_rrup_std = gnn_res_rrup_groups[gnn_run_config.ims].std()
 
@@ -790,7 +793,7 @@ def rrup_bias_res_std(
         labels=sr.constants.RRUP_BIN_LABELS,
     )
 
-    cim_res_rrup_groups = cim_res_df.groupby("rrup_bin")
+    cim_res_rrup_groups = cim_res_df.groupby("rrup_bin", observed=True)
     cim_res_rrup_bias = cim_res_rrup_groups[sr.constants.PSA_KEYS].mean()
     cim_res_rrup_std = cim_res_rrup_groups[sr.constants.PSA_KEYS].std()
 
@@ -801,6 +804,7 @@ def rrup_bias_res_std(
     if gnn_run_config.non_pSA_ims is not None:
         fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
             sr.constants.FIG_SIZE,
+            fig_dpi=sr.constants.FIG_DPI,
             left=0.08,
             main_wspace=0.175,
             sub_wspace=0.05,
@@ -812,6 +816,7 @@ def rrup_bias_res_std(
     else:
         fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
             sr.constants.FIG_SIZE,
+            fig_dpi=sr.constants.FIG_DPI,
             main_wspace=0.175,
             left=0.08,
             right=0.99,
@@ -847,7 +852,7 @@ def rrup_bias_res_std(
         ax1.semilogx(
             sr.constants.PERIODS,
             gnn_res_rrup_bias.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"{cur_key} km, N: {gnn_res_rrup_groups.size()[cur_key]}",
+            label=f"{cur_key} km (N={gnn_res_rrup_groups.size()[cur_key]:,})",
             c=group_colors[i],
             linewidth=group_linewidth,
         )
@@ -935,7 +940,7 @@ def rrup_bias_res_std(
             gnn_res_rrup_std.loc[cur_key, sr.constants.PSA_KEYS],
             c=group_colors[i],
             linewidth=group_linewidth,
-            label=f"{cur_key}, N: {gnn_res_rrup_groups.size()[cur_key]}",
+            label=f"{cur_key} (N={gnn_res_rrup_groups.size()[cur_key]:,})",
         )
     if show_legend and legend_ax == 3:
         ax3.legend()
@@ -1064,7 +1069,7 @@ def doc_bias_res_std(
         labels=sr.constants.DOC_BIN_LABELS,
     )
 
-    gnn_res_doc_groups = gnn_res_df.groupby("doc_bin")
+    gnn_res_doc_groups = gnn_res_df.groupby("doc_bin", observed=True)
     gnn_res_doc_bias = gnn_res_doc_groups[gnn_run_config.ims].mean()
     gnn_res_doc_std = gnn_res_doc_groups[gnn_run_config.ims].std()
 
@@ -1075,7 +1080,7 @@ def doc_bias_res_std(
         labels=sr.constants.DOC_BIN_LABELS,
     )
 
-    cim_res_doc_groups = cim_res_df.groupby("doc_bin")
+    cim_res_doc_groups = cim_res_df.groupby("doc_bin", observed=True)
     cim_res_doc_bias = cim_res_doc_groups[sr.constants.PSA_KEYS].mean()
     cim_res_doc_std = cim_res_doc_groups[sr.constants.PSA_KEYS].std()
 
@@ -1086,6 +1091,7 @@ def doc_bias_res_std(
     if gnn_run_config.non_pSA_ims is not None:
         fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
             sr.constants.FIG_SIZE,
+            fig_dpi=sr.constants.FIG_DPI,
             left=0.08,
             main_wspace=0.175,
             sub_wspace=0.05,
@@ -1097,6 +1103,7 @@ def doc_bias_res_std(
     else:
         fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
             sr.constants.FIG_SIZE,
+            fig_dpi=sr.constants.FIG_DPI,
             main_wspace=0.175,
             left=0.08,
             right=0.99,
@@ -1132,7 +1139,7 @@ def doc_bias_res_std(
         ax1.semilogx(
             sr.constants.PERIODS,
             gnn_res_doc_bias.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"{cur_key}, N: {gnn_res_doc_groups.size()[cur_key]}",
+            label=f"{cur_key} (N={gnn_res_doc_groups.size()[cur_key]:,})",
             c=group_colors[i],
             linewidth=group_linewidth,
         )
@@ -1210,7 +1217,7 @@ def doc_bias_res_std(
             gnn_res_doc_std.loc[cur_key, sr.constants.PSA_KEYS],
             c=group_colors[i],
             linewidth=group_linewidth,
-            label=f"{cur_key}, N: {gnn_res_doc_groups.size()[cur_key]}",
+            label=f"{cur_key} (N={gnn_res_doc_groups.size()[cur_key]:,})",
         )
     if show_legend and legend_ax == 3:
         ax3.legend()
@@ -1280,7 +1287,7 @@ def fmin_filter(nzgmdb_ffp: Path, gnn_result_dir: Path, output_dir: Path):
     gnn_results = pd.read_parquet(gnn_result_dir / "val_results.parquet")
     scenario_count = (~gnn_results[sr.constants.PSA_KEYS].isna()).sum(axis=0)
 
-    fig, ax = plt.subplots(figsize=sr.constants.FIG_SIZE)
+    fig, ax = plt.subplots(figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI)
 
     ax.plot(
         sr.constants.PERIODS,
@@ -1435,6 +1442,7 @@ def spatial_corr_trends(
     print("Plotting")
     fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
         sr.constants.FIG_SIZE,
+        fig_dpi=sr.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -1554,6 +1562,7 @@ def spatial_corr_trends(
     ## GNN-Only
     fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
         figsize=sr.constants.FIG_SIZE,
+        fig_dpi=sr.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -1669,6 +1678,7 @@ def spatial_corr_trends(
     ## GNN-Residual
     fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
         figsize=sr.constants.FIG_SIZE,
+        fig_dpi=sr.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -1832,6 +1842,7 @@ def spatial_corr_trends(
     ## GNN-Only
     fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
         figsize=sr.constants.FIG_SIZE,
+        fig_dpi=sr.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -1947,6 +1958,7 @@ def spatial_corr_trends(
     ## GNN-Residual
     fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
         figsize=sr.constants.FIG_SIZE,
+        fig_dpi=sr.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -2104,7 +2116,7 @@ def ind_scenario_pSA(
             event_id, cur_site_int, gnn_residual_pred_df, dist_matrix, n_obs_sites=5
         )
 
-        fig, ax = plt.subplots(figsize=sr.constants.FIG_SIZE)
+        fig, ax = plt.subplots(figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI)
 
         # Observation sites
         obs_lines = []

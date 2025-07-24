@@ -4,6 +4,7 @@ import matplotlib.gridspec as gridspec
 
 def get_pSA_bias_residual_fig(
     figsize: tuple[float, float] = (16, 6),
+    fig_dpi: int = 300,
     left: float = 0.05,
     right: float = 0.98,
     top: float = 0.98,
@@ -33,7 +34,7 @@ def get_pSA_bias_residual_fig(
     ax2 : matplotlib.axes.Axes
         Axis for the residual standard deviation plot.
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, dpi=fig_dpi)
 
     ax1.set_xlabel("Vibration Period, T(s)")
     ax1.set_ylabel("Model bias")
@@ -55,6 +56,7 @@ def get_pSA_bias_residual_fig(
 
 def get_bias_residual_fig(
     figsize: tuple[float, float] = (16, 6),
+    fig_dpi: int = 300,
     left: float = 0.05,
     right: float = 0.98,
     top: float = 0.98,
@@ -101,7 +103,7 @@ def get_bias_residual_fig(
     ax4 : matplotlib.axes.Axes
         Axis for the non-pSA residual standard deviation plot.
     """
-    fig = plt.figure(figsize=figsize)
+    fig = plt.figure(figsize=figsize, dpi=fig_dpi)
 
     main_grid = gridspec.GridSpec(1, 2, figure=fig, wspace=main_wspace)
 
@@ -150,7 +152,7 @@ def get_bias_residual_fig(
 
 
 def get_single_pSA_otherIMs_fig(
-    figsize: tuple[float, float] = (16, 6), top: float = 1.0
+    figsize: tuple[float, float] = (16, 6), fig_dpi: int = 300, top: float = 1.0
 ):
     """
     Create figure for pSA and non-pSA IMs plots.
@@ -171,7 +173,7 @@ def get_single_pSA_otherIMs_fig(
     ax2 : matplotlib.axes.Axes
         Axis for the other IMs plot.
     """
-    fig = plt.figure(figsize=figsize)
+    fig = plt.figure(figsize=figsize, dpi=fig_dpi)   
 
     grid = gridspec.GridSpec(1, 2, figure=fig, wspace=0.05, width_ratios=[5, 1])
 

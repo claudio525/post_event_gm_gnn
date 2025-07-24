@@ -102,24 +102,21 @@ def _compute_emp_gm_params(
     periods : Sequence[float]
         List of periods for which pSA is to be computed.
     output_ffp : Path
-        Output file paht.
+        Output file path.
     """
-    from empirical.util.openquake_wrapper_vectorized import oq_run
-    from empirical.util.classdef import TectType, GMM
-
     ### Constants
     GMM_MAPPING = {
-        TectType.ACTIVE_SHALLOW: GMM.Br_13,
-        TectType.SUBDUCTION_SLAB: GMM.K_20,
-        TectType.SUBDUCTION_INTERFACE: GMM.K_20,
+        oqw.constants.TectType.ACTIVE_SHALLOW: oqw.constants.GMM.Br_13,
+        oqw.constants.TectType.SUBDUCTION_SLAB: oqw.constants.GMM.K_20,
+        oqw.constants.TectType.SUBDUCTION_INTERFACE: oqw.constants.GMM.K_20,
     }
 
     TECT_CLASS_MAPPING = {
-        constants.TectonicType.CRUSTAL: TectType.ACTIVE_SHALLOW,
-        constants.TectonicType.SUBDUCTION_SLAB: TectType.SUBDUCTION_SLAB,
-        constants.TectonicType.SUBDUCTION_INTERFACE: TectType.SUBDUCTION_INTERFACE,
-        constants.TectonicType.UNKNOWN: TectType.ACTIVE_SHALLOW,
-        constants.TectonicType.OUTER_RISE: TectType.SUBDUCTION_SLAB,
+        constants.TectonicType.CRUSTAL: oqw.constants.TectType.ACTIVE_SHALLOW,
+        constants.TectonicType.SUBDUCTION_SLAB: oqw.constants.TectType.SUBDUCTION_SLAB,
+        constants.TectonicType.SUBDUCTION_INTERFACE: oqw.constants.TectType.SUBDUCTION_INTERFACE,
+        constants.TectonicType.UNKNOWN: oqw.constants.TectType.ACTIVE_SHALLOW,
+        constants.TectonicType.OUTER_RISE: oqw.constants.TectType.SUBDUCTION_SLAB,
     }
 
     ### GM prediction
@@ -141,14 +138,14 @@ def _compute_emp_gm_params(
                 continue
 
             cur_tect_type = TECT_CLASS_MAPPING[cur_tect_class]
-            pga_result = oq_run(
+            pga_result = oqw.run_gmm(
                 GMM_MAPPING[cur_tect_type],
                 cur_tect_type,
                 rupture_df.loc[cur_tect_mask, constants.OQ_INPUT_COLUMNS],
                 "PGA",
             )
 
-            psa_result = oq_run(
+            psa_result = oqw.run_gmm(
                 GMM_MAPPING[cur_tect_type],
                 cur_tect_type,
                 rupture_df.loc[cur_tect_mask, constants.OQ_INPUT_COLUMNS],

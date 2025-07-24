@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import List
 
-import xarray as xr
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import typer
@@ -22,18 +22,11 @@ def event_site_map(
     site_int_ids: List[str] = None,
     val_int_site_ids_ffp: Path = None,
     region_key: str = "canterbury",
-    use_map_data: bool = False,
     emp_gm_params_ffp: Path = None,
 ):
     """
     Create a map plot of the event and the site locations
     """
-
-    def custom_shading_fn(
-        topo_grid: xr.DataArray, topo_shading_grid: xr.DataArray
-    ) -> xr.DataArray:
-        return topo_shading_grid.where(topo_shading_grid > 0.1, np.nan)
-
     obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
     obs_sites = obs_data.record_df.loc[
         obs_data.record_df.event_id == event, "site_id"
@@ -77,7 +70,7 @@ def event_site_map(
         high_res_topo=True,
         high_quality=True,
         plot_roads=True,
-        custom_shading_fn=custom_shading_fn,
+        custom_shading_fn=sr.plot_spatial.custom_shading_fn,
     )
 
     if emp_gm_params_ffp is not None:
@@ -95,7 +88,7 @@ def event_site_map(
             region=region,
             grid_spacing="10e/10e",
             # grid_spacing="25e/25e",
-            high_quality=True
+            high_quality=True,
         )
 
         plotting.plot_grid(
@@ -272,16 +265,9 @@ def get_event_prediction_plots(
     event_id: str,
     ims: List[str],
     region_key: str = "canterbury",
-    use_map_data: bool = False,
-    use_high_res_topo: bool = False,
 ):
+    """Generates spatial plots for GNN, GMM, and cIM predictions for a given event."""
     region = sr.constants.REGION_MAPPINGS[region_key]
-
-    # Load map data
-    map_data = None
-    if use_map_data:
-        print("Loading map data")
-        map_data = plotting.NZMapData.load(high_res_topo=use_high_res_topo)
 
     print("Plotting GNN predictions")
     sr.plot_spatial.plot_event_gnn_predictions(
@@ -289,20 +275,18 @@ def get_event_prediction_plots(
         gnn_results_ffp,
         gnn_out_dir,
         ims,
-        map_data=map_data,
         region=region,
     )
 
-    print("Plotting marginal GMM predictions")
-    sr.plot_spatial.plot_event_gmm_predictions(
-        emp_gmm_params_ffp,
-        nzgmdb_ffp,
-        event_id,
-        emp_gmm_out_dir,
-        ims,
-        map_data=map_data,
-        region=region,
-    )
+    # print("Plotting marginal GMM predictions")
+    # sr.plot_spatial.plot_event_gmm_predictions(
+    #     emp_gmm_params_ffp,
+    #     nzgmdb_ffp,
+    #     event_id,
+    #     emp_gmm_out_dir,
+    #     ims,
+    #     region=region,
+    # )
 
     print("Plotting cIM predictions")
     sr.plot_spatial.plot_event_cim_predictions(
@@ -311,7 +295,6 @@ def get_event_prediction_plots(
         event_id,
         cim_out_dir,
         ims,
-        map_data=map_data,
         region=region,
     )
 
@@ -324,16 +307,8 @@ def plot_event_cim_gnn_residuals(
     output_dir: Path,
     ims: List[str],
     region_key: str = "canterbury",
-    use_map_data: bool = False,
-    use_high_res_topo: bool = False,
 ):
     region = sr.constants.REGION_MAPPINGS[region_key]
-
-    # Load map data
-    map_data = None
-    if use_map_data:
-        print("Loading map data")
-        map_data = plotting.NZMapData.load(high_res_topo=use_high_res_topo)
 
     sr.plot_spatial.plot_event_cim_gnn_residuals(
         gnn_model_dir,
@@ -341,9 +316,39 @@ def plot_event_cim_gnn_residuals(
         cim_results_ffp,
         output_dir,
         ims,
-        map_data=map_data,
         region=region,
     )
+
+
+@app.command("combine-spatial-figures")
+def combine_spatial_figures(
+    fig_1_ffp: Path,
+    fig_2_ffp: Path,
+    fig_3_ffp: Path,
+    output_ffp: Path,
+    dpi: int = 300,
+):
+    """
+    Combine three spatial figures into one figure.
+    """
+    figsize = (8.3, 2.8)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(nrows=1, ncols=3, figsize=figsize, dpi=dpi)
+
+    ax1.imshow(plt.imread(fig_1_ffp), aspect="equal")
+    ax1.text(0.02, 0.98, "MVN-CIM", transform=ax1.transAxes, verticalalignment='top', horizontalalignment='left', fontsize=8)
+    ax1.axis("off")
+
+    ax2.imshow(plt.imread(fig_2_ffp), aspect="equal")
+    ax2.text(0.02, 0.98, "GNN-Residual", transform=ax2.transAxes, verticalalignment='top', horizontalalignment='left', fontsize=8)
+    ax2.axis("off")
+
+    ax3.imshow(plt.imread(fig_3_ffp), aspect="equal")
+    ax3.axis("off")
+
+    plt.subplots_adjust(wspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
+
+    fig.savefig(output_ffp)
 
 
 if __name__ == "__main__":
