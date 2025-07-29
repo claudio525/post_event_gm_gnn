@@ -20,22 +20,6 @@ print(f"Using device: {device.upper()}")
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
 
-@app.command("train-holdout")
-def run_holdout(
-    run_config_ffp: Path,
-    holdout_config_ffp: Path,
-    n_epochs: int = None,
-    id_suffix: str = "",
-):
-    sr.ml.run_holdout(
-        run_config_ffp,
-        holdout_config_ffp,
-        n_epochs=n_epochs,
-        id_suffix=id_suffix,
-        device=device,
-    )
-
-
 @app.command("train-cv")
 def run_cv(
     run_config_ffp: Path,
@@ -179,44 +163,6 @@ def predict_event_3468575(
 
     result_df.to_parquet(out_ffp)
 
-
-@app.command("continue-hp-opt")
-def continue_hp_opt(
-    rel_results_dir: str,
-    n_trials: int,
-):
-    mp.set_start_method("spawn")
-
-    sr.ml.gnn_hp.continue_hp_opt(
-        rel_results_dir,
-        n_trials,
-    )
-
-
-@app.command("run-hp-opt")
-def run_hp_opt(
-    base_run_config_ffp: Path,
-    hp_opt_config_ffp: Path,
-    n_event_folds: int,
-    n_site_folds: int,
-    rel_results_dir: str,
-    n_trials: int,
-    n_epochs: int,
-    n_procs: int = mp.cpu_count(),
-):
-    mp.set_start_method("spawn")
-
-    sr.ml.gnn_hp.run_hp_opt(
-        base_run_config_ffp,
-        hp_opt_config_ffp,
-        n_event_folds,
-        n_site_folds,
-        rel_results_dir,
-        n_trials,
-        n_epochs,
-        n_procs,
-        device,
-    )
 
 @app.command("copy-cim-cv-results")
 def copy_cim_cv_results(

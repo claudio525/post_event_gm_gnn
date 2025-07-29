@@ -2077,7 +2077,7 @@ def spatial_corr_trends(
 @app.command("ind-scenario-pSA")
 def ind_scenario_pSA(
     event_id: str,
-    gnn_only_ffp: Path,
+    # gnn_only_ffp: Path,
     gnn_residual_ffp: Path,
     cim_results_ffp: Path,
     emp_gm_params_ffp: Path,
@@ -2094,7 +2094,7 @@ def ind_scenario_pSA(
 
     obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
 
-    gnn_only_pred_df = pd.read_parquet(gnn_only_ffp)
+    # gnn_only_pred_df = pd.read_parquet(gnn_only_ffp)
     gnn_residual_pred_df = pd.read_parquet(gnn_residual_ffp)
 
     cim_results = pd.read_parquet(cim_results_ffp)
@@ -2109,7 +2109,7 @@ def ind_scenario_pSA(
     for cur_site_int in tqdm(site_ints):
         cur_id = f"{event_id}_{cur_site_int}"
 
-        if cur_id not in gnn_only_pred_df.index:
+        if cur_id not in gnn_residual_pred_df.index:
             continue
 
         cur_obs_sites = sr.plot_ind_scenarios.get_obs_sites(

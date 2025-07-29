@@ -180,7 +180,6 @@ def run_cim_for_GNN(
     (out_dir := gnn_result_dir / "cim_results").mkdir(parents=False, exist_ok=True)
     prefix = "train" if on_train else "val"
     result_df.to_parquet(out_dir / f"{prefix}_results.parquet")
-    print("wtf")
 
 
 def predict_event_cIM(

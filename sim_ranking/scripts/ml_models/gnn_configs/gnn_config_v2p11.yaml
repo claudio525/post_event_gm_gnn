@@ -4,31 +4,31 @@
 seed: 42
 
 # IMs
-im_set: "pSA"
+im_set: "all"
 
 # Input data settings
-rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.2/custom/mod_ground_motion_im_table_rotd50_flat.csv
+rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table_rotd50_flat.csv
 max_dist: 30
 closest_max_dist: 10
 max_n_obs_sites: 10
 min_n_obs_sites: 2
 
-rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p2/emp_gm_params.parquet
-use_emp_gm_model: True
+rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p3_final/emp_gm_params.parquet
+use_emp_gm_model: False
 
 ignore_events: ["3468575"]
 
 ### Scenario Weighting
 # Magnitude
 mag_scenario_weighting: True
-mag_min_weight: 1
-mag_max_weight: 5
-mag_start: 4.5
-mag_end: 6.0
+mag_min_weight: 0
+mag_max_weight: 4
+mag_start: 5.0
+mag_end: 7.0
 # DoC
-doc_scenario_weighting: True
-doc_min_weight: 1
-doc_max_weight: 2
+doc_scenario_weighting: False
+doc_min_weight: 0
+doc_max_weight: 0
 doc_start: 1
 doc_end: 6
 
@@ -59,7 +59,7 @@ graph_feature_keys:
     # - "tsite_site_int"
     - "rrup_site_int"
     - "mag"
-    # - "is_subduction"
+    - "is_subduction"
   site_obs:
   #  - "vs30_site_obs"
   #  - "z1p0_site_obs"
@@ -76,7 +76,7 @@ batch_size: 1024
 
 # Learning rate scheduling
 use_lr_scheduler: True
-lr_patience: 50
+lr_patience: 25
 lr_factor: 0.5
 
 fc_n_units: 64

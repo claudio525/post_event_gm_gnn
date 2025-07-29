@@ -17,7 +17,6 @@ rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p3_final/emp_gm_params.
 use_emp_gm_model: True
 
 ignore_events: ["3468575"]
-ignore_sites: ["CCCC", "SHLC"]
 
 ### Scenario Weighting
 # Magnitude
@@ -60,7 +59,7 @@ graph_feature_keys:
     # - "tsite_site_int"
     - "rrup_site_int"
     - "mag"
-    # - "is_subduction"
+    - "is_subduction"
   site_obs:
   #  - "vs30_site_obs"
   #  - "z1p0_site_obs"

@@ -278,15 +278,15 @@ def get_event_prediction_plots(
         region=region,
     )
 
-    # print("Plotting marginal GMM predictions")
-    # sr.plot_spatial.plot_event_gmm_predictions(
-    #     emp_gmm_params_ffp,
-    #     nzgmdb_ffp,
-    #     event_id,
-    #     emp_gmm_out_dir,
-    #     ims,
-    #     region=region,
-    # )
+    print("Plotting marginal GMM predictions")
+    sr.plot_spatial.plot_event_gmm_predictions(
+        emp_gmm_params_ffp,
+        nzgmdb_ffp,
+        event_id,
+        emp_gmm_out_dir,
+        ims,
+        region=region,
+    )
 
     print("Plotting cIM predictions")
     sr.plot_spatial.plot_event_cim_predictions(

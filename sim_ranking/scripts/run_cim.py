@@ -89,8 +89,7 @@ def predict_event_cIM(
         obs_data,
         obs_data.get_event_data(event_id).index.values.astype(str),
         gm_params_df,
-        # site_df.index.values.astype(str),
-        np.asarray(["KPOC"]),
+        site_df.index.values.astype(str),
         output_ffp,
         allow_self=allow_self,
     )

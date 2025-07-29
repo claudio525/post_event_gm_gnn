@@ -152,7 +152,12 @@ class RunConfig:
     use_edge_emb_for_msg: bool = False
     """Whether to use the edge embedding as an input for the message neural network"""
 
+    ignore_sites: Sequence[str] | None = None
+    """Sites to ignore"""
+
+
     _im_scale_params: dict[str, pd.Series] | None = None
+
 
     ### Features
     graph_feature_keys: dict[str, Sequence[str]] = None
@@ -279,6 +284,7 @@ class RunConfig:
             "max_n_obs_sites": self.max_n_obs_sites,
             "min_n_obs_sites": self.min_n_obs_sites,
             "ignore_events": list(self.ignore_events),
+            "ignore_sites": list(self.ignore_sites) if self.ignore_sites is not None else None,
             "mag_scenario_weighting": self.mag_scenario_weighting,
             "mag_min_weight": self.mag_min_weight,
             "mag_max_weight": self.mag_max_weight,

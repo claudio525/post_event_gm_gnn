@@ -1,6 +1,0 @@
-n_val_events: 750
-n_val_sites: null
-rel_val_sites_ffp: sim_ranking/configs/0827_0831_val_int_sites.npy
-val_events: ["3468575"]
-test_events: ["2016p118944", "3528839", "3525264"]
-#test_events: ["2016p118944", "3468575", "3528839", "3525264"]

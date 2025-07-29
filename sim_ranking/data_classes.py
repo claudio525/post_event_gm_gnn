@@ -216,6 +216,13 @@ class ObservedData:
 
         self.__reset_cache()
         return self
+    
+    def drop_sites(self, sites: Sequence[str]):
+        """Drops all records associated with the specified sites."""
+        self.record_df = self.record_df[~self.record_df[self.SiteColEnums.SITE_ID].isin(sites)]
+
+        self.__reset_cache()
+        return self
 
     def drop_duplicates(self, subset: Sequence[str] = None, sort_key: str = None, ascending: bool = True):
         """

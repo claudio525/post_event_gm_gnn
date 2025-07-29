@@ -498,7 +498,8 @@ def add_srf_site_to_source_distances(
         nodal_plane_info["strike"],
         nodal_plane_info["dip"],
         nodal_plane_info["rake"],
-    ) = oqw.estimations.calculate_avg_strike_dip_rake(
+        _,
+    ) = oqw.estimations.calculate_avg_multi_plane_properties(
         srf_model.planes, avg_rake, total_slip
     )
 

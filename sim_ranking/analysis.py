@@ -94,7 +94,7 @@ def compute_corr_site_pairs(gnn_results: pd.DataFrame):
         cur_obs_sites = cur_row.obs_sites
 
         cur_site_pairs = mlt.array_utils.numpy_str_join(
-            "_", cur_site_int, cur_obs_sites
+            "_", cur_site_int, cur_obs_sites.astype(str)
         )
 
         for cur_site_pair in cur_site_pairs:

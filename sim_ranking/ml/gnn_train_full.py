@@ -40,6 +40,8 @@ def run_full(
     obs_data = data.load_obs_nzgmdb(run_config.obs_data_ffp)
     if len(run_config.ignore_events) > 0:
         obs_data = obs_data.drop_events(run_config.ignore_events)
+    if run_config.ignore_sites is not None and len(run_config.ignore_sites) > 0:
+        obs_data = obs_data.drop_sites(run_config.ignore_sites)
 
     emp_gm_params, emp_res_df = None, None
     if run_config.use_emp_gm_model:

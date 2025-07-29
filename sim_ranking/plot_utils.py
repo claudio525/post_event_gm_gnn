@@ -4,7 +4,7 @@ import matplotlib.gridspec as gridspec
 
 def get_pSA_bias_residual_fig(
     figsize: tuple[float, float] = (16, 6),
-    fig_dpi: int = 300,
+    fig_dpi: int | None = None,
     left: float = 0.05,
     right: float = 0.98,
     top: float = 0.98,
@@ -56,7 +56,7 @@ def get_pSA_bias_residual_fig(
 
 def get_bias_residual_fig(
     figsize: tuple[float, float] = (16, 6),
-    fig_dpi: int = 300,
+    fig_dpi: int | None = None,
     left: float = 0.05,
     right: float = 0.98,
     top: float = 0.98,
@@ -152,7 +152,7 @@ def get_bias_residual_fig(
 
 
 def get_single_pSA_otherIMs_fig(
-    figsize: tuple[float, float] = (16, 6), fig_dpi: int = 300, top: float = 1.0
+    figsize: tuple[float, float] = (16, 6), fig_dpi: int | None = None, top: float = 1.0
 ):
     """
     Create figure for pSA and non-pSA IMs plots.
