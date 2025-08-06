@@ -23,6 +23,12 @@ def event_site_map(
     val_int_site_ids_ffp: Path = None,
     region_key: str = "canterbury",
     emp_gm_params_ffp: Path = None,
+    event_lon: float = None,
+    event_lat: float = None,
+    high_quality: bool = True,
+    plot_roads: bool = True,
+    no_frame: bool = False,
+    im: str = "pSA_0.1"
 ):
     """
     Create a map plot of the event and the site locations
@@ -32,6 +38,8 @@ def event_site_map(
         obs_data.record_df.event_id == event, "site_id"
     ].values.astype(str)
     event_data = obs_data.event_df.loc[event]
+    event_lat = event_data.lat if event_lat is None else event_lat
+    event_lon = event_data.lon if event_lon is None else event_lon
 
     # Don't use the validation sites
     val_int_sites = None
@@ -63,13 +71,13 @@ def event_site_map(
             # MAP_GRID_PEN="0.5p,gray",
             MAP_TICK_PEN_PRIMARY="1p,black",
             MAP_FRAME_PEN="1p,black",
-            MAP_FRAME_AXES="WSne",
+            MAP_FRAME_AXES="lrbt" if no_frame else "WSne",
             FONT_ANNOT_PRIMARY="11p,Helvetica,black",
             FONT_LABEL="12p,Helvetica,black",
         ),
         high_res_topo=True,
-        high_quality=True,
-        plot_roads=True,
+        high_quality=high_quality,
+        plot_roads=plot_roads,
         custom_shading_fn=sr.plot_spatial.custom_shading_fn,
     )
 
@@ -78,7 +86,6 @@ def event_site_map(
         emp_gm_params[sr.constants.GMM_PRED_PSA_KEYS] = np.exp(
             emp_gm_params[sr.constants.GMM_PRED_PSA_KEYS]
         )
-        im = "pSA_0.01"
 
         grid = plotting.create_grid(
             emp_gm_params[["lon", "lat", f"{im}_mean"]].rename(
@@ -102,6 +109,8 @@ def event_site_map(
             reverse_cmap=True,
             plot_contours=True,
             transparency=65,
+            cb_position="JBC+o0c/0.25c" if no_frame else None,
+            cb_box="+gwhite+c0c/0c/0.3c/0c" if no_frame else None,
         )
 
     fig.meca(
@@ -112,8 +121,8 @@ def event_site_map(
             magnitude=event_data.mag,
         ),
         scale=f"{0.075 * event_data.mag}c",
-        longitude=event_data.lon,
-        latitude=event_data.lat,
+        longitude=event_lon,
+        latitude=event_lat,
         depth=event_data.depth,
         compressionfill="red",
         pen="0.05p,black,solid",
@@ -121,8 +130,8 @@ def event_site_map(
 
     fig.text(
         text=["Earthquake", "rupture"],
-        x=[event_data.lon + 0.0275, event_data.lon + 0.0275],
-        y=[event_data.lat + 0.0025, event_data.lat - 0.0025],
+        x=[event_lon + 0.0275, event_lon + 0.0275],
+        y=[event_lat + 0.0025, event_lat - 0.0025],
     )
 
     # Plot the observation sites

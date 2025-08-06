@@ -1593,7 +1593,7 @@ def spatial_corr_trends(
         ax1.semilogx(
             sr.constants.PERIODS,
             gnn_only_res_dist_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"S2S {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
+            label=f"S2S {cur_key} km (N = {gnn_only_corr_residual_groups.size()[cur_key]})",
             c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )
@@ -1659,7 +1659,7 @@ def spatial_corr_trends(
             gnn_only_res_dist_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
             c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
-            label=f"S2S {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
+            label=f"S2S {cur_key} km (N={gnn_only_corr_residual_groups.size()[cur_key]})",
         )
 
         if cim_corr_res_std is not None:
@@ -1709,7 +1709,7 @@ def spatial_corr_trends(
         ax1.semilogx(
             sr.constants.PERIODS,
             gnn_residual_res_dist_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"S2S {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
+            label=f"S2S {cur_key} km (N={gnn_residual_corr_residual_groups.size()[cur_key]})",
             c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )
@@ -1774,7 +1774,7 @@ def spatial_corr_trends(
         ax2.semilogx(
             sr.constants.PERIODS,
             gnn_residual_res_dist_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
-            label=f"S2S {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
+            label=f"S2S {cur_key} km (N={gnn_residual_corr_residual_groups.size()[cur_key]})",
             c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )
@@ -1873,7 +1873,7 @@ def spatial_corr_trends(
         ax1.semilogx(
             sr.constants.PERIODS,
             gnn_only_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
-            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
+            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km (N={gnn_only_corr_residual_groups.size()[cur_key]})",
             c=sr.constants.LN_VS30_DIFF_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )
@@ -1938,7 +1938,7 @@ def spatial_corr_trends(
         ax2.semilogx(
             sr.constants.PERIODS,
             gnn_only_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
-            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_only_corr_residual_groups.size()[cur_key]}",
+            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km (N={gnn_only_corr_residual_groups.size()[cur_key]})",
             c=sr.constants.LN_VS30_DIFF_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )
@@ -1989,7 +1989,7 @@ def spatial_corr_trends(
         ax1.semilogx(
             sr.constants.PERIODS,
             gnn_residual_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
-            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
+            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km (N={gnn_residual_corr_residual_groups.size()[cur_key]})",
             c=sr.constants.LN_VS30_DIFF_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )
@@ -2054,7 +2054,7 @@ def spatial_corr_trends(
         ax2.semilogx(
             sr.constants.PERIODS,
             gnn_residual_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
-            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km, N = {gnn_residual_corr_residual_groups.size()[cur_key]}",
+            label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km (N={gnn_residual_corr_residual_groups.size()[cur_key]})",
             c=sr.constants.LN_VS30_DIFF_COLORS[i],
             linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
         )
@@ -2274,6 +2274,7 @@ def ind_scenario_pSA(
 
         ax.set_xscale("log")
         ax.grid(
+            which="both",
             linewidth=0.5,
             alpha=0.5,
             linestyle="--",
