@@ -346,8 +346,8 @@ def _run_mp_helper(
     cur_val_events = event_folds[val_fold_ind[0]]
     cur_val_int_sites = site_folds[val_fold_ind[1]]
 
-    cur_train_events = np.concatenate([event_folds[i] for i, _ in train_folds_ind])
-    cur_train_int_sites = np.concatenate([site_folds[i] for _, i in train_folds_ind])
+    cur_train_events = np.unique(np.concatenate([event_folds[i] for i, _ in train_folds_ind]))
+    cur_train_int_sites = np.unique(np.concatenate([site_folds[i] for _, i in train_folds_ind]))
 
     obs_sites = np.setdiff1d(all_sites, cur_val_int_sites)
 
