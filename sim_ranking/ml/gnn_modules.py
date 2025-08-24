@@ -113,9 +113,9 @@ class CustomAttentionGNN(torch.nn.Module):
                 "tanh" if ix == 0 else run_config.obs_embedding_act_fn,
             )
 
-            ## Observation node transform model
+            ## Unweighted message function
             # This model performs the transformation of the observation
-            # nodes used to update the SoI node
+            # nodes (and edge states) used to update the SoI node
             n_msg_transform_in_channels = (
                 (run_config.site_obs_n_features)
                 if ix == 0

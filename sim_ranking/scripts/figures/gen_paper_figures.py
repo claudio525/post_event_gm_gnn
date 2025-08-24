@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -23,32 +24,28 @@ def mag_rrup_scatter(
     Creates a scatter of rrup vs magnitude
     with the marginal distributions on the sides
     """
-    print("Using figure size: ", sr.constants.FIG_SIZE)
-    print("Using figure format: ", sr.constants.FIG_FORMAT)
-    print("Using figure dpi: ", sr.constants.FIG_DPI)
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
+    # Update font size
+    if sr.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": sr.constants.FIG_FONT_SIZE,
+            }
+        )
 
     obs_data = sr.ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
     obs_data = obs_data.to_event_site_index()
-
-    # # Ignore tectonic types other than 
-    # # crustal, subduction interface, and subduction slab
-    # records_to_keep = obs_data.record_df[
-    #     obs_data.record_df["tect_type"].isin(
-    #         [
-    #             sr.constants.TectonicType.CRUSTAL,
-    #             sr.constants.TectonicType.SUBDUCTION_INTERFACE,
-    #             sr.constants.TectonicType.SUBDUCTION_SLAB,
-    #         ]
-    #     )
-    # ].index.values.astype(str)
-    # obs_data = obs_data.filter_record_ids(records_to_keep)
 
     # Load basic filtered data
     filtered_obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
 
     # Apply Lee magnitude-distance filter
     _, __, valid_record_ids = sr.ml.data.get_valid_site_ints_Lee2024(
-    filtered_obs_data.event_sites, filtered_obs_data.record_df.drop(columns=filtered_obs_data.ims)
+        filtered_obs_data.event_sites,
+        filtered_obs_data.record_df.drop(columns=filtered_obs_data.ims),
     )
     filtered_obs_data = filtered_obs_data.filter_record_ids(valid_record_ids)
 
@@ -121,24 +118,31 @@ def mag_rrup_scatter(
 
 @app.command("sample-weighting")
 def sample_weighting(
-    nzgmdb_ffp: Path,
+    run_config_ffp: Path,
     output_dir: Path,
-    max_dist: float,
-    closest_max_dist: float,
-    max_n_obs_sites: int,
-    min_n_obs_sites: int,
-    mag_n_bins: int = 20,
-    rrup_n_bins: int = 20,
-    mag_max_weight: float = 4.0,
-    mag_start: float = 4.5,
-    mag_end: float = 6.0,
-    doc_max_weight: float = 1.0,
-    doc_start: float = 1.0,
-    doc_end: float = 6.0,
+    mag_nbins: int = 20,
+    rrup_nbins: int = 20,
+    doc_nbins: int = 20,
 ):
-    # Load observed data
-    obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
+    """
+    Creates sample weighting figures
+    """
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
 
+    # Update font size
+    if sr.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": sr.constants.FIG_FONT_SIZE,
+            }
+        )
+
+    run_config = sr.ml.RunConfig.from_yaml(run_config_ffp)
+
+    # Load observed data
+    obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites
     print(f"Number of events: {len(events)}")
@@ -167,10 +171,10 @@ def sample_weighting(
         dist_matrix,
         obs_sites,
         int_sites,
-        max_dist,
-        closest_max_dist,
-        max_n_obs_sites,
-        min_n_obs_sites,
+        run_config.max_dist,
+        run_config.closest_max_dist,
+        run_config.max_n_obs_sites,
+        run_config.min_n_obs_sites,
     )
     # Create scenario dataframe
     scenario_df = sr.ml.utils.create_scenario_df(
@@ -183,61 +187,81 @@ def sample_weighting(
     print(f"Number of scenarios: {len(scenario_df)}")
 
     ### Magnitude
-    fig, ax = plt.subplots(1, 1, figsize=sr.constants.FIG_SIZE)
-    sns.histplot(scenario_df["mag"], bins=mag_n_bins, ax=ax)
+    fig, ax = plt.subplots(
+        1, 1, figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI
+    )
+    sns.histplot(scenario_df["mag"], bins=mag_nbins, ax=ax)
     ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
     ax.xaxis.set_minor_locator(plt.MultipleLocator(0.25))
+    ax.set_xlim(scenario_df["mag"].min(), scenario_df["mag"].max())
+    ax.set_xlabel("Magnitude, $M_{W}$")
+    ax.set_ylabel("Number of scenarios")
 
     # Weighting
-    weight_func = sr.ml.gnn_gm.get_mag_weight_func(
-        0.0, mag_max_weight, mag_start, mag_end
-    )
-    mag_values = np.linspace(scenario_df.mag.min(), scenario_df.mag.max(), 100)
-    weights = np.asarray([weight_func(cur_mag) for cur_mag in mag_values])
-    ax_weight = ax.twinx()
-    ax_weight.plot(mag_values, weights, color="red", linestyle="--")
-    ax_weight.set_ylim(0.0, None)
+    if run_config.mag_scenario_weighting:
+        weight_func = sr.ml.gnn_gm.get_mag_weight_func(
+            0.0, run_config.mag_max_weight, run_config.mag_start, run_config.mag_end
+        )
+        mag_values = np.linspace(scenario_df.mag.min(), scenario_df.mag.max(), 100)
+        weights = np.asarray([weight_func(cur_mag) for cur_mag in mag_values])
+        ax_weight = ax.twinx()
+        ax_weight.plot(
+            mag_values,
+            weights,
+            color="red",
+            linestyle="--",
+            linewidth=sr.constants.FIG_LINEWIDTH,
+        )
+        ax_weight.set_ylim(0.0, None)
+        ax_weight.set_ylabel("Weight")
 
-    ax.set_title("Magnitude Distribution (Original) + Weighting Function")
     fig.tight_layout()
-
     plt.savefig(output_dir / "mag_weighting.png")
     plt.close(fig)
 
     ### RRUP
-    fig, ax_hist = plt.subplots(1, 1, figsize=(8, 6))
-    sns.histplot(scenario_df["rrup"], bins=rrup_n_bins, ax=ax_hist)
+    max_rrup = 300
+    fig, ax_hist = plt.subplots(
+        1, 1, figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI
+    )
+    sns.histplot(
+        scenario_df.loc[scenario_df.rrup <= 300, "rrup"], bins=rrup_nbins, ax=ax_hist
+    )
     ax_hist.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    ax_hist.xaxis.set_minor_locator(plt.MultipleLocator(5))
-    ax_hist.set_xlim(0.0)
-    fig.tight_layout()
+    ax_hist.xaxis.set_minor_locator(plt.MultipleLocator(10))
+    ax_hist.set_xlim(0.0, max_rrup)
+    ax_hist.set_xlabel("Source-to-site distance, $R_{rup}$")
+    ax_hist.set_ylabel("Number of scenarios")
 
+    fig.tight_layout()
     plt.savefig(output_dir / "rrup_hist.png")
     plt.close(fig)
 
     ### Degree of constraint
     # Distribution
-    fig, ax_hist = plt.subplots(1, 1, figsize=(8, 6))
-    sns.histplot(scenario_df["constraintness"], bins=20, ax=ax_hist)
+    fig, ax_hist = plt.subplots(
+        1, 1, figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI
+    )
+    sns.histplot(scenario_df["constraintness"], bins=doc_nbins, ax=ax_hist)
     ax_hist.grid(linewidth=0.5, alpha=0.5, linestyle="--")
     ax_hist.xaxis.set_minor_locator(plt.MultipleLocator(0.5))
-    ax_hist.set_xlim(0.0)
+    ax_hist.set_xlim(0.0, scenario_df["constraintness"].max())
+    ax_hist.set_xlabel("Degree of Constraint")
+    ax_hist.set_ylabel("Number of scenarios")
 
     # Weighting
-    doc_weight_fn = sr.ml.gnn_gm.get_doc_weight_func(
-        0.0, doc_max_weight, doc_start, doc_end
-    )
-    doc_values = np.linspace(
-        scenario_df.constraintness.min(), scenario_df.constraintness.max(), 100
-    )
-    weights = [doc_weight_fn(cur_doc) for cur_doc in doc_values]
+    if run_config.doc_scenario_weighting:
+        doc_weight_fn = sr.ml.gnn_gm.get_doc_weight_func(
+            0.0, run_config.doc_max_weight, run_config.doc_start, run_config.doc_end
+        )
+        doc_values = np.linspace(
+            scenario_df.constraintness.min(), scenario_df.constraintness.max(), 100
+        )
+        weights = [doc_weight_fn(cur_doc) for cur_doc in doc_values]
 
-    ax_weight = ax_hist.twinx()
-    ax_weight.plot(doc_values, weights, color="red", linestyle="--")
-    ax_weight.set_ylim(0.0, None)
-    ax_hist.set_title(
-        "Degree of Constraint Distribution (Original) + Weighting Function"
-    )
+        ax_weight = ax_hist.twinx()
+        ax_weight.plot(doc_values, weights, color="red", linestyle="--")
+        ax_weight.set_ylim(0.0, None)
 
     fig.tight_layout()
     plt.savefig(output_dir / f"doc_weighting.{sr.constants.FIG_FORMAT}")
@@ -257,6 +281,10 @@ def bias_res_std(
     Generates a figure comparing the bias and residual standard deviation
     of the GNN-Only, GNN-Residual, marginal and cIM models.
     """
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
     # Update font size
     if sr.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
@@ -305,10 +333,10 @@ def bias_res_std(
         gnn_only_res_df, ims=gnn_only_run_config.ims
     )
     cim_res_df = sr.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
-
+    cim_res_bias_std_df = sr.analysis.get_res_mean_std(cim_res_df)
     gnn_res_res_df = sr.analysis.get_residuals(gnn_res_results)
     gnn_res_bias_std_df = sr.analysis.get_res_mean_std(gnn_res_res_df)
-    cim_res_bias_std_df = sr.analysis.get_res_mean_std(cim_res_df)
+
     marg_res_bias_std_df = sr.analysis.get_res_mean_std(emp_res_df)
 
     fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
@@ -463,6 +491,10 @@ def mag_bias_res_std(
     output_name : str
         Name of the output file
     """
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
     plot_labels = plot_labels.split(",") if plot_labels is not None else None
 
     # Update font size
@@ -743,6 +775,10 @@ def rrup_bias_res_std(
     output_name : str
         Name of the output file
     """
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
     plot_labels = plot_labels.split(",") if plot_labels is not None else None
 
     # Update font size
@@ -1024,6 +1060,10 @@ def doc_bias_res_std(
     output_name : str
         Name of the output file
     """
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
     plot_labels = plot_labels.split(",") if plot_labels is not None else None
 
     # Update font size
@@ -1273,6 +1313,10 @@ def fmin_filter(nzgmdb_ffp: Path, gnn_result_dir: Path, output_dir: Path):
     Generates figure showing the number of records and scenarios
     as a function of pSA period
     """
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
     # Update font size
     if sr.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
@@ -1326,6 +1370,10 @@ def spatial_corr_trends(
     bias_limit: float = 1.0,
     std_limit: float = 1.0,
 ):
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
     plot_labels = plot_labels.split(",") if plot_labels is not None else None
 
     # Update font size
@@ -2084,6 +2132,10 @@ def ind_scenario_pSA(
     nzgmdb_ffp: Path,
     output_dir: Path,
 ):
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
     # Update font size
     if sr.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
@@ -2102,8 +2154,8 @@ def ind_scenario_pSA(
 
     dist_matrix = sr.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
 
-    obs_color_boundaries = np.array([0, 1.0, 2.5, 5.0, 10.0, 30.0])
-    obs_colors = sns.color_palette("hls", 5)
+    # obs_color_boundaries = np.array([0, 1.0, 2.5, 5.0, 10.0, 30.0])
+    obs_colors = sns.color_palette("viridis", 5)
 
     site_ints = obs_data.event_sites[event_id]
     for cur_site_int in tqdm(site_ints):
@@ -2115,6 +2167,8 @@ def ind_scenario_pSA(
         cur_obs_sites = sr.plot_ind_scenarios.get_obs_sites(
             event_id, cur_site_int, gnn_residual_pred_df, dist_matrix, n_obs_sites=5
         )
+        cur_obs_site_distances = dist_matrix.loc[cur_site_int].loc[cur_obs_sites].values
+        cur_obs_color_boundaries = np.linspace(cur_obs_site_distances.min(), cur_obs_site_distances.max(), 5)
 
         fig, ax = plt.subplots(figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI)
 
@@ -2131,14 +2185,13 @@ def ind_scenario_pSA(
                     ].values.astype(float)
                 ),
                 c=obs_colors[
-                    mlt.array_utils.find_nearest_larger(
-                        obs_color_boundaries,
+                    mlt.array_utils.find_nearest_smaller(
+                        cur_obs_color_boundaries,
                         dist_matrix.loc[cur_site_int, cur_obs_site],
                     )
-                    - 1
                 ],
                 linestyle="--",
-                label=f"{cur_obs_site} - S2S: {dist_matrix.loc[cur_site_int, cur_obs_site]:.1f} km",
+                label=f"{cur_obs_site} - {dist_matrix.loc[cur_site_int, cur_obs_site]:.1f} km",
                 linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
             )
             obs_lines.append(cur_line)
@@ -2279,7 +2332,7 @@ def ind_scenario_pSA(
             alpha=0.5,
             linestyle="--",
         )
-        ax.set_xlabel("Period (s)")
+        ax.set_xlabel("Vibration Period, T(s)")
         ax.set_ylabel("pSA (g)")
         ax.set_xlim(0.01, 10.0)
         ax.yaxis.set_major_formatter(FuncFormatter(sr.plot_ind_scenarios.exp_formatter))
@@ -2306,6 +2359,129 @@ def ind_scenario_pSA(
         fig.tight_layout()
         fig.savefig(output_dir / f"{event_id}_{cur_site_int}.{sr.constants.FIG_FORMAT}")
         plt.close(fig)
+
+
+@app.command("hyper-var")
+def hyper_var(
+    results_dir: Path,
+    ref_model_dir: Path,
+    output_dir: Path,
+    bias_limit: float = 1.0,
+    std_limit: float = 1.0,
+):
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
+    result_dirs = [cur_dir for cur_dir in results_dir.iterdir() if cur_dir.is_dir()]
+
+    ref_metrics = pd.read_pickle(ref_model_dir / "metrics.pickle")
+    ref_val_loss = ref_metrics.sel[:, :, "w_loss_hist_val"].median(axis=1)
+    ref_train_loss = ref_metrics.sel[:, :, "w_loss_hist_train"].median(axis=1)
+    n_epochs = ref_val_loss.shape[0]
+    epochs = np.arange(n_epochs) + 1
+
+    # Loss
+    fig, (ax1, ax2) = plt.subplots(
+        1, 2, figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI, sharey=True
+    )
+    ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax1.set_xlabel("Epochs")
+    ax1.set_ylabel("Weighted Loss (Training)")
+    ax1.set_xlim(1, n_epochs)
+
+    ax2.set_xlabel("Epochs")
+    ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax2.set_ylabel("Weighted Loss (Validation)")
+    ax2.set_xlim(1, n_epochs)
+
+    for ix, cur_dir in enumerate(result_dirs):
+        metrics = pd.read_pickle(cur_dir / "metrics.pickle")
+        val_loss = metrics.sel[:, :, "w_loss_hist_val"].median(axis=1)
+        train_loss = metrics.sel[:, :, "w_loss_hist_train"].median(axis=1)
+        assert val_loss.shape[0] == n_epochs
+
+        ax1.plot(
+            epochs,
+            train_loss,
+            c="k",
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            label="Variation" if ix == 0 else "",
+        )
+        ax2.plot(epochs, val_loss, c="k", linewidth=sr.constants.FIG_GROUP_LINEWIDTH)
+
+    ax1.plot(
+        epochs,
+        ref_train_loss,
+        c="b",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+        label="GNN-residual",
+    )
+    ax2.plot(epochs, ref_val_loss, c="b", linewidth=sr.constants.FIG_LINEWIDTH)
+    ax1.legend()
+
+    fig.tight_layout()
+    fig.savefig(output_dir / f"loss_comparison.{sr.constants.FIG_FORMAT}")
+    plt.close(fig)
+
+    # Bias & Residual Standard deviation
+    ref_gnn_results = pd.read_parquet(
+        ref_model_dir / "val_results.parquet"
+    ).sort_index()
+    ref_gnn_residuals = sr.analysis.get_residuals(
+        ref_gnn_results, ims=sr.constants.PSA_KEYS
+    )
+    ref_gnn_res_bias_std = sr.analysis.get_res_mean_std(ref_gnn_residuals)
+
+    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
+        figsize=sr.constants.FIG_SIZE,
+        fig_dpi=sr.constants.FIG_DPI,
+        main_wspace=0.175,
+        left=0.08,
+        right=0.99,
+        bottom=0.125,
+        std_y_axis_limits=(0.0, std_limit),
+        bias_y_axis_limits=(-bias_limit, bias_limit),
+    )
+    for ix, cur_dir in enumerate(result_dirs):
+        cur_results = pd.read_parquet(cur_dir / "val_results.parquet").sort_index()
+        cur_residuals = sr.analysis.get_residuals(cur_results, ims=sr.constants.PSA_KEYS)
+        cur_res_bias_std = sr.analysis.get_res_mean_std(cur_residuals)
+
+        ax1.plot(
+            sr.constants.PERIODS,
+            cur_res_bias_std["mean"],
+            c="k",
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            label="Variation" if ix == 0 else "",
+        )
+        ax2.plot(
+            sr.constants.PERIODS,
+            cur_res_bias_std["std"],
+            c="k",
+            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+        )
+
+    ax1.plot(
+        sr.constants.PERIODS,
+        ref_gnn_res_bias_std["mean"],
+        c="b",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+        label="GNN-residual",
+    )
+    ax2.plot(
+        sr.constants.PERIODS,
+        ref_gnn_res_bias_std["std"],
+        c="b",
+        linewidth=sr.constants.FIG_LINEWIDTH,
+    )
+    ax1.legend()
+    
+    fig.tight_layout()
+    fig.savefig(output_dir / f"bias_residual_comparison.{sr.constants.FIG_FORMAT}")
+    plt.close(fig)
+
+
 
 
 if __name__ == "__main__":

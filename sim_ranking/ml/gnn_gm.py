@@ -1434,12 +1434,6 @@ def get_predictions(
     results = pd.concat(results, axis=0)
     return results
 
-
-
-
-
-
-
 def get_mag_weight_func(
     min_weight: float, max_weight: float, mag_start: float, mag_end: float
 ):
