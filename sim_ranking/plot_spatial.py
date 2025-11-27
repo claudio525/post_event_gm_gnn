@@ -13,11 +13,11 @@ from . import data
 
 IM_LIMITS_MAPPING = {
     "pSA_0.01": (0.0, 1.0, 0.05),
-    "pSA_0.1": (0.0, 2.5, 0.125),
+    "pSA_0.1": (0.0, 2.5, 0.25),
     "pSA_0.5": (0.0, 1.5, 0.075),
-    "pSA_1.0": (0.0, 0.8, 0.04),
-    "pSA_5.0": (0.0, 0.25, 0.0125),
-    "pSA_10.0": (0.0, 0.025, 0.00125),
+    "pSA_1.0": (0.0, 0.8, 0.08),
+    "pSA_5.0": (0.0, 0.25, 0.025),
+    "pSA_10.0": (0.0, 0.025, 0.0025),
 }
 
 
@@ -64,8 +64,8 @@ def plot_im_values(
             MAP_TICK_PEN_PRIMARY="1p,black",
             MAP_FRAME_PEN="1p,black",
             MAP_FRAME_AXES="wsne",
-            FONT_ANNOT_PRIMARY="11p,Helvetica,black",
-            FONT_LABEL="12p,Helvetica,black",
+            FONT_ANNOT_PRIMARY=constants.GMT_FIG_FONT_ANNOT_PRIMARY,
+            FONT_LABEL=constants.GMT_FIG_FONT_LABEL,
         ),
         high_res_topo=True,
         high_quality=True,
@@ -82,14 +82,14 @@ def plot_im_values(
         "hot",
         im_cmap_limits,
         ("white", "black"),
-        utils.get_nice_im_name(im),
+        cb_label=utils.get_nice_im_name(im) if constants.GMT_SHOW_CB_LABEL else None,
         continuous_cmap=True,
         reverse_cmap=True,
         plot_contours=True,
         transparency=30,
         encode_cb_label=False,
         cb_position="JBC+o0c/0.25c",
-        cb_box="+gwhite+c0c/0c/0.3c/0c" 
+        cb_box="+gwhite+c0c/0c/0.3c/0c",
     )
 
     # Plot the prediction sites
@@ -114,7 +114,7 @@ def plot_im_values(
         latitude=event_info.lat,
         depth=event_info.depth,
         G="red",
-        W="0.05p,black,solid",
+        pen="0.05p,black,solid",
     )
 
     # Plot the observation sites
@@ -170,8 +170,8 @@ def plot_res_values(
             MAP_TICK_PEN_PRIMARY="1p,black",
             MAP_FRAME_PEN="1p,black",
             MAP_FRAME_AXES="wsne",
-            FONT_ANNOT_PRIMARY="11p,Helvetica,black",
-            FONT_LABEL="12p,Helvetica,black",
+            FONT_ANNOT_PRIMARY=constants.GMT_FIG_FONT_ANNOT_PRIMARY,
+            FONT_LABEL=constants.GMT_FIG_FONT_LABEL,
         ),
         high_res_topo=True,
         high_quality=True,
@@ -187,13 +187,17 @@ def plot_res_values(
         "polar",
         (-0.5, 0.5, 0.1),
         ("darkred", "darkblue"),
-        f"{utils.get_nice_im_name(im)} Differences (@[ {label_math}  @[)",
+        cb_label=(
+            f"{utils.get_nice_im_name(im)} Differences (@[ {label_math}  @[)"
+            if constants.GMT_SHOW_CB_LABEL
+            else None
+        ),
         continuous_cmap=True,
         transparency=50,
         reverse_cmap=True,
         encode_cb_label=False,
         cb_position="JBC+o0c/0.25c",
-        cb_box="+gwhite+c0c/0c/0.3c/0c" 
+        cb_box="+gwhite+c0c/0c/0.3c/0c",
     )
 
     # Plot the prediction sites
@@ -218,7 +222,7 @@ def plot_res_values(
         latitude=event_info.lat,
         depth=event_info.depth,
         G="red",
-        W="0.05p,black,solid",
+        pen="0.05p,black,solid",
     )
 
     # Plot the observation sites

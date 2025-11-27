@@ -344,15 +344,22 @@ def combine_spatial_figures(
 
     fig, (ax1, ax2, ax3) = plt.subplots(nrows=1, ncols=3, figsize=figsize, dpi=dpi)
 
+    im1 = f"pSA({fig_1_ffp.stem.rsplit("_", 1)[-1].replace("p", ".")}s)"
     ax1.imshow(plt.imread(fig_1_ffp), aspect="equal")
     ax1.text(0.02, 0.98, "MVN-CIM", transform=ax1.transAxes, verticalalignment='top', horizontalalignment='left', fontsize=8)
+    ax1.text(0.98, 0.98, im1, transform=ax1.transAxes, verticalalignment='top', horizontalalignment='right', fontsize=8)
     ax1.axis("off")
 
+    im2 = f"pSA({fig_2_ffp.stem.rsplit("_", 1)[-1].replace("p", ".")}s)"
     ax2.imshow(plt.imread(fig_2_ffp), aspect="equal")
     ax2.text(0.02, 0.98, "GNN-Residual", transform=ax2.transAxes, verticalalignment='top', horizontalalignment='left', fontsize=8)
+    ax2.text(0.98, 0.98, im2, transform=ax2.transAxes, verticalalignment='top', horizontalalignment='right', fontsize=8)
     ax2.axis("off")
 
+    im3 = f"pSA({fig_3_ffp.stem.rsplit('_', 1)[-1].replace('p', '.')}s)"
     ax3.imshow(plt.imread(fig_3_ffp), aspect="equal")
+    ax3.text(0.02, 0.98, r"Differences $\left( \mu_{\text{lnIM}}^{(\text{cIM})} - \mu_{\text{lnIM}}^{(\text{GNN})} \right)$", transform=ax3.transAxes, verticalalignment='top', horizontalalignment='left', fontsize=8)
+    ax3.text(0.98, 0.98, im3, transform=ax3.transAxes, verticalalignment='top', horizontalalignment='right', fontsize=8)
     ax3.axis("off")
 
     plt.subplots_adjust(wspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)

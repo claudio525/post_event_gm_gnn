@@ -210,7 +210,17 @@ FIG_GROUP_LINEWIDTH = None
 if (env_fig_group_linewidth := os.environ.get("fig_group_linewidth")) is not None:
     FIG_GROUP_LINEWIDTH = float(env_fig_group_linewidth)
 
+GMT_FIG_FONT_LABEL = "14p,Helvetica,black"
+if (env_gmt_fig_font_label := os.environ.get("gmt_fig_font_label")) is not None:
+    GMT_FIG_FONT_LABEL = env_gmt_fig_font_label
 
+GMT_FIG_FONT_ANNOT_PRIMARY = "11p,Helvetica,black"
+if (env_gmt_fig_font_annot_primary := os.environ.get("gmt_fig_font_annot_primary")) is not None:
+    GMT_FIG_FONT_ANNOT_PRIMARY = env_gmt_fig_font_annot_primary
+
+GMT_SHOW_CB_LABEL = True
+if (env_gmt_show_cb_label := os.environ.get("gmt_show_cb_label")) is not None:
+    GMT_SHOW_CB_LABEL = env_gmt_show_cb_label.lower() in ("1", "true", "yes")
 
 MW_RRUP_LIMITS = np.array([
     [3.5, 96.001584],
