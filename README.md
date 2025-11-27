@@ -1,1 +1,1 @@
-# sim_ranking
+# Post-Event Ground Motion Estimation Using Graph Neural Networks

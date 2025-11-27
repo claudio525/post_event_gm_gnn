@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "post_event_gm_gnn"
+version = "2025.11.1"
+requires-python = ">=3.12"
+authors = [{ name = "Claudio Schill" }]
+description = "Post-Event Ground Motion Estimation Using Graph Neural Network"
+readme = "README.md"
+
+[tool.setuptools.package-dir]
+post_event_gm_gnn = "post_event_gm_gnn"

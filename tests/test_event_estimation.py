@@ -6,7 +6,7 @@ import pytest
 import yaml
 import numpy.testing as npt
 
-import sim_ranking as sr
+import post_event_gm_gnn as pg
 
 wdata = Path(os.environ.get("wdata"))
 config_ffp = Path(__file__).parent / "test_config.yaml"
@@ -22,21 +22,21 @@ def train_results(model_dir):
     return pd.read_parquet(model_dir / "train_results.parquet")
 
 @pytest.fixture(scope="module")
-def obs_data(run_config: sr.ml.RunConfig):
-    return sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
+def obs_data(run_config: pg.ml.RunConfig):
+    return pg.data.load_obs_nzgmdb(run_config.obs_data_ffp)
 
 @pytest.fixture(scope="module")
 def run_config(model_dir):
-    return sr.ml.RunConfig.from_yaml(model_dir / "run_config.yaml")
+    return pg.ml.RunConfig.from_yaml(model_dir / "run_config.yaml")
 
 @pytest.fixture(scope="module")
-def emp_gm_data(run_config: sr.ml.RunConfig, obs_data: sr.ObservedData):
+def emp_gm_data(run_config: pg.ml.RunConfig, obs_data: pg.ObservedData):
     if run_config.use_emp_gm_model:
-        return sr.analysis.load_emp_gm_params_res(run_config.emp_gm_params_ffp, obs_data)
+        return pg.analysis.load_emp_gm_params_res(run_config.emp_gm_params_ffp, obs_data)
     return None
 
 @pytest.mark.parametrize("event_id", event_est_config["events"])
-def test_event_estimation(event_id: str, model_dir: Path, run_config: sr.ml.RunConfig, train_results: pd.DataFrame, obs_data: sr.ObservedData, emp_gm_data: tuple[pd.DataFrame, pd.DataFrame] | None):
+def test_event_estimation(event_id: str, model_dir: Path, run_config: pg.ml.RunConfig, train_results: pd.DataFrame, obs_data: pg.ObservedData, emp_gm_data: tuple[pd.DataFrame, pd.DataFrame] | None):
     train_results = train_results.loc[train_results.event_id == event_id]
     event_data = obs_data.get_event_data(event_id)
 
@@ -45,7 +45,7 @@ def test_event_estimation(event_id: str, model_dir: Path, run_config: sr.ml.RunC
 
     emp_gm_params, obs_emp_res_df = emp_gm_data if emp_gm_data else (None, None)
 
-    result_df = sr.ml.predict_event(
+    result_df = pg.ml.predict_event(
         model_dir,
         event_id,
         obs_data.event_df.loc[event_id],
