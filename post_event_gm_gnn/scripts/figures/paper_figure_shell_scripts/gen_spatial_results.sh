@@ -13,7 +13,6 @@ nzgmdb_ffp="${wdata}/gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_
 out_dir="/Users/claudy/dev/work/tmp/tmp_paper_figures/3468575"
 
 ims="pSA_0.1 pSA_1.0 pSA_5.0"
-# ims="pSA_5.0"
 
 # GM Maps
 python ../gen_spatial_plots.py "gen-event-prediction-plots" "--region-key" "chch" "${gnn_results_dir}" "${gnn_predictions_file}" "${out_dir}" "${emp_gm_params}" "${out_dir}" "${cim_results_file}" "${out_dir}" "${nzgmdb_ffp}" "3468575" ${=ims}

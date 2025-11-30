@@ -273,7 +273,9 @@ class RunConfig:
 
     @property
     def emp_gm_params_ffp(self):
-        return Path(self.wdata) / self.rel_emp_gm_params_fp
+        if self.rel_emp_gm_params_fp is not None:
+            return Path(self.wdata) / self.rel_emp_gm_params_fp
+        return None
 
     def to_dict(self):
         result = {

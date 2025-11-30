@@ -7,7 +7,7 @@ import numpy as np
 import typer
 
 from pygmt_helper import plotting
-import sim_ranking as sr
+import post_event_gm_gnn as pg
 
 app = typer.Typer()
 
@@ -33,7 +33,7 @@ def event_site_map(
     """
     Create a map plot of the event and the site locations
     """
-    obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
+    obs_data = pg.data.load_obs_nzgmdb(nzgmdb_ffp)
     obs_sites = obs_data.record_df.loc[
         obs_data.record_df.event_id == event, "site_id"
     ].values.astype(str)
@@ -52,7 +52,7 @@ def event_site_map(
         obs_sites = obs_sites[~np.isin(obs_sites, val_int_sites)]
 
     # Create figure
-    region = sr.constants.REGION_MAPPINGS[region_key]
+    region = pg.constants.REGION_MAPPINGS[region_key]
     fig = plotting.gen_region_fig(
         region=region,
         plot_kwargs={
@@ -78,13 +78,13 @@ def event_site_map(
         high_res_topo=True,
         high_quality=high_quality,
         plot_roads=plot_roads,
-        custom_shading_fn=sr.plot_spatial.custom_shading_fn,
+        custom_shading_fn=pg.plot_spatial.custom_shading_fn,
     )
 
     if emp_gm_params_ffp is not None:
         emp_gm_params = pd.read_parquet(emp_gm_params_ffp)
-        emp_gm_params[sr.constants.GMM_PRED_PSA_KEYS] = np.exp(
-            emp_gm_params[sr.constants.GMM_PRED_PSA_KEYS]
+        emp_gm_params[pg.constants.GMM_PRED_PSA_KEYS] = np.exp(
+            emp_gm_params[pg.constants.GMM_PRED_PSA_KEYS]
         )
 
         grid = plotting.create_grid(
@@ -102,9 +102,9 @@ def event_site_map(
             fig,
             grid,
             "hot",
-            sr.plot_spatial.IM_LIMITS_MAPPING[im],
+            pg.plot_spatial.IM_LIMITS_MAPPING[im],
             ("white", "black"),
-            sr.utils.get_nice_im_name(im),
+            pg.utils.get_nice_im_name(im),
             continuous_cmap=True,
             reverse_cmap=True,
             plot_contours=True,
@@ -184,7 +184,7 @@ def plot_event_cim_predictions(
     use_map_data: bool = False,
     use_high_res_topo: bool = False,
 ):
-    region = sr.constants.REGION_MAPPINGS[region_key]
+    region = pg.constants.REGION_MAPPINGS[region_key]
 
     # Load map data
     map_data = None
@@ -192,7 +192,7 @@ def plot_event_cim_predictions(
         print("Loading map data")
         map_data = plotting.NZMapData.load(high_res_topo=use_high_res_topo)
 
-    sr.plot_spatial.plot_event_cim_predictions(
+    pg.plot_spatial.plot_event_cim_predictions(
         cim_results_ffp,
         nzgmdb_ffp,
         event_id,
@@ -214,7 +214,7 @@ def plot_event_gmm_predictions(
     use_map_data: bool = False,
     use_high_res_topo: bool = False,
 ):
-    region = sr.constants.REGION_MAPPINGS[region_key]
+    region = pg.constants.REGION_MAPPINGS[region_key]
 
     # Load map data
     map_data = None
@@ -222,7 +222,7 @@ def plot_event_gmm_predictions(
         print("Loading map data")
         map_data = plotting.NZMapData.load(high_res_topo=use_high_res_topo)
 
-    sr.plot_spatial.plot_event_gmm_predictions(
+    pg.plot_spatial.plot_event_gmm_predictions(
         emp_gm_params_ffp,
         nzgmdb_ffp,
         event_id,
@@ -243,7 +243,7 @@ def plot_event_gnn_predictions(
     use_map_data: bool = False,
     use_high_res_topo: bool = False,
 ):
-    region = sr.constants.REGION_MAPPINGS[region_key]
+    region = pg.constants.REGION_MAPPINGS[region_key]
 
     # Load map data
     map_data = None
@@ -251,7 +251,7 @@ def plot_event_gnn_predictions(
         print("Loading map data")
         map_data = plotting.NZMapData.load(high_res_topo=use_high_res_topo)
 
-    sr.plot_spatial.plot_event_gnn_predictions(
+    pg.plot_spatial.plot_event_gnn_predictions(
         model_dir,
         event_predictions_ffp,
         output_dir,
@@ -276,10 +276,10 @@ def get_event_prediction_plots(
     region_key: str = "canterbury",
 ):
     """Generates spatial plots for GNN, GMM, and cIM predictions for a given event."""
-    region = sr.constants.REGION_MAPPINGS[region_key]
+    region = pg.constants.REGION_MAPPINGS[region_key]
 
     print("Plotting GNN predictions")
-    sr.plot_spatial.plot_event_gnn_predictions(
+    pg.plot_spatial.plot_event_gnn_predictions(
         gnn_model_dir,
         gnn_results_ffp,
         gnn_out_dir,
@@ -288,7 +288,7 @@ def get_event_prediction_plots(
     )
 
     print("Plotting marginal GMM predictions")
-    sr.plot_spatial.plot_event_gmm_predictions(
+    pg.plot_spatial.plot_event_gmm_predictions(
         emp_gmm_params_ffp,
         nzgmdb_ffp,
         event_id,
@@ -298,7 +298,7 @@ def get_event_prediction_plots(
     )
 
     print("Plotting cIM predictions")
-    sr.plot_spatial.plot_event_cim_predictions(
+    pg.plot_spatial.plot_event_cim_predictions(
         cim_results_ffp,
         nzgmdb_ffp,
         event_id,
@@ -317,9 +317,9 @@ def plot_event_cim_gnn_residuals(
     ims: List[str],
     region_key: str = "canterbury",
 ):
-    region = sr.constants.REGION_MAPPINGS[region_key]
+    region = pg.constants.REGION_MAPPINGS[region_key]
 
-    sr.plot_spatial.plot_event_cim_gnn_residuals(
+    pg.plot_spatial.plot_event_cim_gnn_residuals(
         gnn_model_dir,
         gnn_results_ffp,
         cim_results_ffp,

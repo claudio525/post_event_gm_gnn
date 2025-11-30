@@ -10,7 +10,7 @@ import seaborn as sns
 from tqdm import tqdm
 
 import ml_tools as mlt
-import sim_ranking as sr
+import post_event_gm_gnn as pg
 
 
 app = typer.Typer()
@@ -29,21 +29,21 @@ def mag_rrup_scatter(
             print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
 
     # Update font size
-    if sr.constants.FIG_FONT_SIZE is not None:
+    if pg.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
             {
-                "font.size": sr.constants.FIG_FONT_SIZE,
+                "font.size": pg.constants.FIG_FONT_SIZE,
             }
         )
 
-    obs_data = sr.ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
+    obs_data = pg.ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
     obs_data = obs_data.to_event_site_index()
 
     # Load basic filtered data
-    filtered_obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
+    filtered_obs_data = pg.data.load_obs_nzgmdb(nzgmdb_ffp)
 
     # Apply Lee magnitude-distance filter
-    _, __, valid_record_ids = sr.ml.data.get_valid_site_ints_Lee2024(
+    _, __, valid_record_ids = pg.ml.data.get_valid_site_ints_Lee2024(
         filtered_obs_data.event_sites,
         filtered_obs_data.record_df.drop(columns=filtered_obs_data.ims),
     )
@@ -54,8 +54,8 @@ def mag_rrup_scatter(
         width_ratios=(4, 1),
         height_ratios=(1, 4),
         layout="constrained",
-        figsize=sr.constants.FIG_SIZE,
-        dpi=sr.constants.FIG_DPI,
+        figsize=pg.constants.FIG_SIZE,
+        dpi=pg.constants.FIG_DPI,
     )
     ax_scatter = axs["scatter"]
     ax_histx = axs["histx"]
@@ -79,11 +79,11 @@ def mag_rrup_scatter(
         label=f"Filtered (N={filtered_obs_data.n_records:,})",
     )
     ax_scatter.plot(
-        sr.constants.MW_RRUP_LIMITS[:, 1],
-        sr.constants.MW_RRUP_LIMITS[:, 0],
+        pg.constants.MW_RRUP_LIMITS[:, 1],
+        pg.constants.MW_RRUP_LIMITS[:, 0],
         c="blue",
         label="Magnitude-distance filter",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
 
     ax_scatter.set_xlabel("Source-to-site distance, $R_{rup}$ (km)")
@@ -113,7 +113,7 @@ def mag_rrup_scatter(
     ax_histy.spines[["top", "right"]].set_visible(False)
     ax_histy.set_yticklabels([])
 
-    plt.savefig(output_dir / f"rrup_vs_mag.{sr.constants.FIG_FORMAT}")
+    plt.savefig(output_dir / f"rrup_vs_mag.{pg.constants.FIG_FORMAT}")
 
 
 @app.command("sample-weighting")
@@ -132,39 +132,39 @@ def sample_weighting(
             print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
 
     # Update font size
-    if sr.constants.FIG_FONT_SIZE is not None:
+    if pg.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
             {
-                "font.size": sr.constants.FIG_FONT_SIZE,
+                "font.size": pg.constants.FIG_FONT_SIZE,
             }
         )
 
-    run_config = sr.ml.RunConfig.from_yaml(run_config_ffp)
+    run_config = pg.ml.RunConfig.from_yaml(run_config_ffp)
 
     # Load observed data
-    obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
+    obs_data = pg.data.load_obs_nzgmdb(run_config.obs_data_ffp)
     events, all_sites = obs_data.events, obs_data.sites
     event_sites = obs_data.event_sites
     print(f"Number of events: {len(events)}")
 
     # Get the set of valid site-interests per event
     print("Getting valid sites of interest")
-    int_sites, valid_event_int_sites, _ = sr.ml.data.get_valid_site_ints_Lee2024(
+    int_sites, valid_event_int_sites, _ = pg.ml.data.get_valid_site_ints_Lee2024(
         event_sites, obs_data.record_df.drop(columns=obs_data.ims)
     )
     events = np.intersect1d(events, np.asarray(list(valid_event_int_sites.keys())))
 
     # Distance matrix
-    dist_matrix = sr.utils.calculate_distance_matrix(all_sites, obs_data.site_df)
+    dist_matrix = pg.utils.calculate_distance_matrix(all_sites, obs_data.site_df)
 
     # Loth & Baker spatial correlations
-    corr_data = sr.LBSiteCorrelationData.from_dist_matrix(
-        dist_matrix, sr.constants.PSA_KEYS
+    corr_data = pg.LBSiteCorrelationData.from_dist_matrix(
+        dist_matrix, pg.constants.PSA_KEYS
     )
 
     # Compute available scenarios
     obs_sites = all_sites
-    site_combs, event_sites = sr.ml.data.compute_site_combinations(
+    site_combs, event_sites = pg.ml.data.compute_site_combinations(
         event_sites,
         valid_event_int_sites,
         events,
@@ -177,7 +177,7 @@ def sample_weighting(
         run_config.min_n_obs_sites,
     )
     # Create scenario dataframe
-    scenario_df = sr.ml.utils.create_scenario_df(
+    scenario_df = pg.ml.utils.create_scenario_df(
         site_combs,
         event_sites,
         obs_data,
@@ -188,7 +188,7 @@ def sample_weighting(
 
     ### Magnitude
     fig, ax = plt.subplots(
-        1, 1, figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI
+        1, 1, figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI
     )
     sns.histplot(scenario_df["mag"], bins=mag_nbins, ax=ax)
     ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
@@ -199,7 +199,7 @@ def sample_weighting(
 
     # Weighting
     if run_config.mag_scenario_weighting:
-        weight_func = sr.ml.gnn_gm.get_mag_weight_func(
+        weight_func = pg.ml.gnn_gm.get_mag_weight_func(
             0.0, run_config.mag_max_weight, run_config.mag_start, run_config.mag_end
         )
         mag_values = np.linspace(scenario_df.mag.min(), scenario_df.mag.max(), 100)
@@ -210,7 +210,7 @@ def sample_weighting(
             weights,
             color="red",
             linestyle="--",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
         ax_weight.set_ylim(0.0, None)
         ax_weight.set_ylabel("Weight")
@@ -222,7 +222,7 @@ def sample_weighting(
     ### RRUP
     max_rrup = 300
     fig, ax_hist = plt.subplots(
-        1, 1, figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI
+        1, 1, figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI
     )
     sns.histplot(
         scenario_df.loc[scenario_df.rrup <= 300, "rrup"], bins=rrup_nbins, ax=ax_hist
@@ -240,7 +240,7 @@ def sample_weighting(
     ### Degree of constraint
     # Distribution
     fig, ax_hist = plt.subplots(
-        1, 1, figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI
+        1, 1, figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI
     )
     sns.histplot(scenario_df["constraintness"], bins=doc_nbins, ax=ax_hist)
     ax_hist.grid(linewidth=0.5, alpha=0.5, linestyle="--")
@@ -251,7 +251,7 @@ def sample_weighting(
 
     # Weighting
     if run_config.doc_scenario_weighting:
-        doc_weight_fn = sr.ml.gnn_gm.get_doc_weight_func(
+        doc_weight_fn = pg.ml.gnn_gm.get_doc_weight_func(
             0.0, run_config.doc_max_weight, run_config.doc_start, run_config.doc_end
         )
         doc_values = np.linspace(
@@ -264,7 +264,7 @@ def sample_weighting(
         ax_weight.set_ylim(0.0, None)
 
     fig.tight_layout()
-    plt.savefig(output_dir / f"doc_weighting.{sr.constants.FIG_FORMAT}")
+    plt.savefig(output_dir / f"doc_weighting.{pg.constants.FIG_FORMAT}")
 
 
 @app.command("bias-res-std")
@@ -286,22 +286,22 @@ def bias_res_std(
             print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
 
     # Update font size
-    if sr.constants.FIG_FONT_SIZE is not None:
+    if pg.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
             {
-                "font.size": sr.constants.FIG_FONT_SIZE,
+                "font.size": pg.constants.FIG_FONT_SIZE,
             }
         )
 
-    gnn_only_run_config = sr.ml.RunConfig.from_yaml(
+    gnn_only_run_config = pg.ml.RunConfig.from_yaml(
         gnn_only_result_dir / "run_config.yaml"
     )
-    gnn_residual_run_config = sr.ml.RunConfig.from_yaml(
+    gnn_residual_run_config = pg.ml.RunConfig.from_yaml(
         gnn_residual_result_dir / "run_config.yaml"
     )
 
     assert gnn_only_run_config.obs_data_ffp == gnn_residual_run_config.obs_data_ffp
-    obs_data = sr.data.load_obs_nzgmdb(gnn_only_run_config.obs_data_ffp)
+    obs_data = pg.data.load_obs_nzgmdb(gnn_only_run_config.obs_data_ffp)
 
     # Load GNN validation results
     gnn_only_results = pd.read_parquet(
@@ -315,7 +315,7 @@ def bias_res_std(
     cim_results = pd.read_parquet(cim_result_dir / "val_results.parquet").sort_index()
 
     # Load marginal GMM residuals
-    _, emp_res_df = sr.analysis.load_emp_gm_params_res(emp_gm_params_ffp, obs_data)
+    _, emp_res_df = pg.analysis.load_emp_gm_params_res(emp_gm_params_ffp, obs_data)
     emp_res_df = emp_res_df.loc[gnn_only_results.index]
 
     # Sanity check
@@ -326,22 +326,22 @@ def bias_res_std(
     ), "Index mixmatch"
 
     # Compute residuals
-    gnn_only_res_df = sr.analysis.get_residuals(
+    gnn_only_res_df = pg.analysis.get_residuals(
         gnn_only_results, ims=gnn_only_run_config.ims
     )
-    gnn_only_bias_std_df = sr.analysis.get_res_mean_std(
+    gnn_only_bias_std_df = pg.analysis.get_res_mean_std(
         gnn_only_res_df, ims=gnn_only_run_config.ims
     )
-    cim_res_df = sr.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
-    cim_res_bias_std_df = sr.analysis.get_res_mean_std(cim_res_df)
-    gnn_res_res_df = sr.analysis.get_residuals(gnn_res_results)
-    gnn_res_bias_std_df = sr.analysis.get_res_mean_std(gnn_res_res_df)
+    cim_res_df = pg.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
+    cim_res_bias_std_df = pg.analysis.get_res_mean_std(cim_res_df)
+    gnn_res_res_df = pg.analysis.get_residuals(gnn_res_results)
+    gnn_res_bias_std_df = pg.analysis.get_res_mean_std(gnn_res_res_df)
 
-    marg_res_bias_std_df = sr.analysis.get_res_mean_std(emp_res_df)
+    marg_res_bias_std_df = pg.analysis.get_res_mean_std(emp_res_df)
 
-    fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
-        figsize=sr.constants.FIG_SIZE,
-        fig_dpi=sr.constants.FIG_DPI,
+    fig, ax1, ax2, ax3, ax4 = pg.plot_utils.get_bias_residual_fig(
+        figsize=pg.constants.FIG_SIZE,
+        fig_dpi=pg.constants.FIG_DPI,
         left=0.08,
         main_wspace=0.175,
         sub_wspace=0.05,
@@ -353,42 +353,42 @@ def bias_res_std(
 
     ### Bias
     ax1.plot(
-        sr.constants.PERIODS,
-        marg_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        pg.constants.PERIODS,
+        marg_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="grey",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="MVN-Marginal",
     )
     ax1.plot(
-        sr.constants.PERIODS,
-        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        pg.constants.PERIODS,
+        cim_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="green",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_only_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        pg.constants.PERIODS,
+        gnn_only_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="blue",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-Only",
     )
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        pg.constants.PERIODS,
+        gnn_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="purple",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-Residual",
     )
 
-    ax1.legend(fontsize=sr.constants.FIG_FONT_SIZE)
+    ax1.legend(fontsize=pg.constants.FIG_FONT_SIZE)
 
     ax1.text(
         0.03,
         0.03,
         "Overprediction",
         transform=ax1.transAxes,
-        fontsize=sr.constants.FIG_FONT_SIZE,
+        fontsize=pg.constants.FIG_FONT_SIZE,
         va="bottom",
         ha="left",
     )
@@ -397,7 +397,7 @@ def bias_res_std(
         0.97,
         "Underprediction",
         transform=ax1.transAxes,
-        fontsize=sr.constants.FIG_FONT_SIZE,
+        fontsize=pg.constants.FIG_FONT_SIZE,
         va="top",
         ha="left",
     )
@@ -405,7 +405,7 @@ def bias_res_std(
     if gnn_only_run_config.non_pSA_ims is not None:
         ax2.scatter(
             [
-                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                pg.utils.get_nice_im_name(cur_im, use_latex=True)
                 for cur_im in gnn_only_run_config.non_pSA_ims
             ],
             gnn_only_bias_std_df.loc[gnn_only_run_config.non_pSA_ims, "mean"],
@@ -413,48 +413,48 @@ def bias_res_std(
             zorder=10,
         )
 
-        ax2.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
+        ax2.xaxis.set_tick_params(rotation=90, labelsize=pg.constants.FIG_FONT_SIZE)
         ax2.set_xlim(-0.75, len(gnn_only_run_config.non_pSA_ims) - 0.25)
 
     ### Residual Standard Deviation
     ax3.plot(
-        sr.constants.PERIODS,
-        marg_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        pg.constants.PERIODS,
+        marg_res_bias_std_df.loc[pg.constants.PSA_KEYS, "std"],
         color="grey",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     ax3.plot(
-        sr.constants.PERIODS,
-        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        pg.constants.PERIODS,
+        cim_res_bias_std_df.loc[pg.constants.PSA_KEYS, "std"],
         color="green",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     ax3.plot(
-        sr.constants.PERIODS,
-        gnn_only_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        pg.constants.PERIODS,
+        gnn_only_bias_std_df.loc[pg.constants.PSA_KEYS, "std"],
         color="blue",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     ax3.plot(
-        sr.constants.PERIODS,
+        pg.constants.PERIODS,
         gnn_res_bias_std_df["std"],
         color="purple",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     if gnn_only_run_config.non_pSA_ims is not None:
         ax4.scatter(
             [
-                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                pg.utils.get_nice_im_name(cur_im, use_latex=True)
                 for cur_im in gnn_only_run_config.non_pSA_ims
             ],
             gnn_only_bias_std_df.loc[gnn_only_run_config.non_pSA_ims, "std"],
             color="blue",
         )
 
-        ax4.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
+        ax4.xaxis.set_tick_params(rotation=90, labelsize=pg.constants.FIG_FONT_SIZE)
         ax4.set_xlim(-0.75, len(gnn_only_run_config.non_pSA_ims) - 0.25)
 
-    plt.savefig(output_dir / f"bias_residual_std.{sr.constants.FIG_FORMAT}")
+    plt.savefig(output_dir / f"bias_residual_std.{pg.constants.FIG_FORMAT}")
 
 
 @app.command("mag-bias-res-std")
@@ -498,17 +498,17 @@ def mag_bias_res_std(
     plot_labels = plot_labels.split(",") if plot_labels is not None else None
 
     # Update font size
-    if sr.constants.FIG_FONT_SIZE is not None:
+    if pg.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
             {
-                "font.size": sr.constants.FIG_FONT_SIZE,
+                "font.size": pg.constants.FIG_FONT_SIZE,
             }
         )
 
-    gnn_run_config = sr.ml.RunConfig.from_yaml(gnn_results_dir / "run_config.yaml")
+    gnn_run_config = pg.ml.RunConfig.from_yaml(gnn_results_dir / "run_config.yaml")
 
     # Load observed data
-    obs_data = sr.data.load_obs_nzgmdb(gnn_run_config.obs_data_ffp)
+    obs_data = pg.data.load_obs_nzgmdb(gnn_run_config.obs_data_ffp)
 
     # Load results
     gnn_results = pd.read_parquet(gnn_results_dir / "val_results.parquet").sort_index()
@@ -518,19 +518,19 @@ def mag_bias_res_std(
     assert gnn_results.index.equals(cim_results.index), "Index mixmatch"
 
     # Compute residuals
-    gnn_res_df = sr.analysis.get_residuals(gnn_results, ims=gnn_run_config.ims)
-    gnn_res_bias_std_df = sr.analysis.get_res_mean_std(
+    gnn_res_df = pg.analysis.get_residuals(gnn_results, ims=gnn_run_config.ims)
+    gnn_res_bias_std_df = pg.analysis.get_res_mean_std(
         gnn_res_df, ims=gnn_run_config.ims
     )
-    cim_res_df = sr.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
-    cim_res_bias_std_df = sr.analysis.get_res_mean_std(cim_res_df)
+    cim_res_df = pg.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
+    cim_res_bias_std_df = pg.analysis.get_res_mean_std(cim_res_df)
 
     # Apply magnitude binning
     gnn_res_df["mag"] = obs_data.record_df.loc[gnn_res_df.index, "mag"].values
     gnn_res_df["mag_bin"] = pd.cut(
         gnn_res_df["mag"],
-        bins=sr.constants.MAG_BINS,
-        labels=sr.constants.MAG_BIN_LABELS,
+        bins=pg.constants.MAG_BINS,
+        labels=pg.constants.MAG_BIN_LABELS,
     )
     gnn_res_mag_groups = gnn_res_df.groupby("mag_bin", observed=True)
     gnn_res_mag_bias = gnn_res_mag_groups[gnn_run_config.ims].mean()
@@ -539,22 +539,22 @@ def mag_bias_res_std(
     cim_res_df["mag"] = obs_data.record_df.loc[cim_res_df.index, "mag"].values
     cim_res_df["mag_bin"] = pd.cut(
         cim_res_df["mag"],
-        bins=sr.constants.MAG_BINS,
-        labels=sr.constants.MAG_BIN_LABELS,
+        bins=pg.constants.MAG_BINS,
+        labels=pg.constants.MAG_BIN_LABELS,
     )
     cim_res_mag_groups = cim_res_df.groupby("mag_bin", observed=True)
-    cim_res_mag_bias = cim_res_mag_groups[sr.constants.PSA_KEYS].mean()
-    cim_res_mag_std = cim_res_mag_groups[sr.constants.PSA_KEYS].std()
+    cim_res_mag_bias = cim_res_mag_groups[pg.constants.PSA_KEYS].mean()
+    cim_res_mag_std = cim_res_mag_groups[pg.constants.PSA_KEYS].std()
 
     # colors = list(reversed(cm.viridis(np.linspace(0, 1, len(sr.constants.MAG_BINS)))))
-    group_colors = sr.constants.MAG_COLORS
-    group_linewidth = sr.constants.FIG_GROUP_LINEWIDTH
+    group_colors = pg.constants.MAG_COLORS
+    group_linewidth = pg.constants.FIG_GROUP_LINEWIDTH
     group_scatter_size = 12.5
 
     if gnn_run_config.non_pSA_ims is not None:
-        fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
-            sr.constants.FIG_SIZE,
-            fig_dpi=sr.constants.FIG_DPI,
+        fig, ax1, ax2, ax3, ax4 = pg.plot_utils.get_bias_residual_fig(
+            pg.constants.FIG_SIZE,
+            fig_dpi=pg.constants.FIG_DPI,
             left=0.08,
             main_wspace=0.175,
             sub_wspace=0.05,
@@ -564,9 +564,9 @@ def mag_bias_res_std(
             bias_y_axis_limits=(-bias_limit, bias_limit),
         )
     else:
-        fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
-            sr.constants.FIG_SIZE,
-            fig_dpi=sr.constants.FIG_DPI,
+        fig, ax1, ax3 = pg.plot_utils.get_pSA_bias_residual_fig(
+            pg.constants.FIG_SIZE,
+            fig_dpi=pg.constants.FIG_DPI,
             main_wspace=0.175,
             left=0.08,
             right=0.99,
@@ -577,31 +577,31 @@ def mag_bias_res_std(
 
     ### Bias
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        pg.constants.PERIODS,
+        gnn_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax1.plot(
-        sr.constants.PERIODS,
-        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        pg.constants.PERIODS,
+        cim_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="black",
         linestyle="--",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_mag_groups):
         ax1.semilogx(
-            sr.constants.PERIODS,
-            cim_res_mag_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_res_mag_bias.loc[cur_key, pg.constants.PSA_KEYS],
             c=group_colors[i],
             linestyle="--",
             linewidth=group_linewidth,
         )
         ax1.semilogx(
-            sr.constants.PERIODS,
-            gnn_res_mag_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_res_mag_bias.loc[cur_key, pg.constants.PSA_KEYS],
             label=f"{cur_key} (N={gnn_res_mag_groups.size()[cur_key]:,})",
             c=group_colors[i],
             linewidth=group_linewidth,
@@ -640,7 +640,7 @@ def mag_bias_res_std(
     if gnn_run_config.non_pSA_ims is not None:
         ax2.scatter(
             [
-                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                pg.utils.get_nice_im_name(cur_im, use_latex=True)
                 for cur_im in gnn_run_config.non_pSA_ims
             ],
             gnn_res_bias_std_df.loc[gnn_run_config.non_pSA_ims, "mean"],
@@ -650,7 +650,7 @@ def mag_bias_res_std(
         for i, (cur_key, cur_group) in enumerate(gnn_res_mag_groups):
             ax2.scatter(
                 [
-                    sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                    pg.utils.get_nice_im_name(cur_im, use_latex=True)
                     for cur_im in gnn_run_config.non_pSA_ims
                 ],
                 gnn_res_mag_bias.loc[cur_key, gnn_run_config.non_pSA_ims],
@@ -658,36 +658,36 @@ def mag_bias_res_std(
                 s=group_scatter_size,
             )
 
-        ax2.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
+        ax2.xaxis.set_tick_params(rotation=90, labelsize=pg.constants.FIG_FONT_SIZE)
         ax2.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     ### Residual Standard Deviation
     ax3.plot(
-        sr.constants.PERIODS,
-        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        pg.constants.PERIODS,
+        gnn_res_bias_std_df.loc[pg.constants.PSA_KEYS, "std"],
         color="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax3.plot(
-        sr.constants.PERIODS,
-        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        pg.constants.PERIODS,
+        cim_res_bias_std_df.loc[pg.constants.PSA_KEYS, "std"],
         color="black",
         linestyle="--",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_mag_groups):
         ax3.semilogx(
-            sr.constants.PERIODS,
-            cim_res_mag_std.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_res_mag_std.loc[cur_key, pg.constants.PSA_KEYS],
             c=group_colors[i],
             linestyle="--",
             linewidth=group_linewidth,
         )
         ax3.semilogx(
-            sr.constants.PERIODS,
-            gnn_res_mag_std.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_res_mag_std.loc[cur_key, pg.constants.PSA_KEYS],
             c=group_colors[i],
             linewidth=group_linewidth,
             label=f"{cur_key} (N={gnn_res_mag_groups.size()[cur_key]:,})",
@@ -710,7 +710,7 @@ def mag_bias_res_std(
     if gnn_run_config.non_pSA_ims is not None:
         ax4.scatter(
             [
-                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                pg.utils.get_nice_im_name(cur_im, use_latex=True)
                 for cur_im in gnn_run_config.non_pSA_ims
             ],
             gnn_res_bias_std_df.loc[gnn_run_config.non_pSA_ims, "std"],
@@ -720,7 +720,7 @@ def mag_bias_res_std(
         for i, (cur_key, cur_group) in enumerate(gnn_res_mag_groups):
             ax4.scatter(
                 [
-                    sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                    pg.utils.get_nice_im_name(cur_im, use_latex=True)
                     for cur_im in gnn_run_config.non_pSA_ims
                 ],
                 gnn_res_mag_std.loc[cur_key, gnn_run_config.non_pSA_ims],
@@ -728,13 +728,13 @@ def mag_bias_res_std(
                 s=group_scatter_size,
             )
 
-        ax4.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
+        ax4.xaxis.set_tick_params(rotation=90, labelsize=pg.constants.FIG_FONT_SIZE)
         ax4.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     output_name = (
-        f"{output_name}.{sr.constants.FIG_FORMAT}"
+        f"{output_name}.{pg.constants.FIG_FORMAT}"
         if output_name is not None
-        else f"mag_bias_residual_std.{sr.constants.FIG_FORMAT}"
+        else f"mag_bias_residual_std.{pg.constants.FIG_FORMAT}"
     )
     fig.savefig(
         output_dir / output_name,
@@ -782,17 +782,17 @@ def rrup_bias_res_std(
     plot_labels = plot_labels.split(",") if plot_labels is not None else None
 
     # Update font size
-    if sr.constants.FIG_FONT_SIZE is not None:
+    if pg.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
             {
-                "font.size": sr.constants.FIG_FONT_SIZE,
+                "font.size": pg.constants.FIG_FONT_SIZE,
             }
         )
 
-    gnn_run_config = sr.ml.RunConfig.from_yaml(gnn_results_dir / "run_config.yaml")
+    gnn_run_config = pg.ml.RunConfig.from_yaml(gnn_results_dir / "run_config.yaml")
 
     # Load observed data
-    obs_data = sr.data.load_obs_nzgmdb(gnn_run_config.obs_data_ffp)
+    obs_data = pg.data.load_obs_nzgmdb(gnn_run_config.obs_data_ffp)
 
     # Load results
     gnn_results = pd.read_parquet(gnn_results_dir / "val_results.parquet").sort_index()
@@ -802,20 +802,20 @@ def rrup_bias_res_std(
     assert gnn_results.index.equals(cim_results.index), "Index mixmatch"
 
     # Compute residuals
-    gnn_res_df = sr.analysis.get_residuals(gnn_results, ims=gnn_run_config.ims)
-    gnn_res_bias_std_df = sr.analysis.get_res_mean_std(
+    gnn_res_df = pg.analysis.get_residuals(gnn_results, ims=gnn_run_config.ims)
+    gnn_res_bias_std_df = pg.analysis.get_res_mean_std(
         gnn_res_df, ims=gnn_run_config.ims
     )
 
-    cim_res_df = sr.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
-    cim_res_bias_std_df = sr.analysis.get_res_mean_std(cim_res_df)
+    cim_res_df = pg.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
+    cim_res_bias_std_df = pg.analysis.get_res_mean_std(cim_res_df)
 
     # Apply rrup binning
     gnn_res_df["rrup"] = obs_data.record_df.loc[gnn_res_df.index, "rrup"].values
     gnn_res_df["rrup_bin"] = pd.cut(
         gnn_res_df["rrup"],
-        bins=sr.constants.RRUP_BINS,
-        labels=sr.constants.RRUP_BIN_LABELS,
+        bins=pg.constants.RRUP_BINS,
+        labels=pg.constants.RRUP_BIN_LABELS,
     )
 
     gnn_res_rrup_groups = gnn_res_df.groupby("rrup_bin", observed=True)
@@ -825,22 +825,22 @@ def rrup_bias_res_std(
     cim_res_df["rrup"] = obs_data.record_df.loc[cim_res_df.index, "rrup"].values
     cim_res_df["rrup_bin"] = pd.cut(
         cim_res_df["rrup"],
-        bins=sr.constants.RRUP_BINS,
-        labels=sr.constants.RRUP_BIN_LABELS,
+        bins=pg.constants.RRUP_BINS,
+        labels=pg.constants.RRUP_BIN_LABELS,
     )
 
     cim_res_rrup_groups = cim_res_df.groupby("rrup_bin", observed=True)
-    cim_res_rrup_bias = cim_res_rrup_groups[sr.constants.PSA_KEYS].mean()
-    cim_res_rrup_std = cim_res_rrup_groups[sr.constants.PSA_KEYS].std()
+    cim_res_rrup_bias = cim_res_rrup_groups[pg.constants.PSA_KEYS].mean()
+    cim_res_rrup_std = cim_res_rrup_groups[pg.constants.PSA_KEYS].std()
 
-    group_colors = sr.constants.RRUP_COLORS
-    group_linewidth = sr.constants.FIG_GROUP_LINEWIDTH
+    group_colors = pg.constants.RRUP_COLORS
+    group_linewidth = pg.constants.FIG_GROUP_LINEWIDTH
     group_scatter_size = 12.5
 
     if gnn_run_config.non_pSA_ims is not None:
-        fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
-            sr.constants.FIG_SIZE,
-            fig_dpi=sr.constants.FIG_DPI,
+        fig, ax1, ax2, ax3, ax4 = pg.plot_utils.get_bias_residual_fig(
+            pg.constants.FIG_SIZE,
+            fig_dpi=pg.constants.FIG_DPI,
             left=0.08,
             main_wspace=0.175,
             sub_wspace=0.05,
@@ -850,9 +850,9 @@ def rrup_bias_res_std(
             bias_y_axis_limits=(-bias_limit, bias_limit),
         )
     else:
-        fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
-            sr.constants.FIG_SIZE,
-            fig_dpi=sr.constants.FIG_DPI,
+        fig, ax1, ax3 = pg.plot_utils.get_pSA_bias_residual_fig(
+            pg.constants.FIG_SIZE,
+            fig_dpi=pg.constants.FIG_DPI,
             main_wspace=0.175,
             left=0.08,
             right=0.99,
@@ -863,31 +863,31 @@ def rrup_bias_res_std(
 
     ### Bias
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        pg.constants.PERIODS,
+        gnn_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax1.plot(
-        sr.constants.PERIODS,
-        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        pg.constants.PERIODS,
+        cim_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="black",
         linestyle="--",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
         ax1.semilogx(
-            sr.constants.PERIODS,
-            cim_res_rrup_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_res_rrup_bias.loc[cur_key, pg.constants.PSA_KEYS],
             c=group_colors[i],
             linestyle="--",
             linewidth=group_linewidth,
         )
         ax1.semilogx(
-            sr.constants.PERIODS,
-            gnn_res_rrup_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_res_rrup_bias.loc[cur_key, pg.constants.PSA_KEYS],
             label=f"{cur_key} km (N={gnn_res_rrup_groups.size()[cur_key]:,})",
             c=group_colors[i],
             linewidth=group_linewidth,
@@ -926,7 +926,7 @@ def rrup_bias_res_std(
     if gnn_run_config.non_pSA_ims is not None:
         ax2.scatter(
             [
-                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                pg.utils.get_nice_im_name(cur_im, use_latex=True)
                 for cur_im in gnn_run_config.non_pSA_ims
             ],
             gnn_res_bias_std_df.loc[gnn_run_config.non_pSA_ims, "mean"],
@@ -936,7 +936,7 @@ def rrup_bias_res_std(
         for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
             ax2.scatter(
                 [
-                    sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                    pg.utils.get_nice_im_name(cur_im, use_latex=True)
                     for cur_im in gnn_run_config.non_pSA_ims
                 ],
                 gnn_res_rrup_bias.loc[cur_key, gnn_run_config.non_pSA_ims],
@@ -944,36 +944,36 @@ def rrup_bias_res_std(
                 s=group_scatter_size,
             )
 
-        ax2.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
+        ax2.xaxis.set_tick_params(rotation=90, labelsize=pg.constants.FIG_FONT_SIZE)
         ax2.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     ### Residual Standard Deviation
     ax3.plot(
-        sr.constants.PERIODS,
-        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        pg.constants.PERIODS,
+        gnn_res_bias_std_df.loc[pg.constants.PSA_KEYS, "std"],
         color="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax3.plot(
-        sr.constants.PERIODS,
-        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        pg.constants.PERIODS,
+        cim_res_bias_std_df.loc[pg.constants.PSA_KEYS, "std"],
         color="black",
         linestyle="--",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
         ax3.semilogx(
-            sr.constants.PERIODS,
-            cim_res_rrup_std.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_res_rrup_std.loc[cur_key, pg.constants.PSA_KEYS],
             c=group_colors[i],
             linestyle="--",
             linewidth=group_linewidth,
         )
         ax3.semilogx(
-            sr.constants.PERIODS,
-            gnn_res_rrup_std.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_res_rrup_std.loc[cur_key, pg.constants.PSA_KEYS],
             c=group_colors[i],
             linewidth=group_linewidth,
             label=f"{cur_key} (N={gnn_res_rrup_groups.size()[cur_key]:,})",
@@ -995,7 +995,7 @@ def rrup_bias_res_std(
     if gnn_run_config.non_pSA_ims is not None:
         ax4.scatter(
             [
-                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                pg.utils.get_nice_im_name(cur_im, use_latex=True)
                 for cur_im in gnn_run_config.non_pSA_ims
             ],
             gnn_res_bias_std_df.loc[gnn_run_config.non_pSA_ims, "std"],
@@ -1005,7 +1005,7 @@ def rrup_bias_res_std(
         for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
             ax4.scatter(
                 [
-                    sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                    pg.utils.get_nice_im_name(cur_im, use_latex=True)
                     for cur_im in gnn_run_config.non_pSA_ims
                 ],
                 gnn_res_rrup_std.loc[cur_key, gnn_run_config.non_pSA_ims],
@@ -1013,13 +1013,13 @@ def rrup_bias_res_std(
                 s=group_scatter_size,
             )
 
-        ax4.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
+        ax4.xaxis.set_tick_params(rotation=90, labelsize=pg.constants.FIG_FONT_SIZE)
         ax4.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     output_name = (
-        f"{output_name}.{sr.constants.FIG_FORMAT}"
+        f"{output_name}.{pg.constants.FIG_FORMAT}"
         if output_name is not None
-        else f"rrup_bias_residual_std.{sr.constants.FIG_FORMAT}"
+        else f"rrup_bias_residual_std.{pg.constants.FIG_FORMAT}"
     )
     fig.savefig(
         output_dir / output_name,
@@ -1069,44 +1069,44 @@ def doc_bias_res_std(
     # Update font size
     plt.rcParams.update(
         {
-            "font.size": sr.constants.FIG_FONT_SIZE,
+            "font.size": pg.constants.FIG_FONT_SIZE,
         }
     )
 
-    gnn_run_config = sr.ml.RunConfig.from_yaml(gnn_results_dir / "run_config.yaml")
+    gnn_run_config = pg.ml.RunConfig.from_yaml(gnn_results_dir / "run_config.yaml")
 
     # Load observed data
-    obs_data = sr.data.load_obs_nzgmdb(gnn_run_config.obs_data_ffp)
+    obs_data = pg.data.load_obs_nzgmdb(gnn_run_config.obs_data_ffp)
 
     # Load results
     gnn_results = pd.read_parquet(gnn_results_dir / "val_results.parquet").sort_index()
     cim_results = pd.read_parquet(cim_result_dir / "val_results.parquet").sort_index()
 
     # Add DoC
-    dist_matrix = sr.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
-    corr_data = sr.LBSiteCorrelationData.from_dist_matrix(
+    dist_matrix = pg.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
+    corr_data = pg.LBSiteCorrelationData.from_dist_matrix(
         dist_matrix, gnn_run_config.pSA_ims
     )
-    gnn_results = sr.utils.compute_degree_of_constraint(gnn_results, corr_data)
+    gnn_results = pg.utils.compute_degree_of_constraint(gnn_results, corr_data)
 
     # Sanity check
     assert gnn_results.index.equals(cim_results.index), "Index mixmatch"
 
     # Compute residuals
-    gnn_res_df = sr.analysis.get_residuals(gnn_results, ims=gnn_run_config.ims)
-    gnn_res_bias_std_df = sr.analysis.get_res_mean_std(
+    gnn_res_df = pg.analysis.get_residuals(gnn_results, ims=gnn_run_config.ims)
+    gnn_res_bias_std_df = pg.analysis.get_res_mean_std(
         gnn_res_df, ims=gnn_run_config.ims
     )
 
-    cim_res_df = sr.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
-    cim_res_bias_std_df = sr.analysis.get_res_mean_std(cim_res_df)
+    cim_res_df = pg.analysis.get_residuals(cim_results, pred_suffix="cond_mean")
+    cim_res_bias_std_df = pg.analysis.get_res_mean_std(cim_res_df)
 
     # Apply degree of constraint binning
     gnn_res_df["doc"] = gnn_results.loc[gnn_res_df.index, "doc"].values
     gnn_res_df["doc_bin"] = pd.cut(
         gnn_res_df["doc"],
-        bins=sr.constants.DOC_BINS,
-        labels=sr.constants.DOC_BIN_LABELS,
+        bins=pg.constants.DOC_BINS,
+        labels=pg.constants.DOC_BIN_LABELS,
     )
 
     gnn_res_doc_groups = gnn_res_df.groupby("doc_bin", observed=True)
@@ -1116,22 +1116,22 @@ def doc_bias_res_std(
     cim_res_df["doc"] = gnn_results.loc[cim_res_df.index, "doc"].values
     cim_res_df["doc_bin"] = pd.cut(
         cim_res_df["doc"],
-        bins=sr.constants.DOC_BINS,
-        labels=sr.constants.DOC_BIN_LABELS,
+        bins=pg.constants.DOC_BINS,
+        labels=pg.constants.DOC_BIN_LABELS,
     )
 
     cim_res_doc_groups = cim_res_df.groupby("doc_bin", observed=True)
-    cim_res_doc_bias = cim_res_doc_groups[sr.constants.PSA_KEYS].mean()
-    cim_res_doc_std = cim_res_doc_groups[sr.constants.PSA_KEYS].std()
+    cim_res_doc_bias = cim_res_doc_groups[pg.constants.PSA_KEYS].mean()
+    cim_res_doc_std = cim_res_doc_groups[pg.constants.PSA_KEYS].std()
 
-    group_colors = sr.constants.DOC_COLORS
-    group_linewidth = sr.constants.FIG_GROUP_LINEWIDTH
+    group_colors = pg.constants.DOC_COLORS
+    group_linewidth = pg.constants.FIG_GROUP_LINEWIDTH
     group_scatter_size = 12.5
 
     if gnn_run_config.non_pSA_ims is not None:
-        fig, ax1, ax2, ax3, ax4 = sr.plot_utils.get_bias_residual_fig(
-            sr.constants.FIG_SIZE,
-            fig_dpi=sr.constants.FIG_DPI,
+        fig, ax1, ax2, ax3, ax4 = pg.plot_utils.get_bias_residual_fig(
+            pg.constants.FIG_SIZE,
+            fig_dpi=pg.constants.FIG_DPI,
             left=0.08,
             main_wspace=0.175,
             sub_wspace=0.05,
@@ -1141,9 +1141,9 @@ def doc_bias_res_std(
             bias_y_axis_limits=(-bias_limit, bias_limit),
         )
     else:
-        fig, ax1, ax3 = sr.plot_utils.get_pSA_bias_residual_fig(
-            sr.constants.FIG_SIZE,
-            fig_dpi=sr.constants.FIG_DPI,
+        fig, ax1, ax3 = pg.plot_utils.get_pSA_bias_residual_fig(
+            pg.constants.FIG_SIZE,
+            fig_dpi=pg.constants.FIG_DPI,
             main_wspace=0.175,
             left=0.08,
             right=0.99,
@@ -1154,31 +1154,31 @@ def doc_bias_res_std(
 
     ### Bias
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        pg.constants.PERIODS,
+        gnn_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax1.plot(
-        sr.constants.PERIODS,
-        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "mean"],
+        pg.constants.PERIODS,
+        cim_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="black",
         linestyle="--",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
         ax1.semilogx(
-            sr.constants.PERIODS,
-            cim_res_doc_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_res_doc_bias.loc[cur_key, pg.constants.PSA_KEYS],
             c=group_colors[i],
             linestyle="--",
             linewidth=group_linewidth,
         )
         ax1.semilogx(
-            sr.constants.PERIODS,
-            gnn_res_doc_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_res_doc_bias.loc[cur_key, pg.constants.PSA_KEYS],
             label=f"{cur_key} (N={gnn_res_doc_groups.size()[cur_key]:,})",
             c=group_colors[i],
             linewidth=group_linewidth,
@@ -1207,7 +1207,7 @@ def doc_bias_res_std(
     if gnn_run_config.non_pSA_ims is not None:
         ax2.scatter(
             [
-                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                pg.utils.get_nice_im_name(cur_im, use_latex=True)
                 for cur_im in gnn_run_config.non_pSA_ims
             ],
             gnn_res_bias_std_df.loc[gnn_run_config.non_pSA_ims, "mean"],
@@ -1217,7 +1217,7 @@ def doc_bias_res_std(
         for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
             ax2.scatter(
                 [
-                    sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                    pg.utils.get_nice_im_name(cur_im, use_latex=True)
                     for cur_im in gnn_run_config.non_pSA_ims
                 ],
                 gnn_res_doc_bias.loc[cur_key, gnn_run_config.non_pSA_ims],
@@ -1225,36 +1225,36 @@ def doc_bias_res_std(
                 s=group_scatter_size,
             )
 
-        ax2.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
+        ax2.xaxis.set_tick_params(rotation=90, labelsize=pg.constants.FIG_FONT_SIZE)
         ax2.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     ### Residual Standard Deviation
     ax3.plot(
-        sr.constants.PERIODS,
-        gnn_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        pg.constants.PERIODS,
+        gnn_res_bias_std_df.loc[pg.constants.PSA_KEYS, "std"],
         color="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only",
     )
     ax3.plot(
-        sr.constants.PERIODS,
-        cim_res_bias_std_df.loc[sr.constants.PSA_KEYS, "std"],
+        pg.constants.PERIODS,
+        cim_res_bias_std_df.loc[pg.constants.PSA_KEYS, "std"],
         color="black",
         linestyle="--",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
         ax3.semilogx(
-            sr.constants.PERIODS,
-            cim_res_doc_std.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_res_doc_std.loc[cur_key, pg.constants.PSA_KEYS],
             c=group_colors[i],
             linestyle="--",
             linewidth=group_linewidth,
         )
         ax3.semilogx(
-            sr.constants.PERIODS,
-            gnn_res_doc_std.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_res_doc_std.loc[cur_key, pg.constants.PSA_KEYS],
             c=group_colors[i],
             linewidth=group_linewidth,
             label=f"{cur_key} (N={gnn_res_doc_groups.size()[cur_key]:,})",
@@ -1276,7 +1276,7 @@ def doc_bias_res_std(
     if gnn_run_config.non_pSA_ims is not None:
         ax4.scatter(
             [
-                sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                pg.utils.get_nice_im_name(cur_im, use_latex=True)
                 for cur_im in gnn_run_config.non_pSA_ims
             ],
             gnn_res_bias_std_df.loc[gnn_run_config.non_pSA_ims, "std"],
@@ -1286,7 +1286,7 @@ def doc_bias_res_std(
         for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
             ax4.scatter(
                 [
-                    sr.utils.get_nice_im_name(cur_im, use_latex=True)
+                    pg.utils.get_nice_im_name(cur_im, use_latex=True)
                     for cur_im in gnn_run_config.non_pSA_ims
                 ],
                 gnn_res_doc_std.loc[cur_key, gnn_run_config.non_pSA_ims],
@@ -1294,13 +1294,13 @@ def doc_bias_res_std(
                 s=group_scatter_size,
             )
 
-        ax4.xaxis.set_tick_params(rotation=90, labelsize=sr.constants.FIG_FONT_SIZE)
+        ax4.xaxis.set_tick_params(rotation=90, labelsize=pg.constants.FIG_FONT_SIZE)
         ax4.set_xlim(-0.75, len(gnn_run_config.non_pSA_ims) - 0.25)
 
     output_name = (
-        f"{output_name}.{sr.constants.FIG_FORMAT}"
+        f"{output_name}.{pg.constants.FIG_FORMAT}"
         if output_name is not None
-        else f"doc_bias_residual_std.{sr.constants.FIG_FORMAT}"
+        else f"doc_bias_residual_std.{pg.constants.FIG_FORMAT}"
     )
     fig.savefig(
         output_dir / output_name,
@@ -1318,33 +1318,33 @@ def fmin_filter(nzgmdb_ffp: Path, gnn_result_dir: Path, output_dir: Path):
             print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
 
     # Update font size
-    if sr.constants.FIG_FONT_SIZE is not None:
+    if pg.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
             {
-                "font.size": sr.constants.FIG_FONT_SIZE,
+                "font.size": pg.constants.FIG_FONT_SIZE,
             }
         )
 
-    obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
-    record_count_df = (~obs_data.record_df[sr.constants.PSA_KEYS].isna()).sum(axis=0)
+    obs_data = pg.data.load_obs_nzgmdb(nzgmdb_ffp)
+    record_count_df = (~obs_data.record_df[pg.constants.PSA_KEYS].isna()).sum(axis=0)
 
     gnn_results = pd.read_parquet(gnn_result_dir / "val_results.parquet")
-    scenario_count = (~gnn_results[sr.constants.PSA_KEYS].isna()).sum(axis=0)
+    scenario_count = (~gnn_results[pg.constants.PSA_KEYS].isna()).sum(axis=0)
 
-    fig, ax = plt.subplots(figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI)
+    fig, ax = plt.subplots(figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI)
 
     ax.plot(
-        sr.constants.PERIODS,
-        record_count_df.loc[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        record_count_df.loc[pg.constants.PSA_KEYS],
         color="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="Number of records",
     )
     ax.plot(
-        sr.constants.PERIODS,
-        scenario_count.loc[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        scenario_count.loc[pg.constants.PSA_KEYS],
         color="blue",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="Number of scenarios",
     )
     ax.set_xlabel("Period (s)")
@@ -1356,7 +1356,7 @@ def fmin_filter(nzgmdb_ffp: Path, gnn_result_dir: Path, output_dir: Path):
 
     fig.tight_layout()
 
-    fig.savefig(output_dir / f"fmin_filter.{sr.constants.FIG_FORMAT}")
+    fig.savefig(output_dir / f"fmin_filter.{pg.constants.FIG_FORMAT}")
     plt.close(fig)
 
 
@@ -1377,23 +1377,23 @@ def spatial_corr_trends(
     plot_labels = plot_labels.split(",") if plot_labels is not None else None
 
     # Update font size
-    if sr.constants.FIG_FONT_SIZE is not None:
+    if pg.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
             {
-                "font.size": sr.constants.FIG_FONT_SIZE,
+                "font.size": pg.constants.FIG_FONT_SIZE,
             }
         )
 
-    gnn_only_run_config = sr.ml.RunConfig.from_yaml(
+    gnn_only_run_config = pg.ml.RunConfig.from_yaml(
         gnn_only_results_dir / "run_config.yaml"
     )
-    gnn_residual_run_config = sr.ml.RunConfig.from_yaml(
+    gnn_residual_run_config = pg.ml.RunConfig.from_yaml(
         gnn_residual_results_dir / "run_config.yaml"
     )
     assert gnn_only_run_config.obs_data_ffp == gnn_residual_run_config.obs_data_ffp
 
     # Load data
-    obs_data = sr.data.load_obs_nzgmdb(gnn_only_run_config.obs_data_ffp)
+    obs_data = pg.data.load_obs_nzgmdb(gnn_only_run_config.obs_data_ffp)
     gnn_only_results = pd.read_parquet(
         gnn_only_results_dir / "val_results.parquet"
     ).sort_index()
@@ -1410,10 +1410,10 @@ def spatial_corr_trends(
         cim_results = pd.read_parquet(
             gnn_residual_results_dir / "cim_results/val_results.parquet"
         ).sort_index()
+        assert gnn_only_results.index.equals(cim_results.index), "Index mismatch"
     else:
         print("No CIM results found")
 
-    assert gnn_only_results.index.equals(cim_results.index), "Index mismatch"
     assert gnn_only_results.index.equals(gnn_residual_results.index), "Index mismatch"
 
     # Get the correlations
@@ -1423,7 +1423,7 @@ def spatial_corr_trends(
         obs_site_pair_corrs,
         cim_site_pair_corrs,
         site_pairs_df,
-    ) = sr.analysis.compute_site_int_obs_correlation_residuals(
+    ) = pg.analysis.compute_site_int_obs_correlation_residuals(
         gnn_only_results, obs_data, emp_gm_params, cim_results=cim_results
     )
 
@@ -1431,26 +1431,26 @@ def spatial_corr_trends(
         gnn_residual_site_pair_corrs,
         obs_site_pair_corrs_2,
         *_,
-    ) = sr.analysis.compute_site_int_obs_correlation_residuals(
+    ) = pg.analysis.compute_site_int_obs_correlation_residuals(
         gnn_residual_results, obs_data, emp_gm_params
     )
     assert obs_site_pair_corrs_2.equals(obs_site_pair_corrs)
 
     # Compute fisher transform residuals
-    gnn_only_corr_residuals = sr.analysis.get_fisher_transform_residuals(
+    gnn_only_corr_residuals = pg.analysis.get_fisher_transform_residuals(
         gnn_only_site_pair_corrs, obs_site_pair_corrs
     )
-    gnn_residual_corr_residuals = sr.analysis.get_fisher_transform_residuals(
+    gnn_residual_corr_residuals = pg.analysis.get_fisher_transform_residuals(
         gnn_residual_site_pair_corrs, obs_site_pair_corrs
     )
     cim_corr_residuals = None
     if cim_results is not None:
-        cim_corr_residuals = sr.analysis.get_fisher_transform_residuals(
+        cim_corr_residuals = pg.analysis.get_fisher_transform_residuals(
             cim_site_pair_corrs, obs_site_pair_corrs
         )
 
     # Add site-to-site distance
-    dist_matrix = sr.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
+    dist_matrix = pg.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
     site_int_ind = dist_matrix.index.get_indexer_for(site_pairs_df["site_int"].values)
     obs_site_ind = dist_matrix.columns.get_indexer_for(site_pairs_df["obs_site"].values)
     site_dist = dist_matrix.values[site_int_ind, obs_site_ind]
@@ -1488,9 +1488,9 @@ def spatial_corr_trends(
 
     # Plot total bias and residual standard deviation
     print("Plotting")
-    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
-        sr.constants.FIG_SIZE,
-        fig_dpi=sr.constants.FIG_DPI,
+    fig, ax1, ax2 = pg.plot_utils.get_pSA_bias_residual_fig(
+        pg.constants.FIG_SIZE,
+        fig_dpi=pg.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -1500,49 +1500,49 @@ def spatial_corr_trends(
     )
 
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_only_corr_res_bias[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_only_corr_res_bias[pg.constants.PSA_KEYS],
         label="GNN-only",
         c="blue",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_residual_corr_res_bias[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_residual_corr_res_bias[pg.constants.PSA_KEYS],
         label="GNN-residual",
         c="purple",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
 
     ax2.plot(
-        sr.constants.PERIODS,
-        gnn_only_corr_res_std[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_only_corr_res_std[pg.constants.PSA_KEYS],
         label="GNN-only",
         c="blue",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     ax2.plot(
-        sr.constants.PERIODS,
-        gnn_residual_corr_res_std[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_residual_corr_res_std[pg.constants.PSA_KEYS],
         label="GNN-residual",
         c="purple",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
 
     if cim_corr_res_bias is not None:
         ax1.plot(
-            sr.constants.PERIODS,
-            cim_corr_res_bias[sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_corr_res_bias[pg.constants.PSA_KEYS],
             label="MVN-CIM",
             c="green",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
         ax2.plot(
-            sr.constants.PERIODS,
-            cim_corr_res_std[sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_corr_res_std[pg.constants.PSA_KEYS],
             label="MVN-CIM",
             c="green",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
 
     ax1.legend()
@@ -1552,7 +1552,7 @@ def spatial_corr_trends(
         0.03,
         "Overprediction",
         transform=ax1.transAxes,
-        fontsize=sr.constants.FIG_FONT_SIZE,
+        fontsize=pg.constants.FIG_FONT_SIZE,
         va="bottom",
         ha="left",
     )
@@ -1561,20 +1561,20 @@ def spatial_corr_trends(
         0.97,
         "Underprediction",
         transform=ax1.transAxes,
-        fontsize=sr.constants.FIG_FONT_SIZE,
+        fontsize=pg.constants.FIG_FONT_SIZE,
         va="top",
         ha="left",
     )
 
-    fig.savefig(output_dir / f"spatial_corr_bias_std.{sr.constants.FIG_FORMAT}")
+    fig.savefig(output_dir / f"spatial_corr_bias_std.{pg.constants.FIG_FORMAT}")
     plt.close(fig)
 
     ### Site-to-site distance
     gnn_only_corr_residuals["dist"] = site_pairs_df["dist"]
     gnn_only_corr_residuals["dist_bin"] = pd.cut(
         gnn_only_corr_residuals["dist"],
-        bins=sr.constants.SITE_TO_SITE_DIST_BINS,
-        labels=sr.constants.SITE_TO_SITE_DIST_BIN_LABELS,
+        bins=pg.constants.SITE_TO_SITE_DIST_BINS,
+        labels=pg.constants.SITE_TO_SITE_DIST_BIN_LABELS,
     )
     gnn_only_corr_residual_groups = gnn_only_corr_residuals.groupby(
         "dist_bin", observed=False
@@ -1585,8 +1585,8 @@ def spatial_corr_trends(
     gnn_residual_corr_residuals["dist"] = site_pairs_df["dist"]
     gnn_residual_corr_residuals["dist_bin"] = pd.cut(
         gnn_residual_corr_residuals["dist"],
-        bins=sr.constants.SITE_TO_SITE_DIST_BINS,
-        labels=sr.constants.SITE_TO_SITE_DIST_BIN_LABELS,
+        bins=pg.constants.SITE_TO_SITE_DIST_BINS,
+        labels=pg.constants.SITE_TO_SITE_DIST_BIN_LABELS,
     )
     gnn_residual_corr_residual_groups = gnn_residual_corr_residuals.groupby(
         "dist_bin", observed=False
@@ -1598,8 +1598,8 @@ def spatial_corr_trends(
         cim_corr_residuals["dist"] = site_pairs_df["dist"]
         cim_corr_residuals["dist_bin"] = pd.cut(
             cim_corr_residuals["dist"],
-            bins=sr.constants.SITE_TO_SITE_DIST_BINS,
-            labels=sr.constants.SITE_TO_SITE_DIST_BIN_LABELS,
+            bins=pg.constants.SITE_TO_SITE_DIST_BINS,
+            labels=pg.constants.SITE_TO_SITE_DIST_BIN_LABELS,
         )
         cim_corr_residual_groups = cim_corr_residuals.groupby(
             "dist_bin", observed=False
@@ -1608,9 +1608,9 @@ def spatial_corr_trends(
         cim_res_dist_corr_std = cim_corr_residual_groups.std()
 
     ## GNN-Only
-    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
-        figsize=sr.constants.FIG_SIZE,
-        fig_dpi=sr.constants.FIG_DPI,
+    fig, ax1, ax2 = pg.plot_utils.get_pSA_bias_residual_fig(
+        figsize=pg.constants.FIG_SIZE,
+        fig_dpi=pg.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -1621,38 +1621,38 @@ def spatial_corr_trends(
 
     # Bias
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_only_corr_res_bias[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_only_corr_res_bias[pg.constants.PSA_KEYS],
         label="GNN-Only",
         c="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     if cim_corr_residuals is not None:
         ax1.plot(
-            sr.constants.PERIODS,
-            cim_corr_res_bias[sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_corr_res_bias[pg.constants.PSA_KEYS],
             label="MVN-CIM",
             c="black",
             linestyle="--",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
 
     for i, (cur_key, cur_group) in enumerate(gnn_only_corr_residual_groups):
         ax1.semilogx(
-            sr.constants.PERIODS,
-            gnn_only_res_dist_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_only_res_dist_corr_bias.loc[cur_key, pg.constants.PSA_KEYS],
             label=f"S2S {cur_key} km (N = {gnn_only_corr_residual_groups.size()[cur_key]})",
-            c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            c=pg.constants.SITE_TO_SITE_DIST_COLORS[i],
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
         )
 
         if cim_corr_res_bias is not None:
             ax1.semilogx(
-                sr.constants.PERIODS,
-                cim_res_dist_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
-                c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+                pg.constants.PERIODS,
+                cim_res_dist_corr_bias.loc[cur_key, pg.constants.PSA_KEYS],
+                c=pg.constants.SITE_TO_SITE_DIST_COLORS[i],
                 linestyle="--",
-                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+                linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
     # ax1.legend()
@@ -1661,7 +1661,7 @@ def spatial_corr_trends(
         0.03,
         "Overprediction",
         transform=ax1.transAxes,
-        fontsize=sr.constants.FIG_FONT_SIZE,
+        fontsize=pg.constants.FIG_FONT_SIZE,
         va="bottom",
         ha="left",
     )
@@ -1670,7 +1670,7 @@ def spatial_corr_trends(
         0.97,
         "Underprediction",
         transform=ax1.transAxes,
-        fontsize=sr.constants.FIG_FONT_SIZE,
+        fontsize=pg.constants.FIG_FONT_SIZE,
         va="top",
         ha="left",
     )
@@ -1687,46 +1687,46 @@ def spatial_corr_trends(
 
     # Residual Standard Deviation
     ax2.plot(
-        sr.constants.PERIODS,
-        gnn_only_corr_res_std[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_only_corr_res_std[pg.constants.PSA_KEYS],
         c="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-Only",
     )
     ax2.plot(
-        sr.constants.PERIODS,
-        cim_corr_res_std[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        cim_corr_res_std[pg.constants.PSA_KEYS],
         c="black",
         linestyle="--",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="MVN-CIM",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_only_corr_residual_groups):
         ax2.semilogx(
-            sr.constants.PERIODS,
-            gnn_only_res_dist_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
-            c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            pg.constants.PERIODS,
+            gnn_only_res_dist_corr_std.loc[cur_key, pg.constants.PSA_KEYS],
+            c=pg.constants.SITE_TO_SITE_DIST_COLORS[i],
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             label=f"S2S {cur_key} km (N={gnn_only_corr_residual_groups.size()[cur_key]})",
         )
 
         if cim_corr_res_std is not None:
             ax2.semilogx(
-                sr.constants.PERIODS,
-                cim_res_dist_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
-                c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+                pg.constants.PERIODS,
+                cim_res_dist_corr_std.loc[cur_key, pg.constants.PSA_KEYS],
+                c=pg.constants.SITE_TO_SITE_DIST_COLORS[i],
                 linestyle="--",
-                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+                linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
     ax2.legend()
-    fig.savefig(output_dir / f"spatial_corr_s2s_gnn_only.{sr.constants.FIG_FORMAT}")
+    fig.savefig(output_dir / f"spatial_corr_s2s_gnn_only.{pg.constants.FIG_FORMAT}")
     plt.close(fig)
 
     ## GNN-Residual
-    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
-        figsize=sr.constants.FIG_SIZE,
-        fig_dpi=sr.constants.FIG_DPI,
+    fig, ax1, ax2 = pg.plot_utils.get_pSA_bias_residual_fig(
+        figsize=pg.constants.FIG_SIZE,
+        fig_dpi=pg.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -1737,38 +1737,38 @@ def spatial_corr_trends(
 
     # Bias
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_residual_corr_res_bias[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_residual_corr_res_bias[pg.constants.PSA_KEYS],
         label="GNN-Residual",
         c="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     if cim_corr_residuals is not None:
         ax1.plot(
-            sr.constants.PERIODS,
-            cim_corr_res_bias[sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_corr_res_bias[pg.constants.PSA_KEYS],
             label="MVN-CIM",
             c="black",
             linestyle="--",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
 
     for i, (cur_key, cur_group) in enumerate(gnn_residual_corr_residual_groups):
         ax1.semilogx(
-            sr.constants.PERIODS,
-            gnn_residual_res_dist_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_residual_res_dist_corr_bias.loc[cur_key, pg.constants.PSA_KEYS],
             label=f"S2S {cur_key} km (N={gnn_residual_corr_residual_groups.size()[cur_key]})",
-            c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            c=pg.constants.SITE_TO_SITE_DIST_COLORS[i],
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
         )
 
         if cim_corr_res_bias is not None:
             ax1.semilogx(
-                sr.constants.PERIODS,
-                cim_res_dist_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
-                c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+                pg.constants.PERIODS,
+                cim_res_dist_corr_bias.loc[cur_key, pg.constants.PSA_KEYS],
+                c=pg.constants.SITE_TO_SITE_DIST_COLORS[i],
                 linestyle="--",
-                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+                linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
     # ax1.legend()
@@ -1777,7 +1777,7 @@ def spatial_corr_trends(
         0.03,
         "Overprediction",
         transform=ax1.transAxes,
-        fontsize=sr.constants.FIG_FONT_SIZE,
+        fontsize=pg.constants.FIG_FONT_SIZE,
         va="bottom",
         ha="left",
     )
@@ -1786,7 +1786,7 @@ def spatial_corr_trends(
         0.97,
         "Underprediction",
         transform=ax1.transAxes,
-        fontsize=sr.constants.FIG_FONT_SIZE,
+        fontsize=pg.constants.FIG_FONT_SIZE,
         va="top",
         ha="left",
     )
@@ -1803,94 +1803,94 @@ def spatial_corr_trends(
 
     # Residual Standard Deviation
     ax2.plot(
-        sr.constants.PERIODS,
-        gnn_residual_corr_res_std[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_residual_corr_res_std[pg.constants.PSA_KEYS],
         label="GNN-Residual",
         c="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     ax2.plot(
-        sr.constants.PERIODS,
-        cim_corr_res_std[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        cim_corr_res_std[pg.constants.PSA_KEYS],
         label="MVN-CIM",
         c="black",
         linestyle="--",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
 
     for i, (cur_key, cur_group) in enumerate(gnn_residual_corr_residual_groups):
         ax2.semilogx(
-            sr.constants.PERIODS,
-            gnn_residual_res_dist_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_residual_res_dist_corr_std.loc[cur_key, pg.constants.PSA_KEYS],
             label=f"S2S {cur_key} km (N={gnn_residual_corr_residual_groups.size()[cur_key]})",
-            c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            c=pg.constants.SITE_TO_SITE_DIST_COLORS[i],
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
         )
 
         if cim_corr_res_std is not None:
             ax2.semilogx(
-                sr.constants.PERIODS,
-                cim_res_dist_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
-                c=sr.constants.SITE_TO_SITE_DIST_COLORS[i],
+                pg.constants.PERIODS,
+                cim_res_dist_corr_std.loc[cur_key, pg.constants.PSA_KEYS],
+                c=pg.constants.SITE_TO_SITE_DIST_COLORS[i],
                 linestyle="--",
-                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+                linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
     ax2.legend()
 
-    fig.savefig(output_dir / f"spatial_corr_s2s_gnn_residual.{sr.constants.FIG_FORMAT}")
+    fig.savefig(output_dir / f"spatial_corr_s2s_gnn_residual.{pg.constants.FIG_FORMAT}")
     plt.close(fig)
 
     ### Vs30 Difference
     gnn_only_corr_residuals["abs_ln_vs30_diff"] = site_pairs_df["abs_ln_vs30_diff"]
     gnn_only_corr_residuals["ln_vs30_diff_bin"] = pd.cut(
         gnn_only_corr_residuals["abs_ln_vs30_diff"],
-        bins=sr.constants.LN_VS30_DIFF_BINS,
-        labels=sr.constants.LN_VS30_DIFF_BIN_LABELS,
+        bins=pg.constants.LN_VS30_DIFF_BINS,
+        labels=pg.constants.LN_VS30_DIFF_BIN_LABELS,
     )
     gnn_only_corr_residual_groups = gnn_only_corr_residuals.groupby(
         "ln_vs30_diff_bin", observed=False
     )
     gnn_only_res_vs30_corr_bias = gnn_only_corr_residual_groups[
-        sr.constants.PSA_KEYS
+        pg.constants.PSA_KEYS
     ].mean()
     gnn_only_res_vs30_corr_std = gnn_only_corr_residual_groups[
-        sr.constants.PSA_KEYS
+        pg.constants.PSA_KEYS
     ].std()
 
     gnn_residual_corr_residuals["abs_ln_vs30_diff"] = site_pairs_df["abs_ln_vs30_diff"]
     gnn_residual_corr_residuals["ln_vs30_diff_bin"] = pd.cut(
         gnn_residual_corr_residuals["abs_ln_vs30_diff"],
-        bins=sr.constants.LN_VS30_DIFF_BINS,
-        labels=sr.constants.LN_VS30_DIFF_BIN_LABELS,
+        bins=pg.constants.LN_VS30_DIFF_BINS,
+        labels=pg.constants.LN_VS30_DIFF_BIN_LABELS,
     )
     gnn_residual_corr_residual_groups = gnn_residual_corr_residuals.groupby(
         "ln_vs30_diff_bin", observed=False
     )
     gnn_residual_res_vs30_corr_bias = gnn_residual_corr_residual_groups[
-        sr.constants.PSA_KEYS
+        pg.constants.PSA_KEYS
     ].mean()
     gnn_residual_res_vs30_corr_std = gnn_residual_corr_residual_groups[
-        sr.constants.PSA_KEYS
+        pg.constants.PSA_KEYS
     ].std()
 
     if cim_corr_residuals is not None:
         cim_corr_residuals["abs_ln_vs30_diff"] = site_pairs_df["abs_ln_vs30_diff"]
         cim_corr_residuals["ln_vs30_diff_bin"] = pd.cut(
             cim_corr_residuals["abs_ln_vs30_diff"],
-            bins=sr.constants.LN_VS30_DIFF_BINS,
-            labels=sr.constants.LN_VS30_DIFF_BIN_LABELS,
+            bins=pg.constants.LN_VS30_DIFF_BINS,
+            labels=pg.constants.LN_VS30_DIFF_BIN_LABELS,
         )
         cim_corr_residual_groups = cim_corr_residuals.groupby(
             "ln_vs30_diff_bin", observed=False
         )
-        cim_res_vs30_corr_bias = cim_corr_residual_groups[sr.constants.PSA_KEYS].mean()
-        cim_res_vs30_corr_std = cim_corr_residual_groups[sr.constants.PSA_KEYS].std()
+        cim_res_vs30_corr_bias = cim_corr_residual_groups[pg.constants.PSA_KEYS].mean()
+        cim_res_vs30_corr_std = cim_corr_residual_groups[pg.constants.PSA_KEYS].std()
 
     ## GNN-Only
-    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
-        figsize=sr.constants.FIG_SIZE,
-        fig_dpi=sr.constants.FIG_DPI,
+    fig, ax1, ax2 = pg.plot_utils.get_pSA_bias_residual_fig(
+        figsize=pg.constants.FIG_SIZE,
+        fig_dpi=pg.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -1901,37 +1901,37 @@ def spatial_corr_trends(
 
     # Bias
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_only_corr_res_bias[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_only_corr_res_bias[pg.constants.PSA_KEYS],
         label="GNN-Only",
         c="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     if cim_corr_residuals is not None:
         ax1.plot(
-            sr.constants.PERIODS,
-            cim_corr_res_bias[sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_corr_res_bias[pg.constants.PSA_KEYS],
             label="MVN-CIM",
             c="black",
             linestyle="--",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
 
     for i, (cur_key, cur_group) in enumerate(gnn_only_corr_residual_groups):
         ax1.semilogx(
-            sr.constants.PERIODS,
-            gnn_only_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_only_res_vs30_corr_bias.loc[cur_key, pg.constants.PSA_KEYS],
             label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km (N={gnn_only_corr_residual_groups.size()[cur_key]})",
-            c=sr.constants.LN_VS30_DIFF_COLORS[i],
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            c=pg.constants.LN_VS30_DIFF_COLORS[i],
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
         )
         if cim_corr_res_bias is not None:
             ax1.semilogx(
-                sr.constants.PERIODS,
-                cim_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
-                c=sr.constants.LN_VS30_DIFF_COLORS[i],
+                pg.constants.PERIODS,
+                cim_res_vs30_corr_bias.loc[cur_key, pg.constants.PSA_KEYS],
+                c=pg.constants.LN_VS30_DIFF_COLORS[i],
                 linestyle="--",
-                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+                linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
         # ax1.legend()
@@ -1940,7 +1940,7 @@ def spatial_corr_trends(
             0.03,
             "Overprediction",
             transform=ax1.transAxes,
-            fontsize=sr.constants.FIG_FONT_SIZE,
+            fontsize=pg.constants.FIG_FONT_SIZE,
             va="bottom",
             ha="left",
         )
@@ -1949,7 +1949,7 @@ def spatial_corr_trends(
         0.97,
         "Underprediction",
         transform=ax1.transAxes,
-        fontsize=sr.constants.FIG_FONT_SIZE,
+        fontsize=pg.constants.FIG_FONT_SIZE,
         va="top",
         ha="left",
     )
@@ -1966,47 +1966,47 @@ def spatial_corr_trends(
 
     # Residual Standard Deviation
     ax2.plot(
-        sr.constants.PERIODS,
-        gnn_only_corr_res_std[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_only_corr_res_std[pg.constants.PSA_KEYS],
         label="GNN-Only",
         c="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     if cim_corr_residuals is not None:
         ax2.plot(
-            sr.constants.PERIODS,
-            cim_corr_res_std[sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_corr_res_std[pg.constants.PSA_KEYS],
             label="MVN-CIM",
             c="black",
             linestyle="--",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
 
     for i, (cur_key, cur_group) in enumerate(gnn_only_corr_residual_groups):
         ax2.semilogx(
-            sr.constants.PERIODS,
-            gnn_only_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_only_res_vs30_corr_std.loc[cur_key, pg.constants.PSA_KEYS],
             label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km (N={gnn_only_corr_residual_groups.size()[cur_key]})",
-            c=sr.constants.LN_VS30_DIFF_COLORS[i],
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            c=pg.constants.LN_VS30_DIFF_COLORS[i],
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
         )
         if cim_corr_res_std is not None:
             ax2.semilogx(
-                sr.constants.PERIODS,
-                cim_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
-                c=sr.constants.LN_VS30_DIFF_COLORS[i],
+                pg.constants.PERIODS,
+                cim_res_vs30_corr_std.loc[cur_key, pg.constants.PSA_KEYS],
+                c=pg.constants.LN_VS30_DIFF_COLORS[i],
                 linestyle="--",
-                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+                linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
     ax2.legend()
-    fig.savefig(output_dir / f"spatial_corr_vs30_gnn_only.{sr.constants.FIG_FORMAT}")
+    fig.savefig(output_dir / f"spatial_corr_vs30_gnn_only.{pg.constants.FIG_FORMAT}")
     plt.close(fig)
 
     ## GNN-Residual
-    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
-        figsize=sr.constants.FIG_SIZE,
-        fig_dpi=sr.constants.FIG_DPI,
+    fig, ax1, ax2 = pg.plot_utils.get_pSA_bias_residual_fig(
+        figsize=pg.constants.FIG_SIZE,
+        fig_dpi=pg.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -2017,37 +2017,37 @@ def spatial_corr_trends(
 
     # Bias
     ax1.plot(
-        sr.constants.PERIODS,
-        gnn_residual_corr_res_bias[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_residual_corr_res_bias[pg.constants.PSA_KEYS],
         label="GNN-Residual",
         c="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     if cim_corr_residuals is not None:
         ax1.plot(
-            sr.constants.PERIODS,
-            cim_corr_res_bias[sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_corr_res_bias[pg.constants.PSA_KEYS],
             label="MVN-CIM",
             c="black",
             linestyle="--",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
 
     for i, (cur_key, cur_group) in enumerate(gnn_residual_corr_residual_groups):
         ax1.semilogx(
-            sr.constants.PERIODS,
-            gnn_residual_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_residual_res_vs30_corr_bias.loc[cur_key, pg.constants.PSA_KEYS],
             label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km (N={gnn_residual_corr_residual_groups.size()[cur_key]})",
-            c=sr.constants.LN_VS30_DIFF_COLORS[i],
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            c=pg.constants.LN_VS30_DIFF_COLORS[i],
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
         )
         if cim_corr_res_bias is not None:
             ax1.semilogx(
-                sr.constants.PERIODS,
-                cim_res_vs30_corr_bias.loc[cur_key, sr.constants.PSA_KEYS],
-                c=sr.constants.LN_VS30_DIFF_COLORS[i],
+                pg.constants.PERIODS,
+                cim_res_vs30_corr_bias.loc[cur_key, pg.constants.PSA_KEYS],
+                c=pg.constants.LN_VS30_DIFF_COLORS[i],
                 linestyle="--",
-                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+                linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
         # ax1.legend()
@@ -2056,7 +2056,7 @@ def spatial_corr_trends(
             0.03,
             "Overprediction",
             transform=ax1.transAxes,
-            fontsize=sr.constants.FIG_FONT_SIZE,
+            fontsize=pg.constants.FIG_FONT_SIZE,
             va="bottom",
             ha="left",
         )
@@ -2065,7 +2065,7 @@ def spatial_corr_trends(
         0.97,
         "Underprediction",
         transform=ax1.transAxes,
-        fontsize=sr.constants.FIG_FONT_SIZE,
+        fontsize=pg.constants.FIG_FONT_SIZE,
         va="top",
         ha="left",
     )
@@ -2082,42 +2082,42 @@ def spatial_corr_trends(
 
     # Residual Standard Deviation
     ax2.plot(
-        sr.constants.PERIODS,
-        gnn_residual_corr_res_std[sr.constants.PSA_KEYS],
+        pg.constants.PERIODS,
+        gnn_residual_corr_res_std[pg.constants.PSA_KEYS],
         label="GNN-Residual",
         c="black",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     if cim_corr_residuals is not None:
         ax2.plot(
-            sr.constants.PERIODS,
-            cim_corr_res_std[sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_corr_res_std[pg.constants.PSA_KEYS],
             label="MVN-CIM",
             c="black",
             linestyle="--",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
 
     for i, (cur_key, cur_group) in enumerate(gnn_residual_corr_residual_groups):
         ax2.semilogx(
-            sr.constants.PERIODS,
-            gnn_residual_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_residual_res_vs30_corr_std.loc[cur_key, pg.constants.PSA_KEYS],
             label=rf"$\Delta_{{V_{{S30}}}}$ {cur_key} km (N={gnn_residual_corr_residual_groups.size()[cur_key]})",
-            c=sr.constants.LN_VS30_DIFF_COLORS[i],
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            c=pg.constants.LN_VS30_DIFF_COLORS[i],
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
         )
         if cim_corr_res_std is not None:
             ax2.semilogx(
-                sr.constants.PERIODS,
-                cim_res_vs30_corr_std.loc[cur_key, sr.constants.PSA_KEYS],
-                c=sr.constants.LN_VS30_DIFF_COLORS[i],
+                pg.constants.PERIODS,
+                cim_res_vs30_corr_std.loc[cur_key, pg.constants.PSA_KEYS],
+                c=pg.constants.LN_VS30_DIFF_COLORS[i],
                 linestyle="--",
-                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+                linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
     ax2.legend()
     fig.savefig(
-        output_dir / f"spatial_corr_vs30_gnn_residual.{sr.constants.FIG_FORMAT}"
+        output_dir / f"spatial_corr_vs30_gnn_residual.{pg.constants.FIG_FORMAT}"
     )
     plt.close(fig)
 
@@ -2137,14 +2137,14 @@ def ind_scenario_pSA(
             print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
 
     # Update font size
-    if sr.constants.FIG_FONT_SIZE is not None:
+    if pg.constants.FIG_FONT_SIZE is not None:
         plt.rcParams.update(
             {
-                "font.size": sr.constants.FIG_FONT_SIZE,
+                "font.size": pg.constants.FIG_FONT_SIZE,
             }
         )
 
-    obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
+    obs_data = pg.data.load_obs_nzgmdb(nzgmdb_ffp)
 
     # gnn_only_pred_df = pd.read_parquet(gnn_only_ffp)
     gnn_residual_pred_df = pd.read_parquet(gnn_residual_ffp)
@@ -2152,7 +2152,7 @@ def ind_scenario_pSA(
     cim_results = pd.read_parquet(cim_results_ffp)
     emp_gm_params = pd.read_parquet(emp_gm_params_ffp)
 
-    dist_matrix = sr.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
+    dist_matrix = pg.utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
 
     # obs_color_boundaries = np.array([0, 1.0, 2.5, 5.0, 10.0, 30.0])
     obs_colors = sns.color_palette("viridis", 5)
@@ -2164,13 +2164,13 @@ def ind_scenario_pSA(
         if cur_id not in gnn_residual_pred_df.index:
             continue
 
-        cur_obs_sites = sr.plot_ind_scenarios.get_obs_sites(
+        cur_obs_sites = pg.plot_ind_scenarios.get_obs_sites(
             event_id, cur_site_int, gnn_residual_pred_df, dist_matrix, n_obs_sites=5
         )
         cur_obs_site_distances = dist_matrix.loc[cur_site_int].loc[cur_obs_sites].values
         cur_obs_color_boundaries = np.linspace(cur_obs_site_distances.min(), cur_obs_site_distances.max(), 5)
 
-        fig, ax = plt.subplots(figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI)
+        fig, ax = plt.subplots(figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI)
 
         # Observation sites
         obs_lines = []
@@ -2178,10 +2178,10 @@ def ind_scenario_pSA(
             cur_obs_site_id = f"{event_id}_{cur_obs_site}"
 
             (cur_line,) = ax.plot(
-                sr.constants.PERIODS,
+                pg.constants.PERIODS,
                 np.log(
                     obs_data.record_df.loc[
-                        cur_obs_site_id, sr.constants.PSA_KEYS
+                        cur_obs_site_id, pg.constants.PSA_KEYS
                     ].values.astype(float)
                 ),
                 c=obs_colors[
@@ -2192,35 +2192,35 @@ def ind_scenario_pSA(
                 ],
                 linestyle="--",
                 label=f"{cur_obs_site} - {dist_matrix.loc[cur_site_int, cur_obs_site]:.1f} km",
-                linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+                linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
             obs_lines.append(cur_line)
 
         # Empirical GM
         (emp_line,) = ax.plot(
-            sr.constants.PERIODS,
-            emp_gm_params.loc[cur_id, sr.constants.GMM_PRED_PSA_KEYS],
+            pg.constants.PERIODS,
+            emp_gm_params.loc[cur_id, pg.constants.GMM_PRED_PSA_KEYS],
             label="Empirical GM",
             c="gray",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
 
         # cIM
         (cim_line,) = ax.plot(
-            sr.constants.PERIODS,
-            cim_results.loc[cur_id, sr.constants.CIM_PRED_PSA_KEYS],
+            pg.constants.PERIODS,
+            cim_results.loc[cur_id, pg.constants.CIM_PRED_PSA_KEYS],
             label="MVN-CIM",
             c="green",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
         ax.fill_between(
-            sr.constants.PERIODS,
-            cim_results.loc[cur_id, sr.constants.CIM_PRED_PSA_KEYS].values.astype(float)
-            + cim_results.loc[cur_id, sr.constants.CIM_PRED_STD_PSA_KEYS].values.astype(
+            pg.constants.PERIODS,
+            cim_results.loc[cur_id, pg.constants.CIM_PRED_PSA_KEYS].values.astype(float)
+            + cim_results.loc[cur_id, pg.constants.CIM_PRED_STD_PSA_KEYS].values.astype(
                 float
             ),
-            cim_results.loc[cur_id, sr.constants.CIM_PRED_PSA_KEYS].values.astype(float)
-            - cim_results.loc[cur_id, sr.constants.CIM_PRED_STD_PSA_KEYS].values.astype(
+            cim_results.loc[cur_id, pg.constants.CIM_PRED_PSA_KEYS].values.astype(float)
+            - cim_results.loc[cur_id, pg.constants.CIM_PRED_STD_PSA_KEYS].values.astype(
                 float
             ),
             color="green",
@@ -2271,25 +2271,25 @@ def ind_scenario_pSA(
 
         # GNN Residual
         (gnn_line,) = ax.plot(
-            sr.constants.PERIODS,
-            gnn_residual_pred_df.loc[cur_id, sr.constants.GNN_PRED_PSA_KEYS],
+            pg.constants.PERIODS,
+            gnn_residual_pred_df.loc[cur_id, pg.constants.GNN_PRED_PSA_KEYS],
             label="GNN-Residual",
             c="purple",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
         ax.fill_between(
-            sr.constants.PERIODS,
+            pg.constants.PERIODS,
             gnn_residual_pred_df.loc[
-                cur_id, sr.constants.GNN_PRED_PSA_KEYS
+                cur_id, pg.constants.GNN_PRED_PSA_KEYS
             ].values.astype(float)
             + gnn_residual_pred_df.loc[
-                cur_id, sr.constants.GNN_PRED_STD_PSA_KEYS
+                cur_id, pg.constants.GNN_PRED_STD_PSA_KEYS
             ].values.astype(float),
             gnn_residual_pred_df.loc[
-                cur_id, sr.constants.GNN_PRED_PSA_KEYS
+                cur_id, pg.constants.GNN_PRED_PSA_KEYS
             ].values.astype(float)
             - gnn_residual_pred_df.loc[
-                cur_id, sr.constants.GNN_PRED_STD_PSA_KEYS
+                cur_id, pg.constants.GNN_PRED_STD_PSA_KEYS
             ].values.astype(float),
             color="purple",
             alpha=0.2,
@@ -2314,15 +2314,15 @@ def ind_scenario_pSA(
 
         # Observed
         (obs_line,) = ax.plot(
-            sr.constants.PERIODS,
+            pg.constants.PERIODS,
             np.log(
-                obs_data.record_df.loc[cur_id, sr.constants.PSA_KEYS].values.astype(
+                obs_data.record_df.loc[cur_id, pg.constants.PSA_KEYS].values.astype(
                     float
                 )
             ),
             label="Observed",
             c="red",
-            linewidth=sr.constants.FIG_LINEWIDTH,
+            linewidth=pg.constants.FIG_LINEWIDTH,
         )
 
         ax.set_xscale("log")
@@ -2335,7 +2335,7 @@ def ind_scenario_pSA(
         ax.set_xlabel("Vibration Period, T(s)")
         ax.set_ylabel("pSA (g)")
         ax.set_xlim(0.01, 10.0)
-        ax.yaxis.set_major_formatter(FuncFormatter(sr.plot_ind_scenarios.exp_formatter))
+        ax.yaxis.set_major_formatter(FuncFormatter(pg.plot_ind_scenarios.exp_formatter))
 
         ax.set_ylim(np.log(0.005), np.log(5.0))
 
@@ -2357,7 +2357,7 @@ def ind_scenario_pSA(
         )
 
         fig.tight_layout()
-        fig.savefig(output_dir / f"{event_id}_{cur_site_int}.{sr.constants.FIG_FORMAT}")
+        fig.savefig(output_dir / f"{event_id}_{cur_site_int}.{pg.constants.FIG_FORMAT}")
         plt.close(fig)
 
 
@@ -2383,7 +2383,7 @@ def hyper_var(
 
     # Loss
     fig, (ax1, ax2) = plt.subplots(
-        1, 2, figsize=sr.constants.FIG_SIZE, dpi=sr.constants.FIG_DPI, sharey=True
+        1, 2, figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI, sharey=True
     )
     ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
     ax1.set_xlabel("Epochs")
@@ -2405,37 +2405,37 @@ def hyper_var(
             epochs,
             train_loss,
             c="k",
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             label="Variation" if ix == 0 else "",
         )
-        ax2.plot(epochs, val_loss, c="k", linewidth=sr.constants.FIG_GROUP_LINEWIDTH)
+        ax2.plot(epochs, val_loss, c="k", linewidth=pg.constants.FIG_GROUP_LINEWIDTH)
 
     ax1.plot(
         epochs,
         ref_train_loss,
         c="b",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-residual",
     )
-    ax2.plot(epochs, ref_val_loss, c="b", linewidth=sr.constants.FIG_LINEWIDTH)
+    ax2.plot(epochs, ref_val_loss, c="b", linewidth=pg.constants.FIG_LINEWIDTH)
     ax1.legend()
 
     fig.tight_layout()
-    fig.savefig(output_dir / f"loss_comparison.{sr.constants.FIG_FORMAT}")
+    fig.savefig(output_dir / f"loss_comparison.{pg.constants.FIG_FORMAT}")
     plt.close(fig)
 
     # Bias & Residual Standard deviation
     ref_gnn_results = pd.read_parquet(
         ref_model_dir / "val_results.parquet"
     ).sort_index()
-    ref_gnn_residuals = sr.analysis.get_residuals(
-        ref_gnn_results, ims=sr.constants.PSA_KEYS
+    ref_gnn_residuals = pg.analysis.get_residuals(
+        ref_gnn_results, ims=pg.constants.PSA_KEYS
     )
-    ref_gnn_res_bias_std = sr.analysis.get_res_mean_std(ref_gnn_residuals)
+    ref_gnn_res_bias_std = pg.analysis.get_res_mean_std(ref_gnn_residuals)
 
-    fig, ax1, ax2 = sr.plot_utils.get_pSA_bias_residual_fig(
-        figsize=sr.constants.FIG_SIZE,
-        fig_dpi=sr.constants.FIG_DPI,
+    fig, ax1, ax2 = pg.plot_utils.get_pSA_bias_residual_fig(
+        figsize=pg.constants.FIG_SIZE,
+        fig_dpi=pg.constants.FIG_DPI,
         main_wspace=0.175,
         left=0.08,
         right=0.99,
@@ -2445,40 +2445,40 @@ def hyper_var(
     )
     for ix, cur_dir in enumerate(result_dirs):
         cur_results = pd.read_parquet(cur_dir / "val_results.parquet").sort_index()
-        cur_residuals = sr.analysis.get_residuals(cur_results, ims=sr.constants.PSA_KEYS)
-        cur_res_bias_std = sr.analysis.get_res_mean_std(cur_residuals)
+        cur_residuals = pg.analysis.get_residuals(cur_results, ims=pg.constants.PSA_KEYS)
+        cur_res_bias_std = pg.analysis.get_res_mean_std(cur_residuals)
 
         ax1.plot(
-            sr.constants.PERIODS,
+            pg.constants.PERIODS,
             cur_res_bias_std["mean"],
             c="k",
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             label="Variation" if ix == 0 else "",
         )
         ax2.plot(
-            sr.constants.PERIODS,
+            pg.constants.PERIODS,
             cur_res_bias_std["std"],
             c="k",
-            linewidth=sr.constants.FIG_GROUP_LINEWIDTH,
+            linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
         )
 
     ax1.plot(
-        sr.constants.PERIODS,
+        pg.constants.PERIODS,
         ref_gnn_res_bias_std["mean"],
         c="b",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
         label="GNN-residual",
     )
     ax2.plot(
-        sr.constants.PERIODS,
+        pg.constants.PERIODS,
         ref_gnn_res_bias_std["std"],
         c="b",
-        linewidth=sr.constants.FIG_LINEWIDTH,
+        linewidth=pg.constants.FIG_LINEWIDTH,
     )
     ax1.legend()
     
     fig.tight_layout()
-    fig.savefig(output_dir / f"bias_residual_comparison.{sr.constants.FIG_FORMAT}")
+    fig.savefig(output_dir / f"bias_residual_comparison.{pg.constants.FIG_FORMAT}")
     plt.close(fig)
 
 

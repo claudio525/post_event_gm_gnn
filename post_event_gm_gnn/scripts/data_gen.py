@@ -1,13 +1,10 @@
-import warnings
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import typer
-import tqdm
 
-import sim_ranking as sr
 import ml_tools as mlt
+import post_event_gm_gnn as pg
 
 app = typer.Typer()
 
@@ -37,9 +34,9 @@ def get_nzgmdb_emp_gmm_params(
     """Computes the GM parameters using empirical GMMs"""
     events = mlt.utils.load_txt(events_ffp) if events_ffp is not None else None
 
-    obs_data = sr.data.load_obs_nzgmdb(nzgmdb_flatfile_ffp)
+    obs_data = pg.data.load_obs_nzgmdb(nzgmdb_flatfile_ffp)
 
-    sr.data.compute_nzgmdb_emp_gm_params(
+    pg.data.compute_nzgmdb_emp_gm_params(
         output_ffp,
         obs_data,
         events=events,
@@ -55,9 +52,9 @@ def get_event_non_uniform_sites_gm_params(
     max_rjb: float = None,
 ):
     """Computes the GM parameters for a single event for non-uniform grid sites"""
-    site_df = sr.data.load_non_uniform_grid(non_uniform_sites_dir)
+    site_df = pg.data.load_non_uniform_grid(non_uniform_sites_dir)
 
-    sr.data.compute_event_sites_emp_gm_params(
+    pg.data.compute_event_sites_emp_gm_params(
         event_id, site_df, nzgmdb_ffp, srf_ffp, output_ffp, max_rjb=max_rjb
     )
 
@@ -73,7 +70,7 @@ def get_event_uniform_sites_gm_params(
     """Computes the GM parameters for a single event for uniform grid sites"""
     site_df = pd.read_parquet(grid_ffp)
 
-    sr.data.compute_event_sites_emp_gm_params(
+    pg.data.compute_event_sites_emp_gm_params(
         event_id, site_df, nzgmdb_ffp, srf_ffp, output_ffp, max_rjb=max_rjb
     )
     
@@ -88,9 +85,9 @@ def gen_uniform_site_grid(
     Generates a uniform grid of sites for the given region. 
     Resolution is in metres.
     """
-    region = sr.constants.REGION_MAPPINGS[region_key]
+    region = pg.constants.REGION_MAPPINGS[region_key]
 
-    sr.data.gen_uniform_site_grid(region, resolution, output_ffp)
+    pg.data.gen_uniform_site_grid(region, resolution, output_ffp)
 
     
     

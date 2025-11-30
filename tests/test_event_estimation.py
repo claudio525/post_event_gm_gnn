@@ -65,7 +65,5 @@ def test_event_estimation(event_id: str, model_dir: Path, run_config: pg.ml.RunC
     npt.assert_allclose(result_df[pred_std_cols], train_results[pred_std_cols], rtol=1e-3)
 
 
-# if __name__ == "__main__": 
-    # test_scenario_estimation("sim_ranking/results/gnn/0218_2000_full_v4p2NZGMDB_v2p1GNN", "2016p860234_WEL")
-    # test_event_estimation("3528839")
+
     

@@ -10,7 +10,7 @@ import scipy.io as io
 import numpy as np
 from numpy.testing import assert_allclose
 
-import sim_ranking as sr
+import post_event_gm_gnn as pg
 
 DISTANCES = np.array([0.0, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0])
 PERIODS = [
@@ -59,7 +59,7 @@ def test_lb13_benchmark():
     max_diff_index = None
     for i, T_i in enumerate(PERIODS):
         for j, T_j in enumerate(PERIODS):
-            rho = sr.lb13.get_correlations(T_i, T_j, DISTANCES)
+            rho = pg.lb13.get_correlations(T_i, T_j, DISTANCES)
 
             diff = np.abs(rho - bench_data[:, i, j])
             if diff.max() > max_diff:
@@ -79,17 +79,12 @@ def test_lb13_vec_benchmark():
 
     period_combs = np.array(list(itertools.product(PERIODS, repeat=2)))
 
-    rho = sr.lb13.get_correlations_vec(period_combs[:, 0], period_combs[:, 1], DISTANCES)
+    rho = pg.lb13.get_correlations_vec(period_combs[:, 0], period_combs[:, 1], DISTANCES)
     rho = rho.T.reshape(bench_data.shape)
 
     assert_allclose(rho, bench_data, atol=0.06)
 
     print("Vectorized - Max diff: ", np.abs(rho - bench_data).max())
-    
+  
         
 
-# if __name__ == "__main__":
-    # import os
-    # os.chdir("/Users/claudy/dev/work/code/sim_ranking/sim_ranking/loth_baker_2013_corr_model/tests")
-    # test_lb13_benchmark()
-    # test_lb13_vec_benchmark()

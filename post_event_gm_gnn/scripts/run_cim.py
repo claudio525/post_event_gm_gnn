@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import typer
 
-import sim_ranking as sr
+import post_event_gm_gnn as pg
 
 app = typer.Typer()
 
@@ -17,7 +17,7 @@ def run_cim_for_GNN(
     n_procs: int = 1,
 ):
     """Runs conditional IM ranking for the GNN results"""
-    sr.conditional.run_cim_for_GNN(
+    pg.conditional.run_cim_for_GNN(
         gnn_result_dir, emp_gm_params_ffp, on_train=on_train, n_procs=n_procs
     )
 
@@ -30,7 +30,7 @@ def run_cim_for_CV_GNN(
     include_train: bool = False,
 ):
     """Runs conditional IM ranking for the GNN CV results"""
-    sr.conditional.run_cim_for_CV_GNN(
+    pg.conditional.run_cim_for_CV_GNN(
         gnn_cv_results_dir,
         emp_gm_params_ffp,
         n_procs=n_procs,
@@ -56,11 +56,11 @@ def predict_event_cIM(
 
     # Load the site data
     if non_uniform_grid_dir is not None:
-        site_df = sr.data.load_non_uniform_grid(non_uniform_grid_dir)
+        site_df = pg.data.load_non_uniform_grid(non_uniform_grid_dir)
     else:
         site_df = pd.read_parquet(uniform_site_ffp)
 
-    obs_data = sr.data.load_obs_nzgmdb(nzgmdb_ffp)
+    obs_data = pg.data.load_obs_nzgmdb(nzgmdb_ffp)
 
     # Load GM params
     grid_gm_params_df = pd.read_parquet(site_emp_gm_params_ffp)
@@ -83,7 +83,7 @@ def predict_event_cIM(
         axis=0,
     )
 
-    sr.conditional.predict_event_cIM(
+    pg.conditional.predict_event_cIM(
         event_id,
         site_df,
         obs_data,

@@ -11,7 +11,6 @@ export fig_group_linewidth="2.0"
 gnn_only="/Users/claudy/dev/work/data/sim_ranking/results/gnn/final/0725_0929_cv_v4p3FNZGMDB_v2p9_6e8s"
 gnn_residual="/Users/claudy/dev/work/data/sim_ranking/results/gnn/final/0725_1117_cv_v4p3FNZGMDB_v2p10_6e8s"
 emp_gm_params="/Users/claudy/dev/work/data/sim_ranking/emp_gm_params/nzgmdb_v4p3_final/emp_gm_params.parquet"
-# out_dir="/Users/claudy/dev/work/docs/PhD/cond_gm_est_paper/resources/case_study/results"
 out_dir="/Users/claudy/dev/work/tmp/tmp_paper_figures"
 
 

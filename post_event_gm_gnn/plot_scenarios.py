@@ -4,8 +4,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
-import sim_ranking as sr
 import ml_tools as mlt
+
+from . import constants
+from .data_classes import ObservedData
 
 
 def get_obs_sites(
@@ -40,10 +42,10 @@ def plot_gnn_cim(
     log_values: bool = False,
 ):
     emp_gmm_pSA_mean_keys = [
-        f"pSA_{cur_period}_mean" for cur_period in sr.constants.PERIODS
+        f"pSA_{cur_period}_mean" for cur_period in constants.PERIODS
     ]
     emp_gmm_pSA_std_keys = [
-        f"pSA_{cur_period}_std_Total" for cur_period in sr.constants.PERIODS
+        f"pSA_{cur_period}_std_Total" for cur_period in constants.PERIODS
     ]
 
     # Empirical GMM
@@ -55,13 +57,13 @@ def plot_gnn_cim(
             cur_id, emp_gmm_pSA_std_keys
         ].values.astype(float)
         ax.plot(
-            sr.constants.PERIODS,
+            constants.PERIODS,
             cur_emp_gmm_mean if log_values else np.exp(cur_emp_gmm_mean),
             label="Empirical GMM",
             c="gray",
         )
         ax.plot(
-            sr.constants.PERIODS,
+            constants.PERIODS,
             (
                 cur_emp_gmm_mean + cur_emp_gmm_std
                 if log_values
@@ -71,7 +73,7 @@ def plot_gnn_cim(
             linestyle="--",
         )
         ax.plot(
-            sr.constants.PERIODS,
+            constants.PERIODS,
             (
                 cur_emp_gmm_mean - cur_emp_gmm_std
                 if log_values
@@ -84,19 +86,19 @@ def plot_gnn_cim(
     # CIM
     if cim_results is not None:
         cur_cim_mean = cim_results.loc[
-            cur_id, sr.constants.CIM_PRED_PSA_KEYS
+            cur_id, constants.CIM_PRED_PSA_KEYS
         ].values.astype(float)
         cur_cim_std = cim_results.loc[
-            cur_id, sr.constants.CIM_PRED_STD_PSA_KEYS
+            cur_id, constants.CIM_PRED_STD_PSA_KEYS
         ].values.astype(float)
         ax.plot(
-            sr.constants.PERIODS,
+            constants.PERIODS,
             cur_cim_mean if log_values else np.exp(cur_cim_mean),
             label="cIM",
             c="g",
         )
         ax.plot(
-            sr.constants.PERIODS,
+            constants.PERIODS,
             (
                 cur_cim_mean + cur_cim_std
                 if log_values
@@ -106,7 +108,7 @@ def plot_gnn_cim(
             linestyle="--",
         )
         ax.plot(
-            sr.constants.PERIODS,
+            constants.PERIODS,
             (
                 cur_cim_mean - cur_cim_std
                 if log_values
@@ -118,19 +120,19 @@ def plot_gnn_cim(
 
     # GNN
     cur_gnn_mean = gnn_results.loc[
-        cur_id, sr.constants.GNN_PRED_PSA_KEYS
+        cur_id, constants.GNN_PRED_PSA_KEYS
     ].values.astype(float)
     cur_gnn_std = gnn_results.loc[
-        cur_id, sr.constants.GNN_PRED_STD_PSA_KEYS
+        cur_id, constants.GNN_PRED_STD_PSA_KEYS
     ].values.astype(float)
     ax.plot(
-        sr.constants.PERIODS,
+        constants.PERIODS,
         cur_gnn_mean if log_values else np.exp(cur_gnn_mean),
         label="GNN",
         c="b",
     )
     ax.plot(
-        sr.constants.PERIODS,
+        constants.PERIODS,
         (
             cur_gnn_mean + cur_gnn_std
             if log_values
@@ -140,7 +142,7 @@ def plot_gnn_cim(
         linestyle="--",
     )
     ax.plot(
-        sr.constants.PERIODS,
+        constants.PERIODS,
         (
             cur_gnn_mean - cur_gnn_std
             if log_values
@@ -151,9 +153,9 @@ def plot_gnn_cim(
     )
 
     # Observed
-    obs_values = gnn_results.loc[cur_id, sr.constants.PSA_KEYS].values.astype(float)
+    obs_values = gnn_results.loc[cur_id, constants.PSA_KEYS].values.astype(float)
     ax.plot(
-        sr.constants.PERIODS,
+        constants.PERIODS,
         obs_values if log_values else np.exp(obs_values),
         label="Observed",
         c="r",
@@ -181,7 +183,7 @@ def plot_obs_sites(
     event: str,
     int_site: str,
     obs_sites: np.ndarray[str],
-    obs_data: sr.ObservedData,
+    obs_data: ObservedData,
     dist_matrix: pd.DataFrame,
     log_values: bool = False,
 ):
@@ -189,11 +191,11 @@ def plot_obs_sites(
     cur_obs_data = obs_data.get_event_data(event, obs_sites)
 
     for int_site in obs_sites:
-        cur_values = cur_obs_data.loc[int_site, sr.constants.PSA_KEYS].values.astype(
+        cur_values = cur_obs_data.loc[int_site, constants.PSA_KEYS].values.astype(
             float
         )
         ax.plot(
-            sr.constants.PERIODS,
+            constants.PERIODS,
             np.log(cur_values) if log_values else cur_values,
             label=f"{int_site}, {cur_obs_sites_dist[int_site]:.2f} km",
         )
@@ -221,7 +223,7 @@ def create_4plot(
     obs_sites: np.ndarray[str],
     gnn_val_results: pd.DataFrame,
     cim_val_results: pd.DataFrame,
-    obs_data: sr.ObservedData,
+    obs_data: ObservedData,
     dist_matrix: pd.DataFrame,
     emp_gmm_params: pd.DataFrame = None,
 ):
@@ -272,7 +274,7 @@ def create_2plot_log(
     obs_sites: np.ndarray[str],
     gnn_results: pd.DataFrame,
     cim_results: pd.DataFrame,
-    obs_data: sr.ObservedData,
+    obs_data: ObservedData,
     dist_matrix: pd.DataFrame,
     emp_gmm_params: pd.DataFrame = None,
 ):
@@ -308,7 +310,7 @@ def get_site_info_df(
     event: str,
     int_site: str,
     obs_sites: np.ndarray[str],
-    obs_data: sr.ObservedData,
+    obs_data: ObservedData,
     dist_matrix: pd.DataFrame,
 ):
     site_cols = ["rrup", "vs30", "z1p0", "z2p5", "tsite"]
