@@ -320,7 +320,6 @@ class ObservedData:
         cls,
         nzgmdb_flat_ffp: Path,
         version: constants.NZGMDBVersion = None,
-        event_site_id_index: bool = True,
     ):
         site_cols_map = {
             "sta": cls.SiteColEnums.SITE_ID,
@@ -389,88 +388,19 @@ class ObservedData:
                     f"from {nzgmdb_flat_ffp.parent.parent.name}"
                 ) from e
 
-        # Load
-        if version in [constants.NZGMDBVersion.v3p4, constants.NZGMDBVersion.v3p0]:
-            record_df = pd.read_csv(
-                nzgmdb_flat_ffp, dtype={"evid": str}, index_col="gmid", engine="c"
-            ).sort_index()
+        record_df = pd.read_csv(
+            nzgmdb_flat_ffp,
+            dtype={"evid": str, "loc": str},
+            engine="c",
+            index_col="record_id",
+        ).sort_index()
 
-            # Renaming
-            record_df = record_df.rename(columns=mapping_dict)
-            record_df.index.name = "record_id"
+        if version is constants.NZGMDBVersion.v4p3_final:
+            # Add fmin column
+            record_df[cls.OtherColEnums.FMIN] = record_df[cls.OtherColEnums.FHP_HORIZONTAL] * 1.25
 
-            # Convert index
-            if event_site_id_index:
-                index = mlt.array_utils.numpy_str_join(
-                    "_",
-                    record_df["event_id"].values.astype(str),
-                    record_df["site_id"].values.astype(str),
-                )
-                record_df.index = index
-                record_df = record_df.sort_index()
-
-            # The GMC fmin in version 3.4 is used to select fHP, hence
-            # the actual fmin is not the GMC fmin values
-            if (
-                cls.OtherColEnums.FMIN_H1 in record_df.columns
-                and cls.OtherColEnums.FMIN_H2 in record_df.columns
-            ):
-                # Rotd50 does not contain vertical GMC fmin, hack this in...
-                fmin_v = pd.read_csv(
-                    nzgmdb_flat_ffp.parent
-                    / nzgmdb_flat_ffp.name.replace("rotd50", "ver"),
-                    dtype={"evid": str},
-                    index_col="gmid",
-                    engine="c",
-                ).sort_index()
-
-                # Convert index, as gmid is incorrect in 3.4
-                index = mlt.array_utils.numpy_str_join(
-                    "_",
-                    fmin_v["evid"].values.astype(str),
-                    fmin_v["sta"].values.astype(str),
-                )
-                fmin_v.index = index
-                fmin_v = fmin_v.sort_index()
-                assert fmin_v.index.equals(record_df.index)
-
-                record_df[cls.OtherColEnums.FHP] = np.max(
-                    np.stack(
-                        (
-                            record_df[cls.OtherColEnums.FMIN_H1].values,
-                            record_df[cls.OtherColEnums.FMIN_H2].values,
-                            fmin_v["fmin_mean_Z"].values,
-                        ),
-                        axis=1,
-                    ),
-                    axis=1,
-                )
-
-                record_df[cls.OtherColEnums.FMIN] = (
-                        record_df[cls.OtherColEnums.FHP] / 1.25
-                )
-                record_df = record_df.drop(
-                    columns=[
-                        cls.OtherColEnums.FMIN_H1,
-                        cls.OtherColEnums.FMIN_H2,
-                        cls.OtherColEnums.FMIN_V,
-                    ],
-                    errors="ignore",
-                )
-        else:
-            record_df = pd.read_csv(
-                nzgmdb_flat_ffp,
-                dtype={"evid": str, "loc": str},
-                engine="c",
-                index_col="record_id",
-            ).sort_index()
-
-            if version is constants.NZGMDBVersion.v4p3_final:
-                # Add fmin column
-                record_df[cls.OtherColEnums.FMIN] = record_df[cls.OtherColEnums.FHP_HORIZONTAL] * 1.25
-
-            # Renaming
-            record_df = record_df.rename(columns=mapping_dict)
+        # Renaming
+        record_df = record_df.rename(columns=mapping_dict)
 
         # Tectonic type
         record_df[cls.EventColEnums.TECT_TYPE] = record_df[cls.EventColEnums.TECT_TYPE].map(
@@ -484,186 +414,9 @@ class ObservedData:
 
         return cls(record_df, nzgmdb_flat_ffp, constants.ObsDataSource.NZGMDB, version)
 
-    @classmethod
-    def from_nga_west2_flat(cls, nga_west2_flat_ffp: Path):
-        """Creates an observed data object from the NGA West 2 flat file."""
-        site_cols_map = {
-            "Station Sequence Number": cls.SiteColEnums.SITE_ID,
-            "Vs30 (m/s) selected for analysis": cls.SiteColEnums.VS30,
-            "Station Latitude": cls.SiteColEnums.SITE_LAT,
-            "Station Longitude": cls.SiteColEnums.SITE_LON,
-        }
-        event_map = {
-            "EQID": cls.EventColEnums.EVENT_ID,
-            "Earthquake Magnitude": cls.EventColEnums.MAG,
-            "Hypocenter Depth (km)": cls.EventColEnums.DEPTH,
-            "Depth to Top Of Fault Rupture Model": cls.EventColEnums.ZTOR,
-            "Hypocenter Latitude (deg)": cls.EventColEnums.EVENT_LAT,
-            "Hypocenter Longitude (deg)": cls.EventColEnums.EVENT_LON,
-        }
-        event_site_map = {
-            "Joyner-Boore Dist. (km)": cls.EventSiteColEnums.RJB,
-            "ClstD (km)": cls.EventSiteColEnums.RRUP,
-            "Rx": cls.EventSiteColEnums.RX,
-        }
-        other_map = {
-            "Lowest Usable Freq - H1 (Hz)": cls.OtherColEnums.FMIN_H1,
-            "Lowest Usable Freq - H2 (Hz)": cls.OtherColEnums.FMIN_H2,
-            "Lowest Usable Freq - Ave. Component (Hz)": cls.OtherColEnums.FMIN,
-        }
-        im_map = {
-            "PGA (g)": "PGA",
-            "PGV (cm/s)": "PGV",
-        }
-
-        def _is_pSA(col: str):
-            return col.startswith("T") and col.endswith("S")
-
-        def _get_pSA_key(col: str):
-            return f"pSA_{float(col[1:-1])}"
-
-        # Load
-        if nga_west2_flat_ffp.name.endswith(".parquet"):
-            record_df = pd.read_parquet(nga_west2_flat_ffp)
-        else:
-            record_df = pd.read_excel(nga_west2_flat_ffp, index_col=0)
-
-        # Renaming
-        im_map = im_map | {
-            cur_col: _get_pSA_key(cur_col)
-            for cur_col in record_df.columns
-            if _is_pSA(cur_col)
-        }
-        mapping_dict = site_cols_map | event_map | event_site_map | other_map | im_map
-        record_df = record_df.rename(columns=mapping_dict)
-
-        # Tectonic Type
-        record_df[cls.EventColEnums.TECT_TYPE] = constants.TectonicType.CRUSTAL
-
-        # Drop any columns not of interest
-        im_cols = list(im_map.values())
-        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS + im_cols)]
-        record_df = record_df[cols]
-
-        # Drop any records with invalid event or site id
-        drop_mask = (record_df[cls.EventColEnums.EVENT_ID] == -999) | (
-                record_df[cls.SiteColEnums.SITE_ID] == -999
-        )
-        record_df = record_df[~drop_mask]
-
-        # Replace -999 with nan values
-        record_df = record_df.replace(-999.0, np.nan)
-
-        # Update index
-        assert (record_df.dtypes[cls.EventColEnums.EVENT_ID] == np.int64) and (
-                record_df.dtypes[cls.SiteColEnums.SITE_ID] == np.int64
-        )
-        record_df.index = mlt.array_utils.numpy_str_join(
-            "_",
-            record_df["event_id"].values.astype(str),
-            record_df["site_id"].values.astype(str),
-        )
-
-        return cls(
-            record_df,
-            nga_west2_flat_ffp,
-            constants.ObsDataSource.NGAWest2,
-        )
-
-    @classmethod
-    def from_nga_subduction_flat(cls, nga_sub_ffp: Path):
-        site_cols_map = {
-            "NGAsubSSN": cls.SiteColEnums.SITE_ID,
-            "Vs30_Selected_for_Analysis_m_s": cls.SiteColEnums.VS30,
-            "Station_Latitude_deg": cls.SiteColEnums.SITE_LAT,
-            "Station_Longitude_deg": cls.SiteColEnums.SITE_LON,
-        }
-        event_map = {
-            "NGAsubEQID": cls.EventColEnums.EVENT_ID,
-            "Earthquake_Magnitude": cls.EventColEnums.MAG,
-            "Hypocenter_Depth_km": cls.EventColEnums.DEPTH,
-            "Ztor_km": cls.EventColEnums.ZTOR,
-            "Hypocenter_Latitude_deg": cls.EventColEnums.EVENT_LAT,
-            "Hypocenter_Longitude_deg": cls.EventColEnums.EVENT_LON,
-            "Intra_Inter_Flag": cls.EventColEnums.TECT_TYPE
-        }
-        event_site_map = {
-            "Rjb_km": cls.EventSiteColEnums.RJB,
-            "ClstD_km": cls.EventSiteColEnums.RRUP,
-            "Rx_km": cls.EventSiteColEnums.RX,
-        }
-        other_map = {
-            "Longest_Usable_Period_for_PSa_Ave_Component_sec": cls.OtherColEnums.TMAX,
-        }
-        im_map = {
-            "PGA (g)": "PGA",
-            "PGV (cm/s)": "PGV",
-        }
-
-        tect_type_mapping = {
-            0: constants.TectonicType.SUBDUCTION_INTERFACE,
-            1: constants.TectonicType.SUBDUCTION_SLAB,
-            2: constants.TectonicType.CRUSTAL,
-            3: constants.TectonicType.MANTLE,
-            4: constants.TectonicType.OUTER_RISE,
-            -444: constants.TectonicType.OUTER_RISE,
-            5: constants.TectonicType.SUBDUCTION_SLAB,
-            -666: constants.TectonicType.CRUSTAL,
-            -777: constants.TectonicType.SUBDUCTION_SLAB,
-            -888: constants.TectonicType.SUBDUCTION_INTERFACE,
-            -999: constants.TectonicType.UNKNOWN,
-        }
-
-        def _is_pSA(col: str):
-            return col.startswith("T") and col.endswith("S")
-
-        def _get_pSA_key(col: str):
-            return f"pSA_{float(col[1:-1].replace('pt', '.'))}"
-
-        # Load
-        if nga_sub_ffp.name.endswith(".parquet"):
-            record_df = pd.read_parquet(nga_sub_ffp)
-        else:
-            record_df = pd.read_excel(nga_sub_ffp, index_col=0)
-
-        # Renaming
-        im_map = im_map | {
-            cur_col: _get_pSA_key(cur_col)
-            for cur_col in record_df.columns
-            if _is_pSA(cur_col)
-        }
-        mapping_dict = site_cols_map | event_map | event_site_map | other_map | im_map
-        record_df = record_df.rename(columns=mapping_dict)
-
-        # Tectonic type
-        record_df[cls.EventColEnums.TECT_TYPE] = record_df[cls.EventColEnums.TECT_TYPE].map(
-            tect_type_mapping
-        )
-
-        # Drop any columns not of interest
-        im_cols = list(im_map.values())
-        cols = record_df.columns[record_df.columns.isin(cls.COLUMNS + im_cols)]
-        record_df = record_df[cols]
-
-        # Replace -999 with nan values
-        record_df = record_df.replace(-999, np.nan)
-
-        # Update index
-        record_df.index = mlt.array_utils.numpy_str_join(
-            "_",
-            record_df["event_id"].values.astype(str),
-            record_df["site_id"].values.astype(str),
-        )
-
-        return cls(
-            record_df,
-            nga_sub_ffp,
-            constants.ObsDataSource.NGASubduction,
-        )
-
 
 class DynamicLBSiteCorrelationsData:
-
+    
     def __init__(self, dist_matrix: pd.DataFrame):
         self.dist_matrix = dist_matrix
         self.sites = dist_matrix.index.values.astype(str)

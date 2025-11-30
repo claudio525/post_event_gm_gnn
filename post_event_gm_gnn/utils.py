@@ -1,20 +1,13 @@
-from typing import Sequence, NamedTuple, Tuple, TYPE_CHECKING
+from typing import Sequence, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 from sklearn.metrics.pairwise import haversine_distances
 
 from . import constants
 
 if TYPE_CHECKING:
     from .data_classes import LBSiteCorrelationData
-
-
-class SourceInfo(NamedTuple):
-
-    rupture_name: str
-    hypo_loc: Tuple[float, float]
 
 
 def reverse_im_filename(im: str):
@@ -122,4 +115,3 @@ def compute_degree_of_constraint(
         )
 
     return result_df
-

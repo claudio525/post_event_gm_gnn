@@ -361,59 +361,6 @@ class RunConfig:
     def from_yaml(cls, ffp: Path):
         return cls.from_dict(mlt.utils.load_yaml(ffp))
 
-
-@dataclass
-class HoldoutConfig:
-    """Config for using holdout data"""
-
-    n_val_events: int
-    """Number of validation events"""
-
-    n_val_sites: int
-    """Number of validation sites"""
-
-    rel_val_sites_ffp: str
-    """Validation events ffp"""
-
-    val_events: Sequence[str] = None
-    """Events to be used for validation"""
-
-    test_events: Sequence[str] = None
-    """Events to be ignored"""
-
-    def __post_init__(self):
-        assert self.n_val_events > 0
-        assert self.rel_val_sites_ffp is not None or self.n_val_sites > 0
-        assert self.val_sites_ffp is None or self.val_sites_ffp.exists()
-
-    @property
-    def val_sites_ffp(self):
-        if self.rel_val_sites_ffp is not None:
-            return Path(os.path.expandvars("$wdata")) / self.rel_val_sites_ffp
-        return None
-
-    def to_dict(self):
-        return {
-            "n_val_events": self.n_val_events,
-            "n_val_sites": self.n_val_sites,
-            "rel_val_sites_ffp": self.rel_val_sites_ffp,
-            "val_events": (
-                list(self.val_events) if self.val_events is not None else None
-            ),
-            "test_events": (
-                list(self.test_events) if self.test_events is not None else None
-            ),
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict):
-        return cls(**d)
-
-    @classmethod
-    def from_yaml(cls, ffp: Path):
-        return cls.from_dict(mlt.utils.load_yaml(ffp))
-
-
 def run_model_training(
     out_dir: Path,
     event_sites: dict[str, np.ndarray[str]],

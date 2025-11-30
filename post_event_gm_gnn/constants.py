@@ -1,5 +1,5 @@
 import os
-from enum import Enum, auto, StrEnum
+from enum import StrEnum
 
 import numpy as np
 
@@ -12,8 +12,6 @@ class ObsDataSource(StrEnum):
 
 
 class NZGMDBVersion(StrEnum):
-    v3p0 = "v3.0"
-    v3p4 = "v3.4"
     v4p0 = "v4.0"
     v4p1 = "v4.1"
     v4p2 = "v4.2"
@@ -32,17 +30,6 @@ class IMSet(StrEnum):
     pSA = "pSA"
     all = "all"
 
-
-class RankingMethod(Enum):
-    emp_cMVN = 1
-    sim_cMVN = 2
-
-    # Same as sim_cMVN but uses correlation coefficients
-    # from the empirical model
-    sim_cMVN_emp_corr = 3
-
-    ml_prob = 4
-    ml_prob_per_im = 5
 
 OQ_INPUT_COLUMNS = [
     "vs30",
@@ -81,7 +68,6 @@ PERIODS = [
     0.8,
     0.9,
     1.0,
-    # 1.25,
     1.2,
     1.5,
     2.0,
@@ -122,8 +108,6 @@ IM_WEIGTHS_SETS = {
     "pSA": np.ones(len(PSA_KEYS)) * (1 / len(PSA_KEYS)),
 }
 
-COMPONENTS = ["090", "000", "ver"]
-
 SCALAR_FEATURE_KEYS = {
     "event": ["mag", "is_subduction"],
     "site": ["vs30", "z1p0", "z2p5", "tsite"],
@@ -131,7 +115,6 @@ SCALAR_FEATURE_KEYS = {
     "event_site": ["rrup"],
     "event_site_to_site": ["angular_dist", "rrup_diff"],
 }
-
 
 PRE_PROCESS_CONFIG = {
     "mag": (2, 9),
@@ -150,8 +133,6 @@ PRE_PROCESS_CONFIG = {
 MAG_BINS = [3.5, 4.5, 5.5, 8]
 MAG_BIN_LABELS = ["$M_w$ 3.5 - 4.5", "$M_w$ 4.5 - 5.5", "$M_w$: 5.5 - 8"]
 MAG_COLORS = ["blue", "purple", "red"]
-# RRUP_BINS = [0, 30, 100, 250, 500]
-# RRUP_BIN_LABELS = ["$R_{Rup}$ 0 - 30", "$R_{Rup}$ 30 - 100", "$R_{Rup}$ 100 - 250", "$R_{Rup}$ 250 - 500"]
 RRUP_BINS = [0, 30, 100, 500]
 RRUP_BIN_LABELS = ["$R_{Rup}$ 0 - 30", "$R_{Rup}$ 30 - 100", "$R_{Rup}$ 100 - 500"]
 RRUP_COLORS = ["blue", "purple", "red"]
@@ -166,7 +147,6 @@ SITE_TO_SITE_DIST_COLORS = ["blue", "purple", "red"]
 LN_VS30_DIFF_BINS = [0, 0.25, 0.75, 2.5]
 LN_VS30_DIFF_BIN_LABELS = ["0 - 0.25", "0.25 - 0.75", "0.75 - 2.5"]
 LN_VS30_DIFF_COLORS = ["blue", "purple", "red"]
-
 
 CHCH_REGION_EXTENDED_NS = [172.334220, 172.821381, -43.669494, -43.275246]
 CHCH_REGION_EXTENDED_WE = [172.45, 172.78288300933386, -43.6, -43.45]
@@ -184,8 +164,8 @@ REGION_MAPPINGS = {
     "chch": CHCH_REGION,
 }
 
-STATION_FN_NAME = "non_uniform_whole_nz_with_real_stations-hh400_v20p3_land"
-
+## Plotting constants
+## Can be overwritten via environment variables
 FIG_SIZE = (16, 10)
 if (env_figsize := os.environ.get("fig_size")) is not None:
     FIG_SIZE = [float(x) for x in env_figsize.split(",")]
@@ -222,6 +202,7 @@ GMT_SHOW_CB_LABEL = True
 if (env_gmt_show_cb_label := os.environ.get("gmt_show_cb_label")) is not None:
     GMT_SHOW_CB_LABEL = env_gmt_show_cb_label.lower() in ("1", "true", "yes")
 
+# Magnitude-Rrup distance limits from Lee et al. (2024)
 MW_RRUP_LIMITS = np.array([
     [3.5, 96.001584],
     [3.6, 95.9631833664],

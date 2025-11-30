@@ -1,5 +1,5 @@
 import random
-from typing import Any, Sequence, TYPE_CHECKING
+from typing import Sequence, TYPE_CHECKING
 
 import einops
 import pandas as pd
@@ -10,9 +10,7 @@ import torch_geometric.data as gdata
 import torch_geometric.nn as gnn
 from torch import Tensor
 import torch_geometric.nn.inits as ginits
-import torch_geometric.utils as gutils
 from torch_geometric.nn.conv import MessagePassing
-from torch_geometric.typing import Adj, Size
 from torch_geometric.transforms import BaseTransform
 import numpy as np
 
@@ -353,9 +351,6 @@ class IntNodeConv(MessagePassing):
 
     def __init__(
         self,
-        # obs_transform_model: nn.Module,
-        # int_transform_model: nn.Module,
-        # att_model: nn.Module,
         msg_transform_models: nn.ModuleList,
         int_update_model: nn.Module,
         edge_update_model: nn.Module,

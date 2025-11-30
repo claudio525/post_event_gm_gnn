@@ -16,6 +16,10 @@ def get_obs_sites(
     dist_matrix: pd.DataFrame,
     n_obs_sites: int = 5,
 ):
+    """
+    Gets the observation sites for a 
+    given event and location of interest.
+    """
     cur_id = f"{event}_{int_site}"
     obs_sites = (
         dist_matrix.loc[int_site]
@@ -29,7 +33,6 @@ def get_obs_sites(
 
 def exp_formatter(y, pos):
     return f"{np.exp(y):.3f}"
-    # return f"{np.exp(y):.2e}"
 
 
 def plot_gnn_cim(
@@ -224,57 +227,6 @@ def plot_obs_sites(
     if log_values:
         return np.exp(min_y), np.exp(max_y)
     return min_y, max_y
-
-
-def create_4plot(
-    event: str,
-    int_site: str,
-    obs_sites: np.ndarray[str],
-    gnn_val_results: pd.DataFrame,
-    cim_val_results: pd.DataFrame,
-    obs_data: ObservedData,
-    dist_matrix: pd.DataFrame,
-    emp_gmm_params: pd.DataFrame = None,
-):
-    cur_id = f"{event}_{int_site}"
-
-    fig, (ax1, ax2, ax3, ax4) = mlt.plotting.get_fig_axes(4, 2, 2, ind_figsize=(8, 6))
-
-    min_y1, max_y1 = plot_gnn_cim(
-        ax1, cur_id, gnn_val_results, cim_val_results, emp_gmm_params
-    )
-    ax1.legend()
-
-    min_y2, max_y2 = plot_gnn_cim(
-        ax2,
-        cur_id,
-        gnn_val_results,
-        cim_val_results,
-        log_values=True,
-        emp_gmm_params=emp_gmm_params,
-    )
-    ax2.set_ylim(None, np.log(ax1.get_ylim()[1]))
-
-    min_y3, max_y3 = plot_obs_sites(
-        ax3, event, int_site, obs_sites, obs_data, dist_matrix
-    )
-    ax3.legend()
-    # ax3.set_ylim(None, np.log(ax1.get_ylim()[1]))
-
-    min_y4, max_y4 = plot_obs_sites(
-        ax4, event, int_site, obs_sites, obs_data, dist_matrix, log_values=True
-    )
-
-    # y-axis limits
-    min_y = min(min_y1, min_y2, min_y3, min_y4)
-    max_y = max(max_y1, max_y2, max_y3, max_y4)
-
-    ax1.set_ylim(min_y, max_y)
-    ax2.set_ylim(np.log(min_y), np.log(max_y))
-    ax3.set_ylim(min_y, max_y)
-    ax4.set_ylim(np.log(min_y), np.log(max_y))
-
-    fig.tight_layout()
 
 
 def create_2plot_log(
