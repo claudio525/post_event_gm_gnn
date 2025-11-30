@@ -6,10 +6,11 @@ import torch
 import torch.multiprocessing as mp
 import typer
 
-import sim_ranking as sr
 from source_modelling.srf import read_srf
 from qcore import src_site_dist
 from tqdm import tqdm
+
+import post_event_gm_gnn as pg
 
 device = "cpu"
 if torch.cuda.is_available():
@@ -31,7 +32,7 @@ def run_cv(
 ):
     mp.set_start_method("spawn")
 
-    sr.ml.run_cv(
+    pg.ml.run_cv(
         run_config_ffp,
         n_event_folds,
         n_site_folds,
@@ -50,7 +51,7 @@ def run_full(
 ):
     mp.set_start_method("spawn")
 
-    sr.ml.run_full(
+    pg.ml.run_full(
         output_dir,
         run_config_ffp,
         n_epochs,
@@ -78,8 +79,8 @@ def predict_event_3468575(
 
     # Prediction site data
     if non_uniform_site_dir is not None:
-        region = sr.constants.CANTERBURY_REGION
-        pred_site_df = sr.data.load_non_uniform_grid(
+        region = pg.constants.CANTERBURY_REGION
+        pred_site_df = pg.data.load_non_uniform_grid(
             non_uniform_site_dir
         )
         region_mask = (
@@ -108,15 +109,15 @@ def predict_event_3468575(
     assert pred_site_df.z2p5.max() < 15, "Ensure Z2.5 is in kilometres"
 
     # Observation data
-    run_config = sr.ml.RunConfig.from_yaml(model_dir / "run_config.yaml")
-    obs_data = sr.data.load_obs_nzgmdb(run_config.obs_data_ffp)
+    run_config = pg.ml.RunConfig.from_yaml(model_dir / "run_config.yaml")
+    obs_data = pg.data.load_obs_nzgmdb(run_config.obs_data_ffp)
 
     emp_gm_params, obs_emp_res_df = None, None
     if run_config.use_emp_gm_model:
         assert emp_gm_params_ffp is not None, "emp_gm_params_ffp must be provided"
 
         # Load empirical GMM residuals for observation sites
-        _, obs_emp_res_df = sr.analysis.load_emp_gm_params_res(
+        _, obs_emp_res_df = pg.analysis.load_emp_gm_params_res(
             run_config.emp_gm_params_ffp, obs_data
         )
         # Load empirical GMM parameters for prediction sites
@@ -124,14 +125,14 @@ def predict_event_3468575(
 
     # Run prediction
     if batch_size is None:
-        result_df = sr.ml.predict_event(
+        result_df = pg.ml.predict_event(
             model_dir,
             event_id,
             obs_data.event_df.loc[event_id],
             pred_site_df,
             obs_data.site_df.loc[obs_data.event_sites[event_id]],
             obs_data.record_df[["event_id", "site_id", "rrup"]],
-            obs_data.record_df[sr.constants.IMs + ["event_id", "site_id"]],
+            obs_data.record_df[pg.constants.IMs + ["event_id", "site_id"]],
             emp_gm_params=emp_gm_params,
             obs_emp_res_df=obs_emp_res_df,
             allow_self=allow_self,
@@ -142,14 +143,14 @@ def predict_event_3468575(
 
         for i in tqdm(range(n_batches)):
             cur_pred_site_df = pred_site_df.iloc[i * batch_size : (i + 1) * batch_size]
-            cur_result_df = sr.ml.predict_event(
+            cur_result_df = pg.ml.predict_event(
                 model_dir,
                 event_id,
                 obs_data.event_df.loc[event_id],
                 cur_pred_site_df,
                 obs_data.site_df.loc[obs_data.event_sites[event_id]],
                 obs_data.record_df[["event_id", "site_id", "rrup"]],
-                obs_data.record_df[sr.constants.IMs + ["event_id", "site_id"]],
+                obs_data.record_df[pg.constants.IMs + ["event_id", "site_id"]],
                 emp_gm_params=emp_gm_params,
                 obs_emp_res_df=obs_emp_res_df,
                 allow_self=allow_self,
@@ -169,7 +170,7 @@ def copy_cim_cv_results(
     src_dir: Path,
     dest_dir: Path,
 ):
-    sr.ml.data.copy_cim_cv_results(src_dir, dest_dir)
+    pg.ml.data.copy_cim_cv_results(src_dir, dest_dir)
 
 
 if __name__ == "__main__":

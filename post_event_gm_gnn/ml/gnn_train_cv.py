@@ -309,18 +309,6 @@ def run_cv(
         wdata=run_config.wdata,
     )
 
-    # loss_worst_notebook = (
-    #     Path(__file__).parent.parent
-    #     / "scripts/ml_models/report_notebooks/loss_worst_report.ipynb"
-    # )
-    # mlt.quarto.render_quarto(
-    #     "mamba activate sim-ranking-pip",
-    #     loss_worst_notebook,
-    #     out_dir / "loss_worst_report.html",
-    #     results_dir=out_dir,
-    #     wdata=run_config.wdata
-    # )
-
     return out_dir, agg_metrics
 
 
