@@ -13,7 +13,7 @@ closest_max_dist: 10
 max_n_obs_sites: 10
 min_n_obs_sites: 2
 
-rel_emp_gm_params_fp: sim_ranking/emp_gm_params/nzgmdb_v4p3_final/emp_gm_params.parquet
+rel_emp_gm_params_fp: post_event_gm_gnn/emp_gm_params/nzgmdb_v4p3_final/emp_gm_params.parquet
 use_emp_gm_model: True
 
 ignore_events: ["3468575"]
@@ -105,4 +105,4 @@ use_edge_emb_for_msg: True
 
 
 # Output settings
-rel_results_dir: sim_ranking/results/gnn
+rel_results_dir: post_event_gm_gnn/results/gnn

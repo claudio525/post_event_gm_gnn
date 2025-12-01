@@ -105,4 +105,4 @@ use_edge_emb_for_msg: True
 
 
 # Output settings
-rel_results_dir: sim_ranking/results/gnn
+rel_results_dir: post_event_gm_gnn/results/gnn

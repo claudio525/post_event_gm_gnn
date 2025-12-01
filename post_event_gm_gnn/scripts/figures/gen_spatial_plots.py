@@ -317,6 +317,10 @@ def plot_event_cim_gnn_residuals(
     ims: List[str],
     region_key: str = "canterbury",
 ):
+    """
+    Plot spatial residuals between cIM and 
+    GNN predictions for a given event.
+    """
     region = pg.constants.REGION_MAPPINGS[region_key]
 
     pg.plot_spatial.plot_event_cim_gnn_residuals(

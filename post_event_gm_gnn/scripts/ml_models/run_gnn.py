@@ -30,6 +30,7 @@ def run_cv(
     id_suffix: str = "",
     n_procs: int = mp.cpu_count(),
 ):
+    """Runs cross-validation training for the GNN model"""
     mp.set_start_method("spawn")
 
     pg.ml.run_cv(
@@ -49,6 +50,7 @@ def run_full(
     run_config_ffp: Path,
     n_epochs: int,
 ):
+    """Trains a full model (i.e. using all data for training)"""
     mp.set_start_method("spawn")
 
     pg.ml.run_full(
@@ -70,6 +72,7 @@ def predict_event_3468575(
     allow_self: bool = True,
     batch_size: int = None,
 ):
+    """Runs prediction for event 3468575 for given model result directory"""
     if non_uniform_site_dir is None and grid_site_ffp is None:
         raise ValueError(
             "Either non-uniform site dir or grid site file must be provided"
@@ -170,6 +173,9 @@ def copy_cim_cv_results(
     src_dir: Path,
     dest_dir: Path,
 ):
+    """
+    Copies cIM CV results from source to destination directory
+    """
     pg.ml.data.copy_cim_cv_results(src_dir, dest_dir)
 
 

@@ -4,6 +4,7 @@ Test the Loth and Baker 2013 correlation model against benchmark data.
 However, due to differences the interpolation of the B-coefficients,
 the results are not exactly the same, hence the large tolerance.
 """
+from pathlib import Path
 import itertools
 
 import scipy.io as io
@@ -53,7 +54,8 @@ def test_lb13_benchmark():
     Test the single IM Loth and Baker 2013 correlation model
     python implementation against the MATLAB benchmark data.
     """
-    bench_data = io.loadmat("./bench_data.mat")["results"]
+    
+    bench_data = io.loadmat(Path(__file__).parent / "bench_data.mat")["results"]
 
     max_diff = -np.inf
     max_diff_index = None
@@ -75,7 +77,7 @@ def test_lb13_vec_benchmark():
     Test the vectorized Loth and Baker 2013 correlation model
     python implementation against the MATLAB benchmark data.
     """
-    bench_data = io.loadmat("./bench_data.mat")["results"]
+    bench_data = io.loadmat(Path(__file__).parent / "bench_data.mat")["results"]
 
     period_combs = np.array(list(itertools.product(PERIODS, repeat=2)))
 

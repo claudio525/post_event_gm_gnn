@@ -35,6 +35,7 @@ def predict_event(
     obs_emp_res_df: pd.DataFrame = None,
     allow_self: bool = True,
     verbose: bool = True,
+    device: str = None,
 ):
     """
     Perform predictions using a trained GNN model for a specific event.
@@ -58,7 +59,7 @@ def predict_event(
         - z1p0: Z1.0 value of the site in metres
         - z2p5: Z2.5 value of the site in kilometres
         - rrup: R_Rup in kilometres
-        
+
     obs_site_df : pd.DataFrame
         DataFrame containing observation site information.
     obs_event_site_df : pd.DataFrame
@@ -89,6 +90,7 @@ def predict_event(
         )
 
     model = torch.load(model_dir / "model.pt")
+    model.to(device or run_config.device)
     model.eval()
 
     # Scale the IM data
@@ -115,7 +117,9 @@ def predict_event(
         ),
         axis=0,
     )
-    assert np.all(mlt.array_utils.pandas_isin(all_sites, comb_site_df.index.values.astype(str)))
+    assert np.all(
+        mlt.array_utils.pandas_isin(all_sites, comb_site_df.index.values.astype(str))
+    )
 
     pred_event_site_df = pred_site_df.loc[:, "rrup"].copy().to_frame()
     pred_event_site_df["event_id"] = event_id
@@ -141,7 +145,9 @@ def predict_event(
 
     if verbose:
         print("Computing distance matrix")
-    dist_matrix = utils.calculate_distance_matrix(all_sites, comb_site_df).astype(np.float32)
+    dist_matrix = utils.calculate_distance_matrix(all_sites, comb_site_df).astype(
+        np.float32
+    )
 
     event_sites = {event_id: all_sites}
     event_int_sites = {event_id: int_sites}
@@ -176,7 +182,7 @@ def predict_event(
         allow_self=allow_self,
     )
     site_combs, used_sites = event_site_combs[event_id], event_used_sites[event_id]
-    
+
     if verbose:
         print("Creating scalar feature dataframes")
     event_scalar_feature_dfs, _ = ml_data.create_event_scalar_feature_dfs(
@@ -196,7 +202,9 @@ def predict_event(
             obs_im_data.set_index("site_id"),
             run_config,
             obs_emp_res_df=(
-                obs_emp_res_df.loc[obs_emp_res_df.event_id == event_id].set_index("site_id")
+                obs_emp_res_df.loc[obs_emp_res_df.event_id == event_id].set_index(
+                    "site_id"
+                )
                 if obs_emp_res_df is not None
                 else None
             ),
@@ -204,140 +212,18 @@ def predict_event(
         graph_data.append(cur_graph_data)
 
     result_df = _run_prediction(
-        model, graph_data, run_config, emp_gm_params=emp_gm_params, verbose=verbose
+        model,
+        graph_data,
+        run_config,
+        emp_gm_params=emp_gm_params,
+        verbose=verbose,
+        device=device,
     )
 
     # Add site information
     result_df = pd.merge(
         result_df, comb_site_df, left_on="site_int", right_index=True, how="left"
     )
-    return result_df
-
-
-def predict_scenarios(
-    model_dir: Path,
-    site_df: pd.DataFrame,
-    event_df: pd.DataFrame,
-    event_site_df: pd.DataFrame,
-    obs_im_data: pd.DataFrame,
-    scenario_defs: list,
-):
-    """
-    Perform predictions using a trained GNN model
-    for the specified scenarios.
-
-    Parameters
-    ----------
-    model_dir : Path
-        Directory containing the trained model and configuration files.
-    site_df : pd.DataFrame
-        DataFrame containing site information.
-    event_df : pd.DataFrame
-        DataFrame containing event information.
-    event_site_df : pd.DataFrame
-        DataFrame containing event-site information (e.g. rrup).
-    im_data : pd.DataFrame
-        DataFrame containing intensity measure (IM) data
-        for the obsversation sites.
-    scenario_defs : list
-        List of scenario definitions. Each scenario is a tuple containing:
-        - event_id (str): Identifier for the event.
-        - site_int (str): Identifier for the site of interest.
-        - obs_sites (list): List of observation site identifiers.
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame containing the prediction results with columns for event_id, site_int, obs_sites,
-        predicted IMs, and their standard deviations.
-    """
-    run_config = gnn_gm.RunConfig.from_yaml(model_dir / "run_config.yaml")
-
-    model = torch.load(model_dir / "model.pt")
-    model.eval()
-
-    # Scale the IM data
-    obs_im_data = obs_im_data[run_config.ims + ["event_id", "site_id"]].copy()
-    obs_im_data[run_config.ims] = (
-        np.log(obs_im_data[run_config.ims])
-        - run_config.im_scale_params["mean"][run_config.ims]
-    ) / run_config.im_scale_params["std"][run_config.ims]
-
-    # Get the events and relevant event site pairs
-    events = list({cur_event for cur_event, _, __ in scenario_defs})
-    event_sites = {cur_event: set() for cur_event in events}
-    for cur_event, cur_site_int, cur_obs_sites in scenario_defs:
-        event_sites[cur_event].add(cur_site_int)
-        event_sites[cur_event].update(cur_obs_sites)
-    event_sites = {
-        cur_event: np.asarray(list(cur_sites))
-        for cur_event, cur_sites in event_sites.items()
-    }
-
-    print("Computing distance matrix")
-    dist_matrix = utils.calculate_distance_matrix(site_df.index, site_df)
-
-    print("Getting scalar features")
-    scalar_features = features.get_scalar_features(
-        event_sites,
-        event_df,
-        site_df,
-        event_site_df,
-        run_config,
-        constants.SCALAR_FEATURE_KEYS,
-        dist_matrix,
-    )
-
-    # Event site combinations
-    event_site_combs = {cur_event: [] for cur_event in events}
-    for cur_event, cur_site_int, cur_obs_sites in scenario_defs:
-        cur_event_sites = event_sites[cur_event]
-        cur_site_int_ix = np.flatnonzero(cur_event_sites == cur_site_int)[0]
-        cur_combs = [
-            (cur_site_int_ix, np.flatnonzero(cur_event_sites == cur_obs_site)[0])
-            for cur_obs_site in cur_obs_sites
-        ]
-
-        event_site_combs[cur_event].extend(cur_combs)
-
-    event_site_combs = {
-        cur_event: np.asarray(cur_combs)
-        for cur_event, cur_combs in event_site_combs.items()
-    }
-
-    event_scalar_feature_dfs, scalar_feature_columns = (
-        ml_data.create_event_scalar_feature_dfs(
-            event_sites, scalar_features, event_site_combs
-        )
-    )
-
-    # Generate the graph data
-    graph_data = []
-    for cur_event, cur_site_int, cur_obs_sites in tqdm(
-        scenario_defs, desc="Creating graph data"
-    ):
-        cur_scalar_feature_df = event_scalar_feature_dfs[cur_event]
-
-        cur_im_data = obs_im_data.loc[obs_im_data.event_id == cur_event].set_index(
-            "site_id"
-        )
-        cur_event_sites = event_sites[cur_event]
-        cur_event_site_combs = event_site_combs[cur_event]
-        cur_site_int_ix = np.flatnonzero(cur_event_sites == cur_site_int)[0]
-
-        cur_sc_data = _create_graph_data(
-            cur_event,
-            cur_site_int_ix,
-            cur_event_site_combs,
-            cur_event_sites,
-            cur_scalar_feature_df,
-            cur_im_data,
-            run_config,
-        )
-
-        graph_data.append(cur_sc_data)
-
-    result_df = _run_prediction(model, graph_data, run_config)
     return result_df
 
 
@@ -439,6 +325,7 @@ def _run_prediction(
     run_config: gnn_gm.RunConfig,
     emp_gm_params: pd.DataFrame = None,
     verbose: bool = True,
+    device: str = None,
 ):
 
     pred_im_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred")
@@ -448,7 +335,7 @@ def _run_prediction(
     results = []
     loader = gloader.DataLoader(graph_data, batch_size=1024, shuffle=False)
     for cur_batch in tqdm(loader, desc="Running predictions", disable=not verbose):
-        cur_batch = cur_batch.to(run_config.device)
+        cur_batch = cur_batch.to(device or run_config.device)
 
         # Get predictions
         torch_pred_mean, torch_pred_ln_std = model(cur_batch)
@@ -467,7 +354,9 @@ def _run_prediction(
             cur_result_df["event_id"].values.astype(str),
             cur_result_df["site_int"].values.astype(str),
         )
-        cur_result_df["n_obs_sites"] = [cur_obs_sites.size for cur_obs_sites in cur_result_df.obs_sites]
+        cur_result_df["n_obs_sites"] = [
+            cur_obs_sites.size for cur_obs_sites in cur_result_df.obs_sites
+        ]
 
         # GNN Residual Model
         if run_config.use_emp_gm_model:

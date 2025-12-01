@@ -1,12 +1,20 @@
 import os
 from pathlib import Path
 
+import torch
 import pandas as pd
 import pytest
 import yaml
 import numpy.testing as npt
 
 import post_event_gm_gnn as pg
+
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+
+print(f"Using device: {device.upper()}")
+
 
 wdata = Path(os.environ.get("wdata"))
 config_ffp = Path(__file__).parent / "test_config.yaml"
@@ -55,7 +63,8 @@ def test_event_estimation(event_id: str, model_dir: Path, run_config: pg.ml.RunC
         obs_data.record_df[run_config.ims + ["event_id", "site_id"]],
         emp_gm_params=emp_gm_params,
         obs_emp_res_df=obs_emp_res_df,
-        allow_self=False
+        allow_self=False,
+        device=device
     )
 
     pred_cols = [f"{im}_pred" for im in run_config.ims]

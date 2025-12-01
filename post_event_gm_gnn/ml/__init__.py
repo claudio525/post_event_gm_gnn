@@ -7,7 +7,7 @@ from . import utils
 
 from .gnn_gm import RunConfig
 from .gnn_train_cv import run_cv
-from .gnn_prediction import predict_scenarios, predict_event
+from .gnn_prediction import predict_event
 from .gnn_train_full import run_full
 
 
@@ -19,7 +19,6 @@ __all__ = [
     "utils",
     "RunConfig",
     "run_cv",
-    "predict_scenarios",
     "predict_event",
     "run_full",
 ]
