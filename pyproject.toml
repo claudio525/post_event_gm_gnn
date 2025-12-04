@@ -12,7 +12,7 @@ readme = "README.md"
 dependencies = [
     "qcore @ git+https://github.com/ucgmsim/qcore.git",
     "source_modelling @ git+https://github.com/ucgmsim/source_modelling.git",
-    "pygmt_helper @ git+https://github.com/ucgmsim/pygmt_helper.git",
+    "pygmt_helper @ git+https://github.com/ucgmsim/pygmt_helper.git@disagg_plot",
     "seismic_hazard_analysis @ git+https://github.com/ucgmsim/seismic_hazard_analysis.git@nshm2022",
     "cs-ml-tools==2025.12.4",
     "labelled-data-array==2025.12.2",
@@ -27,7 +27,9 @@ dependencies = [
     "matplotlib==3.10.7",
     "scikit-learn==1.7.2",
     "typer==0.20.0",
-    "quarto==0.1.0",
+    "quarto==1.7.32",
+    "papermill==2.6.0",
+    "pygmt==0.16.0",
 ]
 
 [tool.setuptools.package-dir]
