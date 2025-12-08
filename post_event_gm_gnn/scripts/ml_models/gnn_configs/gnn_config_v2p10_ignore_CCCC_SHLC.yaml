@@ -50,8 +50,6 @@ graph_feature_keys:
     - "z1p0_diff"
     - "z2p5_site_int"
     - "z2p5_diff"
-    # - "tsite_site_int"
-    # - "tsite_diff"
     - "rrup_site_int"
     - "rrup_diff"
     - "mag"
@@ -59,16 +57,9 @@ graph_feature_keys:
     - "vs30_site_int"
     - "z1p0_site_int"
     - "z2p5_site_int"
-    # - "tsite_site_int"
     - "rrup_site_int"
     - "mag"
-    # - "is_subduction"
   site_obs:
-  #  - "vs30_site_obs"
-  #  - "z1p0_site_obs"
-#    - "z2p5_site_obs"
-#    - "tsite_site_obs"
-  #  - "rrup_site_obs"
 
 # Model settings
 scale_IMs: true

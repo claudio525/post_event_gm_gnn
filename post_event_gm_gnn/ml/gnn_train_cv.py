@@ -177,18 +177,10 @@ def run_cv(
         cur_val_result["cv_iter"] = cur_out_dir.stem
         val_results.append(cur_val_result)
 
-        # cur_val_attn_coeffs = pd.read_parquet(cur_out_dir / "val_attn_coeffs.parquet")
-        # cur_val_attn_coeffs["cv_iter"] = cur_out_dir.stem
-        # val_attn_coeffs.append(cur_val_attn_coeffs)
-
-        # metrics[cur_out_dir.stem] = pd.read_pickle(cur_out_dir / "metrics.pickle")
         metrics[cur_out_dir.stem] = pd.read_parquet(cur_out_dir / "metrics.parquet")
 
     val_results = pd.concat(val_results, axis=0)
     val_results.to_parquet(out_dir / "val_results.parquet")
-
-    # val_attn_coeffs = pd.concat(val_attn_coeffs, axis=0)
-    # val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
 
     # Sanity check
     assert np.all(
@@ -285,29 +277,29 @@ def run_cv(
     mlt.utils.write_to_yaml(agg_metrics, out_dir / "agg_metrics.yaml")
 
     # Generate reports
-    cv_agg_notebook = (
-        Path(__file__).parent.parent
-        / "scripts/ml_models/report_notebooks/cv_agg_results.ipynb"
-    )
-    mlt.quarto.render_quarto(
-        "mamba activate sim-ranking-pip",
-        cv_agg_notebook,
-        out_dir / "cv_agg_results.html",
-        results_dir=out_dir,
-        wdata=run_config.wdata,
-    )
+    # cv_agg_notebook = (
+    #     Path(__file__).parent.parent
+    #     / "scripts/ml_models/report_notebooks/cv_agg_results.ipynb"
+    # )
+    # mlt.quarto.render_quarto(
+    #     "mamba activate sim-ranking-pip",
+    #     cv_agg_notebook,
+    #     out_dir / "cv_agg_results.html",
+    #     results_dir=out_dir,
+    #     wdata=run_config.wdata,
+    # )
 
-    ind_notebook = (
-        Path(__file__).parent.parent
-        / "scripts/ml_models/report_notebooks/ind_scenarios.ipynb"
-    )
-    mlt.quarto.render_quarto(
-        "mamba activate sim-ranking-pip",
-        ind_notebook,
-        out_dir / "ind_scenarios.html",
-        results_dir=out_dir,
-        wdata=run_config.wdata,
-    )
+    # ind_notebook = (
+    #     Path(__file__).parent.parent
+    #     / "scripts/ml_models/report_notebooks/ind_scenarios.ipynb"
+    # )
+    # mlt.quarto.render_quarto(
+    #     "mamba activate sim-ranking-pip",
+    #     ind_notebook,
+    #     out_dir / "ind_scenarios.html",
+    #     results_dir=out_dir,
+    #     wdata=run_config.wdata,
+    # )
 
     return out_dir, agg_metrics
 
@@ -334,8 +326,12 @@ def _run_mp_helper(
     cur_val_events = event_folds[val_fold_ind[0]]
     cur_val_int_sites = site_folds[val_fold_ind[1]]
 
-    cur_train_events = np.unique(np.concatenate([event_folds[i] for i, _ in train_folds_ind]))
-    cur_train_int_sites = np.unique(np.concatenate([site_folds[i] for _, i in train_folds_ind]))
+    cur_train_events = np.unique(
+        np.concatenate([event_folds[i] for i, _ in train_folds_ind])
+    )
+    cur_train_int_sites = np.unique(
+        np.concatenate([site_folds[i] for _, i in train_folds_ind])
+    )
 
     obs_sites = np.setdiff1d(all_sites, cur_val_int_sites)
 

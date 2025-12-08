@@ -21,14 +21,25 @@ This should give you the following directory structure
     - nz_gmdb
         - v4.3_final
             - custom
+                - mod_ground_motion_im_table_rotd50_flat.csv
 - post_event_gm_gnn
     - results
         - gnn
             - final
+                - 0725_0929_cv_v4p3FNZGMDB_v2p9_6e8s
+                - 0725_1117_cv_v4p3FNZGMDB_v2p10_6e8s
+                - 0728_4p3FNZGMDB_v2p10_full
+                - 0729_v4p3FNZGMDB_v2p10Ignore_CCCC_SHLC_full
         - cim
+            - 0728_3468575_canterbury_extended_500m_nzgmdbV4p3Final
+                - cim_results_noAllowSelf.parquet
     - emp_gm_params
         - canterbury_extended_500m_nzgmdbV4p3Final
+            - emp_gm_params.parquet
         - nzgmdb_v4p3_final
+            - emp_gm_params.parquet
+    - other
+        - 3468575.srf
 ```
 
 ### Data Overview
@@ -76,10 +87,16 @@ So each row corresponds to a location, and the relevant columns are:
 - `pSA_X.XX` is the observed IM at that location, nan for almost all locations, unless it corresponds to a observation site   
 - `pSA_X.XX_cond_mean` and `pSA_X.XX_cond_std` are the mean and standard deviation estimated by the multivariate normal conditional 
 
+
+## Model Training
+Training of models, can be done using the scrip `train_ml_models.sh` located under `post_event_gm_gnn/scripts/ml_models`.
+You have to set the variables defined under `# Input`, and is advisable to use a GPU otherwise it will take a long time. 
+
+## Post-processing
+The `run_gnn_post.sh` script, generates the multivariate normal conditional IM results for the CV GNN runs, and runs the 22 February Magnitude 6.2 2011 Christchurch earthquake predictions for the GNNs trained on all data (except the 2011 February event). Again, you'll need to update some of the inputs, specifically: `cv_gnn_only_dir`, `cv_gnn_residual_dir`, `full_gnn_model_dir` and `full_gnn_model_dir_ignore_CCCC_SHLC`; these are just the model directories created `train_ml_models.sh`. Note that this can be quite slow (multiple hours).
+
 ## Generation Of Paper Plots
 The plots of the paper can be generated using the `gen_paper_figures.sh` script located under `post_event_gm_gnn/scripts/figures/gen_paper_figures.sh` in the repository.
 The only thing that is required to make this work is setting the `scripts_dir` and `out_dir` variable (and ensuring that `wdata` is set).
 
-## Model Training
-Training of models, can be done using the scrip `train_ml_models.sh` located under `post_event_gm_gnn/scripts/ml_models`.
 

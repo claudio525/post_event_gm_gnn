@@ -12,8 +12,8 @@ nzgmdb_ffp="${wdata}/gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_
 ### ------------------- Aggregate Figures ------------------------------
 
 # Inputs
-gnn_only="${wdata}/post_event_gm_gnn/results/gnn/final/0725_0929_cv_v4p3FNZGMDB_v2p9_6e8s"
-gnn_residual="${wdata}/post_event_gm_gnn/results/gnn/final/0725_1117_cv_v4p3FNZGMDB_v2p10_6e8s"
+gnn_only="${wdata}/post_event_gm_gnn/results/gnn/1205_1029_cv_v4p3FNZGMDB_v2p9_6e8s"
+gnn_residual="${wdata}/post_event_gm_gnn/results/gnn/1205_1149_cv_v4p3FNZGMDB_v2p10_6e8s"
 nzgmdb_emp_gm_params="${wdata}/post_event_gm_gnn/emp_gm_params/nzgmdb_v4p3_final/emp_gm_params.parquet"
 
 # Define environment variables for figure configuration
@@ -66,7 +66,7 @@ python ${scripts_dir}/gen_paper_figures.py spatial-corr-trends $gnn_only $gnn_re
 ### ------------------- Spatial Figures ------------------------------
 
 # Inputs
-gnn_results_dir="${wdata}/post_event_gm_gnn/results/gnn/final/0728_4p3FNZGMDB_v2p10_full"
+gnn_results_dir="${wdata}/post_event_gm_gnn/results/gnn/1205_4p3FNZGMDB_v2p10_full"
 gnn_predictions_file="${gnn_results_dir}/3468575/predictions_noAllowSelf.parquet"
 cim_results_file="${wdata}/post_event_gm_gnn/results/cIM/0728_3468575_canterbury_extended_500m_nzgmdbV4p3Final/cim_results_noAllowSelf.parquet"
 grid_emp_gm_params="${wdata}/post_event_gm_gnn/emp_gm_params/canterbury_extended_500m_nzgmdbV4p3Final/emp_gm_params.parquet"

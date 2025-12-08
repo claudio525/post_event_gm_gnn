@@ -734,10 +734,7 @@ def _get_train_event_graph_data(
             "_", cur_site_int, cur_obs_sites
         )
 
-        # cur_site_combs_mask = site_combs[:, 0] == cur_site_int_ix
-
         # DoC scenario weighting
-
         doc_weight = (
             doc_weight_fn(
                 corr_data.corr_data.sel[cur_site_int, :, :]
