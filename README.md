@@ -3,6 +3,8 @@
 This repository contains the code for reproducing the results from the paper.  
 It is advised to use a linux machine, all instructions below assume a linux OS. 
 
+If there are any problems, please raise an issue on the Github repository.
+
 ## Installation
 
 In order to install this package and run the relevant scripts, the following libraries have to be available:

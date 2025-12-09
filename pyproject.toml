@@ -1,14 +1,14 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "post_event_gm_gnn"
-version = "2025.11.1"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 authors = [{ name = "Claudio Schill" }]
 description = "Post-Event Ground Motion Estimation Using Graph Neural Network"
 readme = "README.md"
+dynamic = ["version"]
 dependencies = [
     "qcore @ git+https://github.com/ucgmsim/qcore.git",
     "source_modelling @ git+https://github.com/ucgmsim/source_modelling.git",
@@ -30,6 +30,8 @@ dependencies = [
     "typer==0.20.0",
     "pygmt==0.16.0",
 ]
+
+[tool.setuptools_scm]
 
 [tool.setuptools.package-dir]
 post_event_gm_gnn = "post_event_gm_gnn"
