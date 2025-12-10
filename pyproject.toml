@@ -4,17 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "post_event_gm_gnn"
+version = "v2025.12.1"
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "Claudio Schill" }]
 description = "Post-Event Ground Motion Estimation Using Graph Neural Network"
 readme = "README.md"
-dynamic = ["version"]
+# dynamic = ["version"]
 dependencies = [
-    "qcore @ git+https://github.com/ucgmsim/qcore.git",
-    "source_modelling @ git+https://github.com/ucgmsim/source_modelling.git",
-    # "pygmt_helper @ git+https://github.com/ucgmsim/pygmt_helper.git@disagg_plot",
-    "pygmt_helper @ git+https://github.com/ucgmsim/pygmt_helper.git",
-    "seismic_hazard_analysis @ git+https://github.com/ucgmsim/seismic_hazard_analysis.git@nshm2022",
+    "source_modelling==2025.12.1",
+    "pygmt-helper==2025.12.1",
+    "seismic-hazard-analysis==2025.12.1",
+    "qcore-utils==2025.12.2",
+    "oq-wrapper==2025.12.3",
     "cs-ml-tools==2025.12.4",
     "labelled-data-array==2025.12.2",
     "openquake-engine==3.21.0",
@@ -31,7 +32,7 @@ dependencies = [
     "pygmt==0.16.0",
 ]
 
-[tool.setuptools_scm]
+# [tool.setuptools_scm]
 
 [tool.setuptools.package-dir]
 post_event_gm_gnn = "post_event_gm_gnn"
