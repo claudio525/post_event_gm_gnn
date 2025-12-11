@@ -4,8 +4,8 @@
 set -e
 
 # Shared Inputs
-scripts_dir="/Users/claudy/dev/work/code/post_event_gm_gnn/post_event_gm_gnn/scripts/figures"
-out_dir="/Users/claudy/dev/work/tmp/test_fig_gen"
+scripts_dir="/path/to/post_event_gm_gnn/post_event_gm_gnn/scripts/figures"
+out_dir=""
 nzgmdb_ffp="${wdata}/gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table_rotd50_flat.csv"
 
 

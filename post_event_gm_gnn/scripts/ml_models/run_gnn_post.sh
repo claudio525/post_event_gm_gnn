@@ -4,7 +4,7 @@
 set -e
 
 # Shared Inputs
-scripts_dir="/home/claudy/dev/work/code/post_event_gm_gnn/post_event_gm_gnn/scripts"
+scripts_dir="/path/to/post_event_gm_gnn/post_event_gm_gnn/scripts"
 n_procs=16
 
 ### ------------------- Compute cIM results for GNN CV folds ------------------------------

@@ -58,7 +58,7 @@ base_data_dir/
     │   │       ├── 0725_1117_cv_v4p3FNZGMDB_v2p10_6e8s/
     │   │       ├── 0728_4p3FNZGMDB_v2p10_full/
     │   │       └── 0729_v4p3FNZGMDB_v2p10Ignore_CCCC_SHLC_full/
-    │   └── cim/
+    │   └── cIM/
     │       └── 0728_3468575_canterbury_extended_500m_nzgmdbV4p3Final/
     │           └── cim_results_noAllowSelf.parquet
     ├── emp_gm_params/
@@ -75,6 +75,8 @@ base_data_dir/
 ### Dataset
 
 The `gm_datasets` folder contains the relevant NZGMDB data file.
+
+**Note:** The included flatfile combines RotD50 and geomean flatfiles from the NZGMDB v4.3 release, allowing all IMs to be accessed via a single file. The full NZGMDB v4.3 release can be found [here](https://doi.org/10.17603/ds2-0gxc-j420).
 
 ### Empirical GMM Ground Motion Parameters
 
