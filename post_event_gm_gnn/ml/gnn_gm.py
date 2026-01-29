@@ -604,7 +604,7 @@ def run_model_training(
 
     # Save the results
     dist_matrix = utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
-    train_results_df = get_predictions(
+    train_results_df, _ = get_predictions(
         run_config,
         gnn_model,
         train_graph_data,
@@ -617,7 +617,7 @@ def run_model_training(
     # train_attn_coeffs_df.to_parquet(out_dir / "train_attn_coeffs.parquet")
 
     if val_int_sites is not None:
-        val_results_df = get_predictions(
+        val_results_df, val_attn_coeffs = get_predictions(
             run_config,
             gnn_model,
             val_graph_data,
@@ -627,7 +627,7 @@ def run_model_training(
             verbose=verbose,
         )
         val_results_df.to_parquet(out_dir / "val_results.parquet")
-        # val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
+        val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
 
         # Sanity checks
         assert ~np.any(val_results_df.event_id.isin(train_results_df.event_id))
@@ -1271,12 +1271,12 @@ def get_predictions(
     w_loss_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "w_loss")
 
     results = []
-    # attn_coeffs = []
+    attn_coeffs = []
     for cur_batch in tqdm.tqdm(loader, disable=not verbose):
         cur_batch = cur_batch.to(run_config.device)
         cur_batch_result = _get_batch_result(cur_batch, gnn_model, run_config)
 
-        # cur_attn_coeffs_df = gnn_model.get_attention_coeff(cur_batch)
+        cur_attn_coeffs_df = gnn_model.get_attention_coeff(cur_batch)
 
         cur_result = pd.DataFrame(
             data=[
@@ -1370,12 +1370,12 @@ def get_predictions(
             for cur_key, cur_row in cur_result.iterrows()
         ]
 
-        # attn_coeffs.append(cur_attn_coeffs_df)
+        attn_coeffs.append(cur_attn_coeffs_df)
         results.append(cur_result)
 
-    # attn_coeffs_df = pd.concat(attn_coeffs, axis=0)
+    attn_coeffs_df = pd.concat(attn_coeffs, axis=0)
     results = pd.concat(results, axis=0)
-    return results
+    return results, attn_coeffs_df
 
 def get_mag_weight_func(
     min_weight: float, max_weight: float, mag_start: float, mag_end: float

@@ -225,10 +225,10 @@ class CustomAttentionGNN(torch.nn.Module):
         prev_edge_attrs = rel_data["edge_attr"]
         for ix, cur_conv in enumerate(self.convs):
             cur_conv_module = cur_conv.convs[("site_obs", "informs", "site_int")]
-            cur_edge_attrs = cur_conv_module.edge_update(prev_edge_attrs)
-            cur_attn_coeffs = cur_conv_module.compute_attn_coeffs(cur_edge_attrs).numpy(
+            cur_attn_coeffs = cur_conv_module.compute_attn_coeffs(prev_edge_attrs).numpy(
                 force=True
             )
+            cur_edge_attrs = cur_conv_module.edge_update(prev_edge_attrs)
 
             for dest_ix in np.unique(dest_ind):
                 attn_coeffs[sc_id[dest_ix]].append(cur_attn_coeffs[dest_ind == dest_ix])
@@ -254,10 +254,6 @@ class CustomAttentionGNN(torch.nn.Module):
 
             result.append(cur_df)
 
-        # result = {
-        #     key: pd.DataFrame(index=mlt.array_utils.numpy_str_join("_", key, obs_sites[key]), data=np.concatenate(value, axis=1))
-        #     for key, value in attn_coeffs.items()
-        # }
         return pd.concat(result, axis=0)
 
     def forward(self, data: gdata.HeteroData):
