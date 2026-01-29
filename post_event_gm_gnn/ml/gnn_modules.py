@@ -12,6 +12,7 @@ from torch import Tensor
 import torch_geometric.nn.inits as ginits
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.transforms import BaseTransform
+from torch_geometric.utils import softmax
 import numpy as np
 
 import ml_tools as mlt
@@ -225,7 +226,7 @@ class CustomAttentionGNN(torch.nn.Module):
         prev_edge_attrs = rel_data["edge_attr"]
         for ix, cur_conv in enumerate(self.convs):
             cur_conv_module = cur_conv.convs[("site_obs", "informs", "site_int")]
-            cur_attn_coeffs = cur_conv_module.compute_attn_coeffs(prev_edge_attrs).numpy(
+            cur_attn_coeffs = cur_conv_module.compute_attn_coeffs(prev_edge_attrs, rel_data["edge_index"]).numpy(
                 force=True
             )
             cur_edge_attrs = cur_conv_module.edge_update(prev_edge_attrs)
@@ -413,11 +414,11 @@ class IntNodeConv(MessagePassing):
         edge_attr = self.edge_update_model(edge_attr)
         return edge_attr
 
-    def compute_attn_coeffs(self, edge_attr: torch.Tensor) -> torch.Tensor:
+    def compute_attn_coeffs(self, edge_attr: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """Compute the attention coefficients"""
         a = self.att_model(edge_attr)
 
-        alpha = torch.sigmoid(a)
+        alpha = softmax(a, edge_index[1])
         return alpha
 
     def message(
@@ -428,7 +429,7 @@ class IntNodeConv(MessagePassing):
         edge_attr: torch.Tensor,
     ) -> Tensor:
         # Compute the attention coefficients
-        alpha = self.compute_attn_coeffs(edge_attr)
+        alpha = self.compute_attn_coeffs(edge_attr, edge_index)
 
         # Compute the message
         # 1) Compute the transformed source node
