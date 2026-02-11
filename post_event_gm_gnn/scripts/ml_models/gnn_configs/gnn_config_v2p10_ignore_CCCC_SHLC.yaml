@@ -94,9 +94,5 @@ att_act_fn: "tanh"
 l2_reg: 0.0005
 dropout_rate: 0.1
 
-# Embedding settings
-use_edge_emb_for_msg: True
-
-
 # Output settings
 rel_results_dir: post_event_gm_gnn/results/gnn

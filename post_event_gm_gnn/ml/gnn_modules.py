@@ -120,9 +120,6 @@ class CustomAttentionGNN(torch.nn.Module):
                 if ix == 0
                 else run_config.n_obs_node_channels[ix - 1]
             )
-            # Use the edge embedding for the message
-            if run_config.use_edge_emb_for_msg:
-                n_msg_transform_in_channels += run_config.n_edge_features if ix == 0 else run_config.n_edge_channels[ix - 1]
             msg_transform_models = nn.ModuleList(
                 [
                     _create_single_mlp(
@@ -139,7 +136,7 @@ class CustomAttentionGNN(torch.nn.Module):
             n_int_in_channels = (
                 run_config.site_int_n_features
                 if ix == 0
-                else run_config.n_int_node_channels[ix - 1] * run_config.n_att_heads[ix]
+                else run_config.n_int_node_channels[ix - 1] * run_config.n_att_heads[ix - 1]
             )
             n_int_out_channels = cur_int_n_channels * run_config.n_att_heads[ix]
             int_update_model = _create_single_mlp(
@@ -178,7 +175,6 @@ class CustomAttentionGNN(torch.nn.Module):
                             int_update_model=int_update_model,
                             edge_update_model=edge_update_model,
                             att_model=att_model,
-                            use_edge_emb_for_msg=run_config.use_edge_emb_for_msg,
                         ),
                     },
                     aggr="sum",
@@ -207,9 +203,9 @@ class CustomAttentionGNN(torch.nn.Module):
     def n_train_params(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def get_attention_coeff(self, data: gdata.HeteroData):
+    def get_attention_values(self, data: gdata.HeteroData):
         """
-        Gets the attention coefficient per layer
+        Gets the attention coefficient & weights per layer
 
         Note: Not part of the prediction or training process,
         only for extraction of attention coefficients!
@@ -226,7 +222,7 @@ class CustomAttentionGNN(torch.nn.Module):
         prev_edge_attrs = rel_data["edge_attr"]
         for ix, cur_conv in enumerate(self.convs):
             cur_conv_module = cur_conv.convs[("site_obs", "informs", "site_int")]
-            cur_attn_coeffs = cur_conv_module.compute_attn_coeffs(prev_edge_attrs, rel_data["edge_index"]).numpy(
+            cur_attn_coeffs = cur_conv_module.compute_att_weights(prev_edge_attrs, rel_data["edge_index"]).numpy(
                 force=True
             )
             cur_edge_attrs = cur_conv_module.edge_update(prev_edge_attrs)
@@ -261,6 +257,8 @@ class CustomAttentionGNN(torch.nn.Module):
         node_emb_dict = data.x_dict
         edge_emb_dict = data.edge_attr_dict
 
+        att_coeffs = None if self.training else []
+        att_weights = None if self.training else []
         for ix, cur_conv in enumerate(self.convs):
             # Apply convolution
             x_dict = cur_conv(
@@ -268,6 +266,15 @@ class CustomAttentionGNN(torch.nn.Module):
                 data.edge_index_dict,
                 edge_attr_dict=edge_emb_dict,
             )
+
+            # Get attention coefficients and weights
+            if not self.training:
+                att_coeffs.append(
+                    cur_conv.convs[("site_obs", "informs", "site_int")].att_coeffs.numpy(force=True)
+                )
+                att_weights.append(
+                    cur_conv.convs[("site_obs", "informs", "site_int")].att_weights.numpy(force=True)
+                )
 
             # Get updated embeddings
             obs_node_embedding = x_dict["site_obs"]
@@ -322,10 +329,10 @@ class CustomAttentionGNN(torch.nn.Module):
         ln_im_mean, ln_im_std = out.chunk(2, dim=1)
 
         # Clip predicted values to prevent numerical issues
-        ln_im_std = torch.clamp(ln_im_std, min=-5, max=5)
-        ln_im_mean = torch.clamp(ln_im_mean, min=-5, max=5)
+        ln_im_std = torch.clamp(ln_im_std, min=-5, max=1)
+        ln_im_mean = torch.clamp(ln_im_mean, min=-5, max=6)
 
-        return ln_im_mean, ln_im_std
+        return ln_im_mean, ln_im_std, att_coeffs, att_weights
 
 
 class ObsNodeConv(MessagePassing):
@@ -352,7 +359,6 @@ class IntNodeConv(MessagePassing):
         int_update_model: nn.Module,
         edge_update_model: nn.Module,
         att_model: nn.Module,
-        use_edge_emb_for_msg: bool = False,
         **kwargs,
     ):
         """
@@ -376,18 +382,21 @@ class IntNodeConv(MessagePassing):
         self.int_update_model = int_update_model
         self.edge_update_model = edge_update_model
 
-        self.use_edge_emb_for_msg = use_edge_emb_for_msg
-
         self.n_heads = len(self.msg_transform_models)
 
-
         self.reset_parameters()
+
+        # Placeholders for attention coefficients and weights
+        # to allow extraction after forward pass
+        self.att_coeffs: torch.Tensor | None = None
+        self.att_weights: torch.Tensor | None = None
 
     def reset_parameters(self):
         super().reset_parameters()
         ginits.reset(self.att_model)
         ginits.reset(self.msg_transform_models)
         ginits.reset(self.int_update_model)
+        ginits.reset(self.edge_update_model)
 
     def forward(
         self,
@@ -414,12 +423,13 @@ class IntNodeConv(MessagePassing):
         edge_attr = self.edge_update_model(edge_attr)
         return edge_attr
 
-    def compute_attn_coeffs(self, edge_attr: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+    def compute_att_weights(self, edge_attr: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """Compute the attention coefficients"""
-        a = self.att_model(edge_attr)
+        self.att_coeffs = self.att_model(edge_attr)
 
-        alpha = softmax(a, edge_index[1])
-        return alpha
+        self.att_weights = softmax(self.att_coeffs, edge_index[1])
+        # self.att_weights = torch.sigmoid(self.att_coeffs)
+        return self.att_weights
 
     def message(
         self,
@@ -429,16 +439,15 @@ class IntNodeConv(MessagePassing):
         edge_attr: torch.Tensor,
     ) -> Tensor:
         # Compute the attention coefficients
-        alpha = self.compute_attn_coeffs(edge_attr, edge_index)
+        att_weights = self.compute_att_weights(edge_attr, edge_index)
 
         # Compute the message
         # 1) Compute the transformed source node
         # 2) Multiply with the attention coefficient
         # 3) Concatenate the results
-        msg_model_input = torch.cat((x_j, edge_attr), dim=1) if self.use_edge_emb_for_msg else x_j
         m = torch.cat(
             [
-                alpha[:, i][:, None] * self.msg_transform_models[i](msg_model_input)
+                att_weights[:, i][:, None] * self.msg_transform_models[i](x_j)
                 for i in range(self.n_heads)
             ],
             dim=1,

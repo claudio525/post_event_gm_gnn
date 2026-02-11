@@ -4,14 +4,19 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 from matplotlib.ticker import FuncFormatter
 import typer
+import torch
 import seaborn as sns
 from tqdm import tqdm
 
 import ml_tools as mlt
 import post_event_gm_gnn as pg
 
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
 
 app = typer.Typer()
 
@@ -2168,7 +2173,9 @@ def ind_scenario_pSA(
             event_id, cur_site_int, gnn_residual_pred_df, dist_matrix, n_obs_sites=5
         )
         cur_obs_site_distances = dist_matrix.loc[cur_site_int].loc[cur_obs_sites].values
-        cur_obs_color_boundaries = np.linspace(cur_obs_site_distances.min(), cur_obs_site_distances.max(), 5)
+        cur_obs_color_boundaries = np.linspace(
+            cur_obs_site_distances.min(), cur_obs_site_distances.max(), 5
+        )
 
         fig, ax = plt.subplots(figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI)
 
@@ -2445,7 +2452,9 @@ def hyper_var(
     )
     for ix, cur_dir in enumerate(result_dirs):
         cur_results = pd.read_parquet(cur_dir / "val_results.parquet").sort_index()
-        cur_residuals = pg.analysis.get_residuals(cur_results, ims=pg.constants.PSA_KEYS)
+        cur_residuals = pg.analysis.get_residuals(
+            cur_results, ims=pg.constants.PSA_KEYS
+        )
         cur_res_bias_std = pg.analysis.get_res_mean_std(cur_residuals)
 
         ax1.plot(
@@ -2476,12 +2485,151 @@ def hyper_var(
         linewidth=pg.constants.FIG_LINEWIDTH,
     )
     ax1.legend()
-    
+
     fig.tight_layout()
     fig.savefig(output_dir / f"bias_residual_comparison.{pg.constants.FIG_FORMAT}")
     plt.close(fig)
 
 
+@app.command("attention-coefficients")
+def attention_coefficients(
+    x_var: str,
+    gnn_only_model_dir: Path,
+    gnn_res_model_dir: Path,
+    output_dir: Path,
+    y_max: float,
+    site_dist: list[float] | None = None,
+    angular_dist: list[float] | None = None,
+    ln_vs30_diff: list[float] | None = None,
+    n_xtick_bins: int = 5,
+):
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
+    run_config = pg.ml.RunConfig.from_yaml(gnn_only_model_dir / "run_config.yaml")
+
+    only_att_models = [
+        cur_conv.convs[("site_obs", "informs", "site_int")].att_model
+        for cur_conv in torch.load(
+            gnn_only_model_dir / "model.pt", map_location=device
+        ).convs
+    ]
+    res_att_models = [
+        cur_conv.convs[("site_obs", "informs", "site_int")].att_model
+        for cur_conv in torch.load(
+            gnn_res_model_dir / "model.pt", map_location=device
+        ).convs
+    ]
+
+    n_variations = max(
+        len(site_dist) if site_dist is not None else 0,
+        len(angular_dist) if angular_dist is not None else 0,
+        len(ln_vs30_diff) if ln_vs30_diff is not None else 0,
+    )
+
+    scale_func = pg.ml.features.get_reverse_scale_func(x_var, run_config)
+    fig, axs = mlt.plotting.get_fig_axes(
+        n_variations, 2, -1, ind_figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI
+    )
+
+    for i in range(n_variations):
+        only_raw_att_coeff, variable_input = pg.ml.get_att_model_predictions(
+            run_config,
+            only_att_models[0],
+            device,
+            x_var,
+            site_dist=site_dist[i] if site_dist is not None else None,
+            angular_distance=angular_dist[i] if angular_dist is not None else None,
+            ln_vs30_diff=ln_vs30_diff[i] if ln_vs30_diff is not None else None,
+        )
+        only_exp_att_coeff = np.exp(only_raw_att_coeff)
+
+        res_raw_att_coeff, _ = pg.ml.get_att_model_predictions(
+            run_config,
+            res_att_models[0],
+            device,
+            x_var,
+            site_dist=site_dist[i] if site_dist is not None else None,
+            angular_distance=angular_dist[i] if angular_dist is not None else None,
+            ln_vs30_diff=ln_vs30_diff[i] if ln_vs30_diff is not None else None,
+        )
+        res_exp_att_coeff = np.exp(res_raw_att_coeff)
+
+        axs[i].plot(
+            variable_input,
+            only_exp_att_coeff,
+            color="blue",
+            label=["GNN-Only" if i == 0 else None for i in range(run_config.n_att_heads[0])],
+        )
+        axs[i].plot(
+            variable_input,
+            res_exp_att_coeff,
+            color="purple",
+            label=["GNN-Residual" if i == 0 else None for i in range(run_config.n_att_heads[0])],
+        )
+
+        axs[i].set_xlim([-1, 1])
+        axs[i].grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+        if x_var == "dist":
+            axs[i].set_xlabel("Site-to-Site Distance (km)")
+        elif x_var == "angular_dist":
+            axs[i].set_xlabel("Angular Distance (degrees)")
+        elif x_var == "ln_vs30_diff":
+            axs[i].set_xlabel("ln(Vs30) Difference")
+
+        axs[i].xaxis.set_major_formatter(FuncFormatter(scale_func))
+        axs[i].set_ylabel("Exp(Attention Coefficient)")
+        axs[i].set_ylim([0, y_max])
+        axs[i].yaxis.set_major_locator(mticker.MaxNLocator(5))
+        axs[i].yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+        axs[i].xaxis.set_major_locator(mticker.MaxNLocator(n_xtick_bins))
+        axs[i].xaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+
+        if i == 1:
+            axs[i].legend()
+
+        if i % 2 == 1:
+            axs[i].yaxis.set_ticklabels([])
+            axs[i].set_ylabel("")
+
+        if i < n_variations - 2:
+            axs[i].xaxis.set_ticklabels([])
+            axs[i].set_xlabel("")
+
+        site_dist_label = (
+            f"Site-to-Site Distance: {site_dist[i]} km\n"
+            if site_dist is not None
+            else ""
+        )
+        angular_dist_label = (
+            f"Angular Distance: {angular_dist[i]}°\n"
+            if angular_dist is not None
+            else ""
+        )
+        ln_vs30_diff_label = (
+            f"ln(Vs30) Difference: {ln_vs30_diff[i]:.2f}\n"
+            if ln_vs30_diff is not None
+            else ""
+        )
+        axs[i].text(
+            0.975,
+            0.975,
+            f"{site_dist_label}{angular_dist_label}{ln_vs30_diff_label}",
+            transform=axs[i].transAxes,
+            horizontalalignment="right",
+            verticalalignment="top",
+            fontweight="bold",
+        )
+
+    plt.subplots_adjust(
+        left=0.070, right=0.99, top=0.985, bottom=0.075, wspace=0.05, hspace=0.05
+    )
+    fig.savefig(
+        output_dir / f"attention_coefficients_{x_var}.{pg.constants.FIG_FORMAT}"
+    )
+    plt.close(fig)
 
 
 if __name__ == "__main__":

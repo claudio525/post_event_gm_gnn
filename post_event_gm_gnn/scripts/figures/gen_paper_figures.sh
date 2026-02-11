@@ -62,6 +62,16 @@ python ${scripts_dir}/gen_paper_figures.py doc-bias-res-std $gnn_residual $gnn_r
 echo "Generating spatial correlation trends figures..."
 python ${scripts_dir}/gen_paper_figures.py spatial-corr-trends $gnn_only $gnn_residual $nzgmdb_emp_gm_params $out_dir --plot-labels "a),b)" --bias-limit $corr_bias_limit --std-limit $corr_std_limit
 
+### Attention Weights
+echo "Generating attention weight figures..."
+# Site-to-site distance
+python ${scripts_dir}/gen_paper_figures.py attention-coefficients dist $gnn_only $gnn_residual $out_dir 15 --angular-dist 0 --angular-dist 90 --angular-dist 0 --angular-dist 90 --ln-vs30-diff 0 --ln-vs30-diff 0 --ln-vs30-diff 1.0 --ln-vs30-diff 1.0
+# Angular distance
+python ${scripts_dir}/gen_paper_figures.py attention-coefficients angular_dist $gnn_only $gnn_residual $out_dir 15 --site-dist 0 --site-dist 10 --site-dist 0 --site-dist 10 --ln-vs30-diff 0 --ln-vs30-diff 0 --ln-vs30-diff 1.0 --ln-vs30-diff 1.0
+# ln(Vs30) difference
+python ${scripts_dir}/gen_paper_figures.py attention-coefficients ln_vs30_diff $gnn_only $gnn_residual $out_dir 15 --site-dist 0 --site-dist 10 --site-dist 0 --site-dist 10 --angular-dist 0 --angular-dist 90 --angular-dist 0 --angular-dist 90
+
+
 
 ### ------------------- Spatial Figures ------------------------------
 
