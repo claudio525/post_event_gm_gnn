@@ -105,8 +105,19 @@ class RunConfig:
     n_obs_node_channels: Sequence[int]
     """Number of observation site node channels"""
     n_int_node_channels: Sequence[int]
-    """Number of site of interest node channels per attention coefficient. 
-    Total number of channels = n_int_node_channels * n_attention_heads"""
+    """
+    Number of site of interest node channels per attention coefficient. 
+    Total number of channels = n_int_node_channels * n_attention_heads
+    """
+    use_msg_in_int_update_fn: bool
+    """
+    Whether to use the message (i.e. aggregated information 
+    from the observation sites) in the site of interest node update function.
+    If False, it is added to the output of the update function, instead of
+    being an input to the update function.
+    """
+    use_obs_self_loop: bool
+    """Whether to add self loops for the observation sites"""
     n_edge_channels: Sequence[int]
     """Number of edge channels"""
     n_att_heads: Sequence[int]
@@ -300,6 +311,8 @@ class RunConfig:
             "batch_size": self.batch_size,
             "n_obs_node_channels": list(self.n_obs_node_channels),
             "n_int_node_channels": list(self.n_int_node_channels),
+            "use_msg_in_int_update_fn": bool(self.use_msg_in_int_update_fn),
+            "use_obs_self_loop": bool(self.use_obs_self_loop),
             "n_edge_channels": list(self.n_edge_channels),
             "n_att_heads": self.n_att_heads,
             "fc_n_units": self.fc_n_units,

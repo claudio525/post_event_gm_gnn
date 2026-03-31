@@ -126,6 +126,9 @@ def plot_im_values(
         pen="0.1p,darkblue",
     )
 
+    # Add map scale
+    fig.basemap(map_scale="jBR+w2k+o0.5c/0.5c+l")
+
     fig.savefig(
         output_ffp,
         dpi=900,
@@ -233,6 +236,9 @@ def plot_res_values(
         fill="darkblue",
         pen="0.1p,darkblue",
     )
+
+    # Add map scale
+    fig.basemap(map_scale="jBR+w2k+o0.5c/0.5c+l")
 
     fig.savefig(
         output_ffp,

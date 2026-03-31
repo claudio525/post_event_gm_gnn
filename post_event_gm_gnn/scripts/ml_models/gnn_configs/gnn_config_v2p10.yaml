@@ -79,7 +79,9 @@ int_embedding_act_fn: null
 obs_embedding_act_fn: null
 edge_embedding_act_fn: null
 n_int_node_channels: [2, 2]
+use_msg_in_int_update_fn: False
 n_obs_node_channels: [32, 32]
+use_obs_self_loop: True
 n_edge_channels: [4, 4]
 gcn_act_fn: "relu"
 

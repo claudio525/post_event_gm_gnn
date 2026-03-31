@@ -98,28 +98,31 @@ class CustomAttentionGNN(torch.nn.Module):
                 run_config.n_edge_channels,
             )
         ):
-            ## Observation node update model
-            # This model updates the observation nodes via a self loop
-            n_obs_update_in_channels = (
-                run_config.site_obs_n_features
-                if ix == 0
-                else run_config.n_obs_node_channels[ix - 1]
-            )
-            obs_update_model = _create_single_mlp(
-                n_obs_update_in_channels,
-                cur_obs_n_channels,
-                # Use tanh for first layer to handle large nan replacement values
-                "tanh" if ix == 0 else run_config.obs_embedding_act_fn,
-            )
+            if run_config.use_obs_self_loop:
+                ## Observation node update model
+                # This model updates the observation nodes via a self loop
+                n_obs_update_in_channels = (
+                    run_config.site_obs_n_features
+                    if ix == 0
+                    else run_config.n_obs_node_channels[ix - 1]
+                )
+                obs_update_model = _create_single_mlp(
+                    n_obs_update_in_channels,
+                    cur_obs_n_channels,
+                    # Use tanh for first layer to handle large nan replacement values
+                    "tanh" if ix == 0 else run_config.obs_embedding_act_fn,
+                )
 
             ## Unweighted message function
             # This model performs the transformation of the observation
-            # nodes (and edge states) used to update the SoI node
-            n_msg_transform_in_channels = (
-                (run_config.site_obs_n_features)
-                if ix == 0
-                else run_config.n_obs_node_channels[ix - 1]
-            )
+            # nodes used to update the SoI node
+            n_msg_transform_in_channels = run_config.site_obs_n_features
+            if run_config.use_obs_self_loop:
+                n_msg_transform_in_channels = (
+                    (run_config.site_obs_n_features)
+                    if ix == 0
+                    else run_config.n_obs_node_channels[ix - 1]
+                )
             msg_transform_models = nn.ModuleList(
                 [
                     _create_single_mlp(
@@ -136,9 +139,12 @@ class CustomAttentionGNN(torch.nn.Module):
             n_int_in_channels = (
                 run_config.site_int_n_features
                 if ix == 0
-                else run_config.n_int_node_channels[ix - 1] * run_config.n_att_heads[ix - 1]
+                else run_config.n_int_node_channels[ix - 1]
+                * run_config.n_att_heads[ix - 1]
             )
             n_int_out_channels = cur_int_n_channels * run_config.n_att_heads[ix]
+            if run_config.use_msg_in_int_update_fn:
+                n_int_in_channels += n_int_out_channels
             int_update_model = _create_single_mlp(
                 n_int_in_channels,
                 n_int_out_channels,
@@ -164,19 +170,22 @@ class CustomAttentionGNN(torch.nn.Module):
                 run_config.att_act_fn,
             )
 
+            conv_dict = {
+                ("site_obs", "informs", "site_int"): IntNodeConv(
+                    msg_transform_models=msg_transform_models,
+                    int_update_model=int_update_model,
+                    edge_update_model=edge_update_model,
+                    att_model=att_model,
+                    use_msg_in_int_update_fn=run_config.use_msg_in_int_update_fn,
+                ),
+            }
+            if run_config.use_obs_self_loop:
+                conv_dict[("site_obs", "self_loop", "site_obs")] = ObsNodeConv(
+                    obs_update_model=obs_update_model,
+                )
             self.convs.append(
                 gnn.HeteroConv(
-                    {
-                        ("site_obs", "self_loop", "site_obs"): ObsNodeConv(
-                            obs_update_model=obs_update_model,
-                        ),
-                        ("site_obs", "informs", "site_int"): IntNodeConv(
-                            msg_transform_models=msg_transform_models,
-                            int_update_model=int_update_model,
-                            edge_update_model=edge_update_model,
-                            att_model=att_model,
-                        ),
-                    },
+                    conv_dict,
                     aggr="sum",
                 )
             )
@@ -203,56 +212,6 @@ class CustomAttentionGNN(torch.nn.Module):
     def n_train_params(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def get_attention_values(self, data: gdata.HeteroData):
-        """
-        Gets the attention coefficient & weights per layer
-
-        Note: Not part of the prediction or training process,
-        only for extraction of attention coefficients!
-        """
-        rel_data = data[("site_obs", "informs", "site_int")]
-        dest_ind = rel_data["edge_index"][1].numpy(force=True)
-        sc_id = data["metadata"]["sc_id"]
-
-        attn_coeffs = {sc_id[dest_ix]: [] for dest_ix in np.unique(dest_ind)}
-        obs_sites = {
-            sc_id[dest_ix]: data["metadata"]["obs_sites"][dest_ix]
-            for dest_ix in np.unique(dest_ind)
-        }
-        prev_edge_attrs = rel_data["edge_attr"]
-        for ix, cur_conv in enumerate(self.convs):
-            cur_conv_module = cur_conv.convs[("site_obs", "informs", "site_int")]
-            cur_attn_coeffs = cur_conv_module.compute_att_weights(prev_edge_attrs, rel_data["edge_index"]).numpy(
-                force=True
-            )
-            cur_edge_attrs = cur_conv_module.edge_update(prev_edge_attrs)
-
-            for dest_ix in np.unique(dest_ind):
-                attn_coeffs[sc_id[dest_ix]].append(cur_attn_coeffs[dest_ind == dest_ix])
-
-            prev_edge_attrs = cur_edge_attrs
-
-        result = []
-        for ix, (key, value) in enumerate(attn_coeffs.items()):
-            cur_df = pd.DataFrame(
-                index=mlt.array_utils.numpy_str_join("_", key, obs_sites[key]),
-                data=einops.rearrange(
-                    np.stack(value, axis=2), "obs att conv -> obs (conv att)"
-                ),
-                columns=[
-                    f"conv_{i}_head_{j}"
-                    for i in range(self.n_convs)
-                    for j in range(self.run_config.n_att_heads[i])
-                ],
-            )
-            cur_df["event"] = data["metadata"]["event"][ix]
-            cur_df["obs_site"] = obs_sites[key]
-            cur_df["site_int"] = data["metadata"]["site_int"][ix]
-
-            result.append(cur_df)
-
-        return pd.concat(result, axis=0)
-
     def forward(self, data: gdata.HeteroData):
         node_emb_dict = data.x_dict
         edge_emb_dict = data.edge_attr_dict
@@ -270,14 +229,22 @@ class CustomAttentionGNN(torch.nn.Module):
             # Get attention coefficients and weights
             if not self.training:
                 att_coeffs.append(
-                    cur_conv.convs[("site_obs", "informs", "site_int")].att_coeffs.numpy(force=True)
+                    cur_conv.convs[
+                        ("site_obs", "informs", "site_int")
+                    ].att_coeffs.numpy(force=True)
                 )
                 att_weights.append(
-                    cur_conv.convs[("site_obs", "informs", "site_int")].att_weights.numpy(force=True)
+                    cur_conv.convs[
+                        ("site_obs", "informs", "site_int")
+                    ].att_weights.numpy(force=True)
                 )
 
             # Get updated embeddings
-            obs_node_embedding = x_dict["site_obs"]
+            obs_node_embedding = (
+                x_dict["site_obs"]
+                if self.run_config.use_obs_self_loop
+                else node_emb_dict["site_obs"]
+            )
             int_node_embedding = x_dict["site_int"][0]
             obs_int_edge_embedding = x_dict["site_int"][1]
 
@@ -359,6 +326,7 @@ class IntNodeConv(MessagePassing):
         int_update_model: nn.Module,
         edge_update_model: nn.Module,
         att_model: nn.Module,
+        use_msg_in_int_update_fn: bool = False,
         **kwargs,
     ):
         """
@@ -372,6 +340,9 @@ class IntNodeConv(MessagePassing):
             Update model for the edges
         att_model: torch.nn.Module
             Self-attention model
+        use_msg_in_int_update_fn: bool, optional
+            If True, the message will be concatenated to the input of the int_update_model,
+            otherwise it will be added to the output of the int_update_model, by default False
         kwargs
         """
         super().__init__(aggr="add", **kwargs)
@@ -383,6 +354,8 @@ class IntNodeConv(MessagePassing):
         self.edge_update_model = edge_update_model
 
         self.n_heads = len(self.msg_transform_models)
+
+        self.use_msg_in_int_update_fn = use_msg_in_int_update_fn
 
         self.reset_parameters()
 
@@ -412,7 +385,10 @@ class IntNodeConv(MessagePassing):
         )
 
         # Update the nodes
-        out = m_s + self.int_update_model(x[1])
+        if self.use_msg_in_int_update_fn:
+            out = self.int_update_model(torch.cat((x[1], m_s), dim=1))
+        else:
+            out = m_s + self.int_update_model(x[1])
 
         # Update the edge attributes
         edge_attr = self.edge_update(edge_attr)
@@ -423,7 +399,9 @@ class IntNodeConv(MessagePassing):
         edge_attr = self.edge_update_model(edge_attr)
         return edge_attr
 
-    def compute_att_weights(self, edge_attr: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+    def compute_att_weights(
+        self, edge_attr: torch.Tensor, edge_index: torch.Tensor
+    ) -> torch.Tensor:
         """Compute the attention coefficients"""
         self.att_coeffs = self.att_model(edge_attr)
 

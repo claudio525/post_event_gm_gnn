@@ -8,6 +8,7 @@ import matplotlib.ticker as mticker
 from matplotlib.ticker import FuncFormatter
 import typer
 import torch
+import shap
 import seaborn as sns
 from tqdm import tqdm
 
@@ -616,20 +617,30 @@ def mag_bias_res_std(
 
     ax1.text(
         0.03,
-        0.03,
-        "Overprediction",
-        transform=ax1.transAxes,
-        va="bottom",
-        ha="left",
-    )
-    ax1.text(
-        0.03,
         0.97,
-        "Underprediction",
+        ("GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only"),
         transform=ax1.transAxes,
+        fontweight="bold",
         va="top",
         ha="left",
     )
+
+    # ax1.text(
+    #     0.03,
+    #     0.03,
+    #     "Overprediction",
+    #     transform=ax1.transAxes,
+    #     va="bottom",
+    #     ha="left",
+    # )
+    # ax1.text(
+    #     0.03,
+    #     0.97,
+    #     "Underprediction",
+    #     transform=ax1.transAxes,
+    #     va="top",
+    #     ha="left",
+    # )
 
     if plot_labels is not None:
         ax1.text(
@@ -697,6 +708,16 @@ def mag_bias_res_std(
             linewidth=group_linewidth,
             label=f"{cur_key} (N={gnn_res_mag_groups.size()[cur_key]:,})",
         )
+
+    ax3.text(
+        0.03,
+        0.97,
+        ("GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only"),
+        transform=ax3.transAxes,
+        fontweight="bold",
+        va="top",
+        ha="left",
+    )
 
     if show_legend and legend_ax == 3:
         ax3.legend()
@@ -902,20 +923,30 @@ def rrup_bias_res_std(
 
     ax1.text(
         0.03,
-        0.03,
-        "Overprediction",
-        transform=ax1.transAxes,
-        va="bottom",
-        ha="left",
-    )
-    ax1.text(
-        0.03,
         0.97,
-        "Underprediction",
+        ("GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only"),
         transform=ax1.transAxes,
+        fontweight="bold",
         va="top",
         ha="left",
     )
+
+    # ax1.text(
+    #     0.03,
+    #     0.03,
+    #     "Overprediction",
+    #     transform=ax1.transAxes,
+    #     va="bottom",
+    #     ha="left",
+    # )
+    # ax1.text(
+    #     0.03,
+    #     0.97,
+    #     "Underprediction",
+    #     transform=ax1.transAxes,
+    #     va="top",
+    #     ha="left",
+    # )
 
     if plot_labels is not None:
         ax1.text(
@@ -985,6 +1016,16 @@ def rrup_bias_res_std(
         )
     if show_legend and legend_ax == 3:
         ax3.legend()
+
+    ax3.text(
+        0.03,
+        0.97,
+        ("GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only"),
+        transform=ax3.transAxes,
+        fontweight="bold",
+        va="top",
+        ha="left",
+    )
 
     if plot_labels is not None:
         ax3.text(
@@ -1192,11 +1233,21 @@ def doc_bias_res_std(
         ax1.legend()
 
     ax1.text(
-        0.03, 0.03, "Overprediction", transform=ax1.transAxes, va="bottom", ha="left"
+        0.03,
+        0.97,
+        ("GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only"),
+        transform=ax1.transAxes,
+        fontweight="bold",
+        va="top",
+        ha="left",
     )
-    ax1.text(
-        0.03, 0.97, "Underprediction", transform=ax1.transAxes, va="top", ha="left"
-    )
+
+    # ax1.text(
+    #     0.03, 0.03, "Overprediction", transform=ax1.transAxes, va="bottom", ha="left"
+    # )
+    # ax1.text(
+    #     0.03, 0.97, "Underprediction", transform=ax1.transAxes, va="top", ha="left"
+    # )
 
     if plot_labels is not None:
         ax1.text(
@@ -1266,6 +1317,16 @@ def doc_bias_res_std(
         )
     if show_legend and legend_ax == 3:
         ax3.legend()
+
+    ax3.text(
+        0.03,
+        0.97,
+        ("GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only"),
+        transform=ax3.transAxes,
+        fontweight="bold",
+        va="top",
+        ha="left",
+    )
 
     if plot_labels is not None:
         ax3.text(
@@ -1551,7 +1612,6 @@ def spatial_corr_trends(
         )
 
     ax1.legend()
-    # ax1.yaxis.set_major_locator(ticker.MaxNLocator(9))
     ax1.text(
         0.03,
         0.03,
@@ -1660,25 +1720,34 @@ def spatial_corr_trends(
                 linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
-    # ax1.legend()
-    ax1.text(
-        0.03,
-        0.03,
-        "Overprediction",
-        transform=ax1.transAxes,
-        fontsize=pg.constants.FIG_FONT_SIZE,
-        va="bottom",
-        ha="left",
-    )
     ax1.text(
         0.03,
         0.97,
-        "Underprediction",
+        "GNN-Only",
         transform=ax1.transAxes,
-        fontsize=pg.constants.FIG_FONT_SIZE,
+        fontweight="bold",
         va="top",
         ha="left",
     )
+
+    # ax1.text(
+    #     0.03,
+    #     0.03,
+    #     "Overprediction",
+    #     transform=ax1.transAxes,
+    #     fontsize=pg.constants.FIG_FONT_SIZE,
+    #     va="bottom",
+    #     ha="left",
+    # )
+    # ax1.text(
+    #     0.03,
+    #     0.97,
+    #     "Underprediction",
+    #     transform=ax1.transAxes,
+    #     fontsize=pg.constants.FIG_FONT_SIZE,
+    #     va="top",
+    #     ha="left",
+    # )
     if plot_labels is not None:
         ax1.text(
             -0.175,
@@ -1723,6 +1792,16 @@ def spatial_corr_trends(
                 linestyle="--",
                 linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
+
+    ax2.text(
+        0.03,
+        0.97,
+        "GNN-Only",
+        transform=ax2.transAxes,
+        fontweight="bold",
+        va="top",
+        ha="left",
+    )
 
     ax2.legend()
     fig.savefig(output_dir / f"spatial_corr_s2s_gnn_only.{pg.constants.FIG_FORMAT}")
@@ -1776,25 +1855,33 @@ def spatial_corr_trends(
                 linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
-    # ax1.legend()
-    ax1.text(
-        0.03,
-        0.03,
-        "Overprediction",
-        transform=ax1.transAxes,
-        fontsize=pg.constants.FIG_FONT_SIZE,
-        va="bottom",
-        ha="left",
-    )
     ax1.text(
         0.03,
         0.97,
-        "Underprediction",
+        "GNN-Residual",
         transform=ax1.transAxes,
-        fontsize=pg.constants.FIG_FONT_SIZE,
+        fontweight="bold",
         va="top",
         ha="left",
     )
+    # ax1.text(
+    #     0.03,
+    #     0.03,
+    #     "Overprediction",
+    #     transform=ax1.transAxes,
+    #     fontsize=pg.constants.FIG_FONT_SIZE,
+    #     va="bottom",
+    #     ha="left",
+    # )
+    # ax1.text(
+    #     0.03,
+    #     0.97,
+    #     "Underprediction",
+    #     transform=ax1.transAxes,
+    #     fontsize=pg.constants.FIG_FONT_SIZE,
+    #     va="top",
+    #     ha="left",
+    # )
     if plot_labels is not None:
         ax1.text(
             -0.175,
@@ -1841,6 +1928,15 @@ def spatial_corr_trends(
                 linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
+    ax2.text(
+        0.03,
+        0.97,
+        "GNN-Residual",
+        transform=ax2.transAxes,
+        fontweight="bold",
+        va="top",
+        ha="left",
+    )
     ax2.legend()
 
     fig.savefig(output_dir / f"spatial_corr_s2s_gnn_residual.{pg.constants.FIG_FORMAT}")
@@ -1939,25 +2035,33 @@ def spatial_corr_trends(
                 linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
-        # ax1.legend()
-        ax1.text(
-            0.03,
-            0.03,
-            "Overprediction",
-            transform=ax1.transAxes,
-            fontsize=pg.constants.FIG_FONT_SIZE,
-            va="bottom",
-            ha="left",
-        )
     ax1.text(
         0.03,
         0.97,
-        "Underprediction",
+        "GNN-Only",
         transform=ax1.transAxes,
-        fontsize=pg.constants.FIG_FONT_SIZE,
+        fontweight="bold",
         va="top",
         ha="left",
     )
+    # ax1.text(
+    #     0.03,
+    #     0.03,
+    #     "Overprediction",
+    #     transform=ax1.transAxes,
+    #     fontsize=pg.constants.FIG_FONT_SIZE,
+    #     va="bottom",
+    #     ha="left",
+    # )
+    # ax1.text(
+    #     0.03,
+    #     0.97,
+    #     "Underprediction",
+    #     transform=ax1.transAxes,
+    #     fontsize=pg.constants.FIG_FONT_SIZE,
+    #     va="top",
+    #     ha="left",
+    # )
     if plot_labels is not None:
         ax1.text(
             -0.175,
@@ -2003,6 +2107,15 @@ def spatial_corr_trends(
                 linestyle="--",
                 linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
+    ax2.text(
+        0.03,
+        0.97,
+        "GNN-Only",
+        transform=ax2.transAxes,
+        fontweight="bold",
+        va="top",
+        ha="left",
+    )
 
     ax2.legend()
     fig.savefig(output_dir / f"spatial_corr_vs30_gnn_only.{pg.constants.FIG_FORMAT}")
@@ -2055,25 +2168,33 @@ def spatial_corr_trends(
                 linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
 
-        # ax1.legend()
-        ax1.text(
-            0.03,
-            0.03,
-            "Overprediction",
-            transform=ax1.transAxes,
-            fontsize=pg.constants.FIG_FONT_SIZE,
-            va="bottom",
-            ha="left",
-        )
     ax1.text(
         0.03,
         0.97,
-        "Underprediction",
+        "GNN-Residual",
         transform=ax1.transAxes,
-        fontsize=pg.constants.FIG_FONT_SIZE,
+        fontweight="bold",
         va="top",
         ha="left",
     )
+    # ax1.text(
+    #     0.03,
+    #     0.03,
+    #     "Overprediction",
+    #     transform=ax1.transAxes,
+    #     fontsize=pg.constants.FIG_FONT_SIZE,
+    #     va="bottom",
+    #     ha="left",
+    # )
+    # ax1.text(
+    #     0.03,
+    #     0.97,
+    #     "Underprediction",
+    #     transform=ax1.transAxes,
+    #     fontsize=pg.constants.FIG_FONT_SIZE,
+    #     va="top",
+    #     ha="left",
+    # )
     if plot_labels is not None:
         ax1.text(
             -0.175,
@@ -2119,6 +2240,15 @@ def spatial_corr_trends(
                 linestyle="--",
                 linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
             )
+    ax2.text(
+        0.03,
+        0.97,
+        "GNN-Residual",
+        transform=ax2.transAxes,
+        fontweight="bold",
+        va="top",
+        ha="left",
+    )
 
     ax2.legend()
     fig.savefig(
@@ -2380,6 +2510,14 @@ def hyper_var(
         if cur_env_key.startswith("fig_"):
             print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
 
+    # Update font size
+    if pg.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": pg.constants.FIG_FONT_SIZE,
+            }
+        )
+
     result_dirs = [cur_dir for cur_dir in results_dir.iterdir() if cur_dir.is_dir()]
 
     ref_metrics = pd.read_pickle(ref_model_dir / "metrics.pickle")
@@ -2498,14 +2636,26 @@ def attention_coefficients(
     gnn_res_model_dir: Path,
     output_dir: Path,
     y_max: float,
-    site_dist: list[float] | None = None,
-    angular_dist: list[float] | None = None,
-    ln_vs30_diff: list[float] | None = None,
+    site_dist: list[float] = None,
+    angular_dist: list[float] = None,
+    ln_vs30_diff: list[float] = None,
     n_xtick_bins: int = 5,
 ):
+    """
+    Plot attention coefficients from GNN-Only and GNN-Residual models as a function
+    of a specified variable (site-to-site distance, angular distance, or ln(Vs30) difference).
+    """
     for cur_env_key in os.environ.keys():
         if cur_env_key.startswith("fig_"):
             print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
+    # Update font size
+    if pg.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": pg.constants.FIG_FONT_SIZE,
+            }
+        )
 
     run_config = pg.ml.RunConfig.from_yaml(gnn_only_model_dir / "run_config.yaml")
 
@@ -2534,7 +2684,7 @@ def attention_coefficients(
     )
 
     for i in range(n_variations):
-        only_raw_att_coeff, variable_input = pg.ml.get_att_model_predictions(
+        only_raw_att_coeff, variable_input = pg.ml.get_variable_att_model_predictions(
             run_config,
             only_att_models[0],
             device,
@@ -2545,7 +2695,7 @@ def attention_coefficients(
         )
         only_exp_att_coeff = np.exp(only_raw_att_coeff)
 
-        res_raw_att_coeff, _ = pg.ml.get_att_model_predictions(
+        res_raw_att_coeff, _ = pg.ml.get_variable_att_model_predictions(
             run_config,
             res_att_models[0],
             device,
@@ -2560,13 +2710,18 @@ def attention_coefficients(
             variable_input,
             only_exp_att_coeff,
             color="blue",
-            label=["GNN-Only" if i == 0 else None for i in range(run_config.n_att_heads[0])],
+            label=[
+                "GNN-Only" if i == 0 else None for i in range(run_config.n_att_heads[0])
+            ],
         )
         axs[i].plot(
             variable_input,
             res_exp_att_coeff,
             color="purple",
-            label=["GNN-Residual" if i == 0 else None for i in range(run_config.n_att_heads[0])],
+            label=[
+                "GNN-Residual" if i == 0 else None
+                for i in range(run_config.n_att_heads[0])
+            ],
         )
 
         axs[i].set_xlim([-1, 1])
@@ -2621,15 +2776,164 @@ def attention_coefficients(
             horizontalalignment="right",
             verticalalignment="top",
             fontweight="bold",
+            zorder=10,
         )
 
     plt.subplots_adjust(
-        left=0.070, right=0.99, top=0.985, bottom=0.075, wspace=0.05, hspace=0.05
+        left=0.030, right=0.99, top=0.985, bottom=0.075, wspace=0.05, hspace=0.05
     )
     fig.savefig(
         output_dir / f"attention_coefficients_{x_var}.{pg.constants.FIG_FORMAT}"
     )
     plt.close(fig)
+
+
+@app.command("att-feature-importance-plot")
+def att_feature_importance_plot(
+    model_dir: Path, out_dir: Path, prefix: str | None = None
+):
+    """
+    Generate a bar plot showing the normalized mean absolute
+    SHAP values for each feature and attention coefficient.
+    """
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
+    # Update font size
+    if pg.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": pg.constants.FIG_FONT_SIZE,
+            }
+        )
+
+    shap_values = pd.read_pickle(model_dir / "att_shap_explainer_values.pkl")
+    shap_values.feature_names = [
+        "Site-to-Site Distance",
+        "Angular Distance",
+        "ln(Vs30) Difference",
+    ]
+
+    color = "#e6194B"
+
+    fig, axs = mlt.plotting.get_fig_axes(
+        4, 2, 2, ind_figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI
+    )
+    ax1, ax2, ax3, ax4 = axs
+
+    att_coeff_1_values = np.abs(shap_values.values[:, :, 0]).mean(axis=0)
+    att_coeff_1_values /= att_coeff_1_values.sum()
+    ax1.barh(
+        shap_values.feature_names,
+        att_coeff_1_values,
+        color=color,
+        edgecolor="black",
+        height=0.5,
+    )
+    # ax1.set_title("Attention Coefficient 1")
+    ax1.text(
+        0.5,
+        0.975,
+        "Attention Coefficient 1",
+        transform=ax1.transAxes,
+        horizontalalignment="center",
+        verticalalignment="top",
+        fontweight="bold",
+    )
+    ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax1.set_xlim(0, 1)
+    ax1.set_xticklabels([])
+
+    att_coeff_2_values = np.abs(shap_values.values[:, :, 1]).mean(axis=0)
+    att_coeff_2_values /= att_coeff_2_values.sum()
+    ax2.barh(
+        shap_values.feature_names,
+        att_coeff_2_values,
+        color=color,
+        edgecolor="black",
+        height=0.5,
+    )
+    ax2.text(
+        0.5,
+        0.975,
+        "Attention Coefficient 2",
+        transform=ax2.transAxes,
+        horizontalalignment="center",
+        verticalalignment="top",
+        fontweight="bold",
+    )
+    ax2.set_yticklabels([])
+    ax2.set_ylabel("")
+    ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax2.set_xlim(0, 1)
+    ax2.set_xticklabels([])
+
+    att_coeff_3_values = np.abs(shap_values.values[:, :, 2]).mean(axis=0)
+    att_coeff_3_values /= att_coeff_3_values.sum()
+    ax3.barh(
+        shap_values.feature_names,
+        att_coeff_3_values,
+        color=color,
+        edgecolor="black",
+        height=0.5,
+    )
+    ax3.text(
+        0.5,
+        0.975,
+        "Attention Coefficient 3",
+        transform=ax3.transAxes,
+        horizontalalignment="center",
+        verticalalignment="top",
+        fontweight="bold",
+    )
+    ax3.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax3.set_xlim(0, 1)
+    ax3.set_xlabel("Feature Importance")
+
+    att_coeff_4_values = np.abs(shap_values.values[:, :, 3]).mean(axis=0)
+    att_coeff_4_values /= att_coeff_4_values.sum()
+    ax4.barh(
+        shap_values.feature_names,
+        att_coeff_4_values,
+        color=color,
+        edgecolor="black",
+        height=0.5,
+    )
+    ax4.text(
+        0.5,
+        0.975,
+        "Attention Coefficient 2",
+        transform=ax4.transAxes,
+        horizontalalignment="center",
+        verticalalignment="top",
+        fontweight="bold",
+    )
+    ax4.set_yticklabels([])
+    ax4.set_ylabel("")
+    ax4.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax4.set_xlim(0, 1)
+    ax4.set_xlabel("Feature Importance")
+
+    # shap.plots.bar(shap_values[:, :, 0], show=False, ax=axs[0])
+    # axs[0].set_title("Attention Coefficient 1")
+
+    # shap.plots.bar(shap_values[:, :, 1], show=False, ax=axs[1])
+    # axs[1].set_title("Attention Coefficient 2")
+    # axs[1].yaxis.set_ticklabels([])
+    # axs[1].set_ylabel("")
+
+    # shap.plots.bar(shap_values[:, :, 2], show=False, ax=axs[2])
+    # axs[2].set_title("Attention Coefficient 3")
+
+    # shap.plots.bar(shap_values[:, :, 3], show=False, ax=axs[3])
+    # axs[3].set_title("Attention Coefficient 4")
+    # axs[3].yaxis.set_ticklabels([])
+    # axs[3].set_ylabel("")
+
+    prefix = f"{prefix}_" if prefix is not None else ""
+    fig.tight_layout()
+    fig.savefig(out_dir / f"{prefix}att_feature_importance.{pg.constants.FIG_FORMAT}")
 
 
 if __name__ == "__main__":

@@ -327,7 +327,6 @@ def _run_prediction(
     verbose: bool = True,
     device: str = None,
 ):
-
     pred_im_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred")
     pred_im_std_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_std")
     pred_res_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_res")
@@ -338,7 +337,7 @@ def _run_prediction(
         cur_batch = cur_batch.to(device or run_config.device)
 
         # Get predictions
-        torch_pred_mean, torch_pred_ln_std = model(cur_batch)
+        torch_pred_mean, torch_pred_ln_std, *_ = model(cur_batch)
         pred_std = torch.exp(torch_pred_ln_std).cpu().numpy(force=True)
         pred_mean = torch_pred_mean.cpu().numpy(force=True)
 
@@ -394,7 +393,7 @@ def _run_prediction(
     return result_df
 
 
-def get_att_model_predictions(
+def get_variable_att_model_predictions(
     run_config: gnn_gm.RunConfig,
     att_model: nn.Module,
     device: str,
@@ -445,6 +444,8 @@ def get_att_model_predictions(
         
     with torch.no_grad():
         att_model.eval()
-        raw_att_coeff = att_model(input_tensor).numpy()
+        raw_att_coeff = att_model(input_tensor).numpy(force=True)
 
     return raw_att_coeff, variable_input.numpy(force=True)
+
+

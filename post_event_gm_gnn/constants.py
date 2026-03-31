@@ -133,16 +133,18 @@ PRE_PROCESS_CONFIG = {
 MAG_BINS = [3.5, 4.5, 5.5, 8]
 MAG_BIN_LABELS = ["$M_w$ 3.5 - 4.5", "$M_w$ 4.5 - 5.5", "$M_w$: 5.5 - 8"]
 MAG_COLORS = ["blue", "purple", "red"]
+
 RRUP_BINS = [0, 30, 100, 500]
 RRUP_BIN_LABELS = ["$R_{Rup}$ 0 - 30", "$R_{Rup}$ 30 - 100", "$R_{Rup}$ 100 - 500"]
 RRUP_COLORS = ["blue", "purple", "red"]
-DOC_BINS = [0, 2.5, 4, 8]
-DOC_BIN_LABELS = ["DoC 0 - 2.5", "DoC 2.5 - 4", "DoC 4 - 8"]
-DOC_COLORS = ["blue", "purple", "red"]
 
-SITE_TO_SITE_DIST_BINS = [0, 5, 10, 30]
-SITE_TO_SITE_DIST_BIN_LABELS = ["0 - 5", "5 - 10", "10 - 30"]
-SITE_TO_SITE_DIST_COLORS = ["blue", "purple", "red"]
+DOC_BINS = [0, 2.5, 4, 8, 25]
+DOC_BIN_LABELS = ["DoC 0 - 2.5", "DoC 2.5 - 4", "DoC 4 - 8", "DoC 8 - 25"]
+DOC_COLORS = ["blue", "purple", "red", "orange"]
+
+SITE_TO_SITE_DIST_BINS = [0, 5, 10, 30, 50]
+SITE_TO_SITE_DIST_BIN_LABELS = ["0 - 5", "5 - 10", "10 - 30", "30 - 50"]
+SITE_TO_SITE_DIST_COLORS = ["blue", "purple", "red", "orange"]
 
 LN_VS30_DIFF_BINS = [0, 0.25, 0.75, 2.5]
 LN_VS30_DIFF_BIN_LABELS = ["0 - 0.25", "0.25 - 0.75", "0.75 - 2.5"]
