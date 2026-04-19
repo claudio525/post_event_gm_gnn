@@ -138,9 +138,14 @@ RRUP_BINS = [0, 30, 100, 500]
 RRUP_BIN_LABELS = ["$R_{Rup}$ 0 - 30", "$R_{Rup}$ 30 - 100", "$R_{Rup}$ 100 - 500"]
 RRUP_COLORS = ["blue", "purple", "red"]
 
-DOC_BINS = [0, 2.5, 4, 8, 25]
-DOC_BIN_LABELS = ["DoC 0 - 2.5", "DoC 2.5 - 4", "DoC 4 - 8", "DoC 8 - 25"]
+# DOC_BINS = [0, 2.5, 4, 8, 25]
+# DOC_BIN_LABELS = ["DoC 0 - 2.5", "DoC 2.5 - 4", "DoC 4 - 8", "DoC 8 - 25"]
+# DOC_COLORS = ["blue", "purple", "red", "orange"]
+
+DOC_BINS = [0, 2.5, 10, 25]
+DOC_BIN_LABELS = ["DoC 0 - 2.5", "DoC 2.5 - 10", "DoC 10 - 25"]
 DOC_COLORS = ["blue", "purple", "red", "orange"]
+
 
 SITE_TO_SITE_DIST_BINS = [0, 5, 10, 30, 50]
 SITE_TO_SITE_DIST_BIN_LABELS = ["0 - 5", "5 - 10", "10 - 30", "30 - 50"]

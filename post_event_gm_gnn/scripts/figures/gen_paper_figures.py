@@ -8,7 +8,6 @@ import matplotlib.ticker as mticker
 from matplotlib.ticker import FuncFormatter
 import typer
 import torch
-import shap
 import seaborn as sns
 from tqdm import tqdm
 
@@ -2678,10 +2677,9 @@ def attention_coefficients(
         len(ln_vs30_diff) if ln_vs30_diff is not None else 0,
     )
 
-    scale_func = pg.ml.features.get_reverse_scale_func(x_var, run_config)
-    fig, axs = mlt.plotting.get_fig_axes(
-        n_variations, 2, -1, ind_figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI
-    )
+    # Generate results
+    variable_inputs = []
+    only_exp_att_coeffs, res_exp_att_coeffs = [], []
 
     for i in range(n_variations):
         only_raw_att_coeff, variable_input = pg.ml.get_variable_att_model_predictions(
@@ -2694,6 +2692,8 @@ def attention_coefficients(
             ln_vs30_diff=ln_vs30_diff[i] if ln_vs30_diff is not None else None,
         )
         only_exp_att_coeff = np.exp(only_raw_att_coeff)
+        variable_inputs.append(variable_input)
+        only_exp_att_coeffs.append(only_exp_att_coeff)
 
         res_raw_att_coeff, _ = pg.ml.get_variable_att_model_predictions(
             run_config,
@@ -2705,10 +2705,23 @@ def attention_coefficients(
             ln_vs30_diff=ln_vs30_diff[i] if ln_vs30_diff is not None else None,
         )
         res_exp_att_coeff = np.exp(res_raw_att_coeff)
+        res_exp_att_coeffs.append(res_exp_att_coeff)
 
+    # Normalise
+    res_exp_att_coeffs = np.array(res_exp_att_coeffs)
+    res_exp_att_coeffs = res_exp_att_coeffs / res_exp_att_coeffs.max()
+    only_exp_att_coeffs = np.array(only_exp_att_coeffs)
+    only_exp_att_coeffs = only_exp_att_coeffs / only_exp_att_coeffs.max()
+
+    scale_func = pg.ml.features.get_reverse_scale_func(x_var, run_config)
+    fig, axs = mlt.plotting.get_fig_axes(
+        n_variations, 2, -1, ind_figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI
+    )
+
+    for i in range(n_variations):
         axs[i].plot(
             variable_input,
-            only_exp_att_coeff,
+            only_exp_att_coeffs[i],
             color="blue",
             label=[
                 "GNN-Only" if i == 0 else None for i in range(run_config.n_att_heads[0])
@@ -2716,7 +2729,7 @@ def attention_coefficients(
         )
         axs[i].plot(
             variable_input,
-            res_exp_att_coeff,
+            res_exp_att_coeffs[i],
             color="purple",
             label=[
                 "GNN-Residual" if i == 0 else None
@@ -2735,8 +2748,8 @@ def attention_coefficients(
             axs[i].set_xlabel("ln(Vs30) Difference")
 
         axs[i].xaxis.set_major_formatter(FuncFormatter(scale_func))
-        axs[i].set_ylabel("Exp(Attention Coefficient)")
-        axs[i].set_ylim([0, y_max])
+        axs[i].set_ylabel("Normalised Exp(Attention Coefficient)")
+        axs[i].set_ylim([0, 1.0])
         axs[i].yaxis.set_major_locator(mticker.MaxNLocator(5))
         axs[i].yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
         axs[i].xaxis.set_major_locator(mticker.MaxNLocator(n_xtick_bins))
@@ -2780,8 +2793,9 @@ def attention_coefficients(
         )
 
     plt.subplots_adjust(
-        left=0.030, right=0.99, top=0.985, bottom=0.075, wspace=0.05, hspace=0.05
+        left=0.06, right=0.99, top=0.985, bottom=0.125, wspace=0.03, hspace=0.1
     )
+    # fig.tight_layout()
     fig.savefig(
         output_dir / f"attention_coefficients_{x_var}.{pg.constants.FIG_FORMAT}"
     )
@@ -2790,7 +2804,7 @@ def attention_coefficients(
 
 @app.command("att-feature-importance-plot")
 def att_feature_importance_plot(
-    model_dir: Path, out_dir: Path, prefix: str | None = None
+    model_dir: Path, out_dir: Path, prefix: str | None = None, hide_xlabels: bool = True
 ):
     """
     Generate a bar plot showing the normalized mean absolute
@@ -2808,6 +2822,8 @@ def att_feature_importance_plot(
             }
         )
 
+    gnn_run_config = pg.ml.RunConfig.from_yaml(model_dir / "run_config.yaml")
+
     shap_values = pd.read_pickle(model_dir / "att_shap_explainer_values.pkl")
     shap_values.feature_names = [
         "Site-to-Site Distance",
@@ -2815,126 +2831,127 @@ def att_feature_importance_plot(
         "ln(Vs30) Difference",
     ]
 
-    color = "#e6194B"
+    att_coeff_values = np.abs(shap_values.values).mean(axis=0)
+    att_coeff_values = (att_coeff_values / att_coeff_values.sum(axis=0)).mean(axis=1)
 
-    fig, axs = mlt.plotting.get_fig_axes(
-        4, 2, 2, ind_figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI
-    )
-    ax1, ax2, ax3, ax4 = axs
+    fig, ax = plt.subplots(figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI)
 
-    att_coeff_1_values = np.abs(shap_values.values[:, :, 0]).mean(axis=0)
-    att_coeff_1_values /= att_coeff_1_values.sum()
-    ax1.barh(
-        shap_values.feature_names,
-        att_coeff_1_values,
-        color=color,
+    ax.bar(
+        shap_values.feature_names[::-1],
+        att_coeff_values[::-1],
         edgecolor="black",
-        height=0.5,
     )
-    # ax1.set_title("Attention Coefficient 1")
-    ax1.text(
-        0.5,
-        0.975,
-        "Attention Coefficient 1",
-        transform=ax1.transAxes,
-        horizontalalignment="center",
-        verticalalignment="top",
+    ax.text(
+        0.03,
+        0.97,
+        ("GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only"),
+        transform=ax.transAxes,
         fontweight="bold",
+        va="top",
+        ha="left",
     )
-    ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    ax1.set_xlim(0, 1)
-    ax1.set_xticklabels([])
-
-    att_coeff_2_values = np.abs(shap_values.values[:, :, 1]).mean(axis=0)
-    att_coeff_2_values /= att_coeff_2_values.sum()
-    ax2.barh(
-        shap_values.feature_names,
-        att_coeff_2_values,
-        color=color,
-        edgecolor="black",
-        height=0.5,
-    )
-    ax2.text(
-        0.5,
-        0.975,
-        "Attention Coefficient 2",
-        transform=ax2.transAxes,
-        horizontalalignment="center",
-        verticalalignment="top",
-        fontweight="bold",
-    )
-    ax2.set_yticklabels([])
-    ax2.set_ylabel("")
-    ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    ax2.set_xlim(0, 1)
-    ax2.set_xticklabels([])
-
-    att_coeff_3_values = np.abs(shap_values.values[:, :, 2]).mean(axis=0)
-    att_coeff_3_values /= att_coeff_3_values.sum()
-    ax3.barh(
-        shap_values.feature_names,
-        att_coeff_3_values,
-        color=color,
-        edgecolor="black",
-        height=0.5,
-    )
-    ax3.text(
-        0.5,
-        0.975,
-        "Attention Coefficient 3",
-        transform=ax3.transAxes,
-        horizontalalignment="center",
-        verticalalignment="top",
-        fontweight="bold",
-    )
-    ax3.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    ax3.set_xlim(0, 1)
-    ax3.set_xlabel("Feature Importance")
-
-    att_coeff_4_values = np.abs(shap_values.values[:, :, 3]).mean(axis=0)
-    att_coeff_4_values /= att_coeff_4_values.sum()
-    ax4.barh(
-        shap_values.feature_names,
-        att_coeff_4_values,
-        color=color,
-        edgecolor="black",
-        height=0.5,
-    )
-    ax4.text(
-        0.5,
-        0.975,
-        "Attention Coefficient 2",
-        transform=ax4.transAxes,
-        horizontalalignment="center",
-        verticalalignment="top",
-        fontweight="bold",
-    )
-    ax4.set_yticklabels([])
-    ax4.set_ylabel("")
-    ax4.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    ax4.set_xlim(0, 1)
-    ax4.set_xlabel("Feature Importance")
-
-    # shap.plots.bar(shap_values[:, :, 0], show=False, ax=axs[0])
-    # axs[0].set_title("Attention Coefficient 1")
-
-    # shap.plots.bar(shap_values[:, :, 1], show=False, ax=axs[1])
-    # axs[1].set_title("Attention Coefficient 2")
-    # axs[1].yaxis.set_ticklabels([])
-    # axs[1].set_ylabel("")
-
-    # shap.plots.bar(shap_values[:, :, 2], show=False, ax=axs[2])
-    # axs[2].set_title("Attention Coefficient 3")
-
-    # shap.plots.bar(shap_values[:, :, 3], show=False, ax=axs[3])
-    # axs[3].set_title("Attention Coefficient 4")
-    # axs[3].yaxis.set_ticklabels([])
-    # axs[3].set_ylabel("")
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.set_ylabel("Feature Importance")
+    ax.set_ylim(0, 1.0)
+    if hide_xlabels:
+        ax.set_xticklabels([])
 
     prefix = f"{prefix}_" if prefix is not None else ""
     fig.tight_layout()
     fig.savefig(out_dir / f"{prefix}att_feature_importance.{pg.constants.FIG_FORMAT}")
+    plt.close(fig)
 
+
+@app.command("normalised-residual-std")
+def normalised_residual_std(
+    gnn_only_results_dir: Path,
+    gnn_res_results_dir: Path,
+    output_dir: Path,
+):
+    for cur_env_key in os.environ.keys():
+        if cur_env_key.startswith("fig_"):
+            print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
+
+    # Update font size
+    if pg.constants.FIG_FONT_SIZE is not None:
+        plt.rcParams.update(
+            {
+                "font.size": pg.constants.FIG_FONT_SIZE,
+            }
+        )
+
+    only_run_config = pg.ml.RunConfig.from_yaml(
+        gnn_only_results_dir / "run_config.yaml"
+    )
+    res_run_config = pg.ml.RunConfig.from_yaml(gnn_res_results_dir / "run_config.yaml")
+
+    # Load the combined validation results
+    gnn_only_val_results = pd.read_parquet(gnn_only_results_dir / "val_results.parquet")
+    gnn_res_val_results = pd.read_parquet(gnn_res_results_dir / "val_results.parquet")
+    cim_val_results = pd.read_parquet(
+        gnn_only_results_dir / "cim_results/val_results.parquet"
+    )
+
+    # Get normalized residuals
+    gnn_only_norm_res_df = pg.analysis.get_normalized_residuals(
+        gnn_only_val_results, only_run_config.ims
+    )
+
+    gnn_residual_norm_res_df = pg.analysis.get_normalized_residuals(
+        gnn_res_val_results, res_run_config.ims
+    )
+
+    cim_norm_res_df = pg.analysis.get_normalized_residuals(
+        cim_val_results,
+        only_run_config.pSA_ims,
+        pred_suffix="cond_mean",
+        pred_std_suffix="cond_std",
+    )
+
+    y_min, y_max = 0.7, 1.3
+    fig, ax1, ax2 = pg.plot_utils.get_single_pSA_otherIMs_fig(
+        figsize=pg.constants.FIG_SIZE, fig_dpi=pg.constants.FIG_DPI,
+        left=0.06, right=0.99, bottom=0.125, top=0.985,
+    )
+
+    ax1.axhline(1.0, c="black", linestyle="--", linewidth=pg.constants.FIG_GROUP_LINEWIDTH, zorder=0)
+
+    ax1.plot(
+        only_run_config.pSA_periods,
+        gnn_only_norm_res_df[only_run_config.pSA_ims].std(),
+        label="GNN-Only",
+        linewidth=pg.constants.FIG_LINEWIDTH,
+        color="blue",
+    )
+    ax1.plot(
+        res_run_config.pSA_periods,
+        gnn_residual_norm_res_df[res_run_config.pSA_ims].std(),
+        label="GNN-Residual",
+        linewidth=pg.constants.FIG_LINEWIDTH,
+        color="purple",
+    )
+    ax1.plot(
+        only_run_config.pSA_periods,
+        cim_norm_res_df[only_run_config.pSA_ims].std(),
+        label="MVN-CIM",
+        linewidth=pg.constants.FIG_LINEWIDTH,
+        color="green",
+    )
+    ax1.legend()
+    ax1.set_ylim(y_min, y_max)
+    ax1.set_ylabel("Normalised Residual Standard Deviation")
+
+    ax2.axhline(1.0, c="black", linestyle="--", linewidth=pg.constants.FIG_GROUP_LINEWIDTH, zorder=0)
+    ax2.scatter(
+        only_run_config.non_pSA_ims,
+        gnn_only_norm_res_df[only_run_config.non_pSA_ims].std().values,
+        color="blue"
+    )
+    ax2.xaxis.set_tick_params(rotation=90)
+    ax2.set_ylim(y_min, y_max)
+
+    fig.savefig(output_dir / f"normalised_residual_std.{pg.constants.FIG_FORMAT}")
+    plt.close(fig)
 
 if __name__ == "__main__":
     app()

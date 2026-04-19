@@ -3,6 +3,7 @@ from typing import Sequence
 
 import numpy as np
 import pandas as pd
+import scipy.stats as stats 
 
 from tqdm import tqdm
 import ml_tools as mlt
@@ -17,7 +18,10 @@ def get_residuals(
     pred_suffix: str = "pred",
     site_col: str = "site_int",
 ):
-    """Computes the residual between the observed and predicted IMs for each scenario"""
+    """
+    Computes the residual between 
+    the observed and predicted IMs for each scenario
+    """
     pred_im_keys = mlt.array_utils.numpy_str_join("_", ims, pred_suffix)
     res_df = pd.DataFrame(
         data=results.loc[:, ims].values - results.loc[:, pred_im_keys].values,
@@ -31,6 +35,59 @@ def get_residuals(
         res_df["n_obs_sites"] = results["n_obs_sites"]
     return res_df
 
+def get_normalized_residuals(
+    results: pd.DataFrame,
+    ims: Sequence[str] = constants.PSA_KEYS,
+    pred_suffix: str = "pred",
+    pred_std_suffix: str = "pred_std",
+    site_col: str = "site_int",
+):
+    """
+    Computes the normalized residual between 
+    the observed and predicted IMs for each scenario
+    """
+    pred_im_keys = mlt.array_utils.numpy_str_join("_", ims, pred_suffix)
+    pred_std_keys = mlt.array_utils.numpy_str_join("_", ims, pred_std_suffix)
+
+    norm_res_df = pd.DataFrame(
+        data=(results.loc[:, ims].values - results.loc[:, pred_im_keys].values)
+        / results.loc[:, pred_std_keys].values,
+        columns=ims,
+    )
+
+    norm_res_df.index = results.index
+    norm_res_df["event_id"] = results["event_id"]
+    norm_res_df[site_col] = results[site_col]
+    if "n_obs_sites" in results.columns:
+        norm_res_df["n_obs_sites"] = results["n_obs_sites"]
+    return norm_res_df
+
+def get_nll(
+        results: pd.DataFrame,
+        ims: Sequence[str] = constants.PSA_KEYS,
+        pred_suffix: str = "pred",
+        pred_std_suffix: str = "pred_std",
+        site_col: str = "site_int",
+    ):
+    """
+    Computes the Gaussian negative log-likelihood 
+    """
+    pred_im_keys = mlt.array_utils.numpy_str_join("_", ims, pred_suffix)
+    pred_std_keys = mlt.array_utils.numpy_str_join("_", ims, pred_std_suffix)   
+
+    nll_series = pd.Series(index=ims)
+    for pred_im_key, pred_std_key, im in zip(pred_im_keys, pred_std_keys, ims):
+        nan_mask = np.isnan(results.loc[:, im].values)
+        nll = np.mean(
+            stats.norm.logpdf(
+                results.loc[~nan_mask, im].values,
+                loc=results.loc[~nan_mask, pred_im_key].values,
+                scale=results.loc[~nan_mask, pred_std_key].values,
+            )
+        )
+        nll_series[im] = nll
+
+    return nll_series
 
 def get_res_mean_std(
     residual_df: pd.DataFrame,

@@ -10,24 +10,14 @@ n_procs=16
 
 
 #### CV Models
-## 2p12
-# cv_gnn_only_dir=${wdata}/post_event_gm_gnn/results/gnn/0319_1443_cv_final_v4p3FNZGMDB_v2p12_base 
-# cv_gnn_residual_dir=${wdata}/post_event_gm_gnn/results/gnn/0319_1726_cv_final_v4p3FNZGMDB_v2p12_res
-
-## 2p11
-cv_gnn_only_dir=${wdata}/post_event_gm_gnn/results/gnn/0318_1632_cv_final_v4p3FNZGMDB_v2p11_base 
-cv_gnn_residual_dir=${wdata}/post_event_gm_gnn/results/gnn/0318_1907_cv_final_v4p3FNZGMDB_v2p11_res
+cv_gnn_only_dir=${wdata}/post_event_gm_gnn/results/gnn/0416_1137_cv_final_v4p3FNZGMDB_v2p13_base 
+cv_gnn_residual_dir=${wdata}/post_event_gm_gnn/results/gnn/0416_1606_cv_final_v4p3FNZGMDB_v2p14_res
 
 ### Full Models
-## 2p12
-# full_gnn_only_model_dir=${wdata}/post_event_gm_gnn/results/gnn/0323_final_4p3FNZGMDB_v2p12_base_full
-# full_gnn_residual_model_dir=${wdata}/post_event_gm_gnn/results/gnn/0320_final_4p3FNZGMDB_v2p12_res_full
-# full_gnn_residual_model_dir_ignore_CCCC_SHLC=${wdata}/post_event_gm_gnn/results/gnn/0320_final_4p3FNZGMDB_v2p12_res_ignore_CCCC_SHLC
+full_gnn_only_model_dir=${wdata}/post_event_gm_gnn/results/gnn/0416_final_4p3FNZGMDB_v2p13_base_full
+full_gnn_residual_model_dir=${wdata}/post_event_gm_gnn/results/gnn/0416_final_4p3FNZGMDB_v2p14_res_full
+full_gnn_residual_model_dir_ignore_CCCC_SHLC=${wdata}/post_event_gm_gnn/results/gnn/20260416_final_4p3FNZGMDB_v2p14_res_ignore_CCCC_SHLC
 
-## 2p11
-full_gnn_only_model_dir=${wdata}/post_event_gm_gnn/results/gnn/0324_final_4p3FNZGMDB_v2p11_base_full
-full_gnn_residual_model_dir=${wdata}/post_event_gm_gnn/results/gnn/0318_final_4p3FNZGMDB_v2p11_res_full
-full_gnn_residual_model_dir_ignore_CCCC_SHLC=${wdata}/post_event_gm_gnn/results/gnn/0318_final_4p3FNZGMDB_v2p11_res_ignore_CCCC_SHLC
 
 ### ------------------- Compute cIM results for GNN CV folds ------------------------------
 

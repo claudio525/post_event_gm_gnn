@@ -532,13 +532,13 @@ def run_model_training(
             dist_matrix=dist_matrix,
         )
 
-        val_transform = (
-            gnn_modules.AddSoIObsIMsTransform(val_event_scalar_feature_dfs, run_config)
-            if run_config.soi_with_obs_pert
-            else None
-        )
+        # val_transform = (
+        #     gnn_modules.AddSoIObsIMsTransform(val_event_scalar_feature_dfs, run_config)
+        #     if run_config.soi_with_obs_pert
+        #     else None
+        # )
         val_dataset = gnn_modules.CustomGraphDataset(
-            val_graph_data, transform=val_transform
+            val_graph_data, #transform=val_transform
         )
         val_loader = gloader.DataLoader(
             val_dataset, batch_size=run_config.batch_size, shuffle=True

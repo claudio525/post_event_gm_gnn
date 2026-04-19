@@ -1,0 +1,89 @@
+### All paths specified are relative to the environment variable $wdata
+
+# General settings
+seed: 42
+
+# IMs
+im_set: "all"
+
+# Input data settings
+rel_obs_data_ffp: gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table_rotd50_flat.csv
+max_dist: 50
+closest_max_dist: 10
+max_n_obs_sites: 50
+min_n_obs_sites: 2
+
+rel_emp_gm_params_fp: null
+use_emp_gm_model: False
+
+ignore_events: ["3468575"]
+
+### Scenario Weighting
+# Magnitude
+mag_scenario_weighting: True
+mag_min_weight: 0
+mag_max_weight: 4
+mag_start: 5.0
+mag_end: 7.0
+# DoC
+doc_scenario_weighting: False
+doc_min_weight: 0
+doc_max_weight: 0
+doc_start: 1
+doc_end: 6
+
+### Data Perturbations
+soi_with_obs_pert: True
+soi_with_obs_pert_prob: 0.05
+
+# Features
+graph_feature_keys:
+  edge:
+    - "dist"
+    - "angular_dist"
+    - "ln_vs30_diff"
+  site_int:
+    - "vs30_site_int"
+    - "z1p0_site_int"
+    - "z2p5_site_int"
+    - "rrup_site_int"
+    - "mag"
+  site_obs:
+
+# Model settings
+scale_IMs: true
+
+# Hyperparameters
+n_epochs: 500
+batch_size: 1024
+
+# Learning rate scheduling
+use_lr_scheduler: True
+lr_patience: 50
+lr_factor: 0.5
+
+fc_n_units: 64
+fc_act_fn: "elu"
+
+batch_norm: False
+
+int_embedding_act_fn: null
+obs_embedding_act_fn: null
+edge_embedding_act_fn: null
+n_int_node_channels: [8, 8]
+use_msg_in_int_update_fn: False
+n_obs_node_channels: [32, 32]
+use_obs_self_loop: True
+n_edge_channels: [4, 4]
+gcn_act_fn: "elu"
+
+n_att_heads: [4, 4]
+att_n_units: [16, 16]
+att_act_fn: "tanh"
+
+# Regularization
+l2_reg: 0.0005
+dropout_rate: 0.1
+
+# Output settings
+rel_results_dir: post_event_gm_gnn/results/gnn
