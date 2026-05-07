@@ -105,8 +105,19 @@ class RunConfig:
     n_obs_node_channels: Sequence[int]
     """Number of observation site node channels"""
     n_int_node_channels: Sequence[int]
-    """Number of site of interest node channels per attention coefficient. 
-    Total number of channels = n_int_node_channels * n_attention_heads"""
+    """
+    Number of site of interest node channels per attention coefficient. 
+    Total number of channels = n_int_node_channels * n_attention_heads
+    """
+    use_msg_in_int_update_fn: bool
+    """
+    Whether to use the message (i.e. aggregated information 
+    from the observation sites) in the site of interest node update function.
+    If False, it is added to the output of the update function, instead of
+    being an input to the update function.
+    """
+    use_obs_self_loop: bool
+    """Whether to add self loops for the observation sites"""
     n_edge_channels: Sequence[int]
     """Number of edge channels"""
     n_att_heads: Sequence[int]
@@ -148,16 +159,10 @@ class RunConfig:
     soi_with_obs_pert_prob: float = 0.0
     """Probability of perturbing scenarios, and adding observation site for SoI"""
 
-    ### Embedding settings
-    use_edge_emb_for_msg: bool = False
-    """Whether to use the edge embedding as an input for the message neural network"""
-
     ignore_sites: Sequence[str] | None = None
     """Sites to ignore"""
 
-
     _im_scale_params: dict[str, pd.Series] | None = None
-
 
     ### Features
     graph_feature_keys: dict[str, Sequence[str]] = None
@@ -286,7 +291,9 @@ class RunConfig:
             "max_n_obs_sites": self.max_n_obs_sites,
             "min_n_obs_sites": self.min_n_obs_sites,
             "ignore_events": list(self.ignore_events),
-            "ignore_sites": list(self.ignore_sites) if self.ignore_sites is not None else None,
+            "ignore_sites": (
+                list(self.ignore_sites) if self.ignore_sites is not None else None
+            ),
             "mag_scenario_weighting": self.mag_scenario_weighting,
             "mag_min_weight": self.mag_min_weight,
             "mag_max_weight": self.mag_max_weight,
@@ -304,6 +311,8 @@ class RunConfig:
             "batch_size": self.batch_size,
             "n_obs_node_channels": list(self.n_obs_node_channels),
             "n_int_node_channels": list(self.n_int_node_channels),
+            "use_msg_in_int_update_fn": bool(self.use_msg_in_int_update_fn),
+            "use_obs_self_loop": bool(self.use_obs_self_loop),
             "n_edge_channels": list(self.n_edge_channels),
             "n_att_heads": self.n_att_heads,
             "fc_n_units": self.fc_n_units,
@@ -326,7 +335,6 @@ class RunConfig:
             "rel_emp_gm_params_fp": self.rel_emp_gm_params_fp,
             "soi_with_obs_pert": self.soi_with_obs_pert,
             "soi_with_obs_pert_prob": self.soi_with_obs_pert_prob,
-            "use_edge_emb_for_msg": self.use_edge_emb_for_msg,
         }
         if self.im_scale_params is not None:
             result["_im_scale_params"] = {
@@ -358,8 +366,9 @@ class RunConfig:
         return cls(**d)
 
     @classmethod
-    def from_yaml(cls, ffp: Path):
+    def from_yaml(cls, ffp: Path) -> "RunConfig":
         return cls.from_dict(mlt.utils.load_yaml(ffp))
+
 
 def run_model_training(
     out_dir: Path,
@@ -523,13 +532,13 @@ def run_model_training(
             dist_matrix=dist_matrix,
         )
 
-        val_transform = (
-            gnn_modules.AddSoIObsIMsTransform(val_event_scalar_feature_dfs, run_config)
-            if run_config.soi_with_obs_pert
-            else None
-        )
+        # val_transform = (
+        #     gnn_modules.AddSoIObsIMsTransform(val_event_scalar_feature_dfs, run_config)
+        #     if run_config.soi_with_obs_pert
+        #     else None
+        # )
         val_dataset = gnn_modules.CustomGraphDataset(
-            val_graph_data, transform=val_transform
+            val_graph_data, #transform=val_transform
         )
         val_loader = gloader.DataLoader(
             val_dataset, batch_size=run_config.batch_size, shuffle=True
@@ -604,7 +613,7 @@ def run_model_training(
 
     # Save the results
     dist_matrix = utils.calculate_distance_matrix(obs_data.sites, obs_data.site_df)
-    train_results_df = get_predictions(
+    train_results_df, *_ = get_predictions(
         run_config,
         gnn_model,
         train_graph_data,
@@ -617,7 +626,7 @@ def run_model_training(
     # train_attn_coeffs_df.to_parquet(out_dir / "train_attn_coeffs.parquet")
 
     if val_int_sites is not None:
-        val_results_df = get_predictions(
+        val_results_df, val_att_coeffs_df, val_att_weights_df = get_predictions(
             run_config,
             gnn_model,
             val_graph_data,
@@ -627,7 +636,8 @@ def run_model_training(
             verbose=verbose,
         )
         val_results_df.to_parquet(out_dir / "val_results.parquet")
-        # val_attn_coeffs.to_parquet(out_dir / "val_attn_coeffs.parquet")
+        val_att_coeffs_df.to_parquet(out_dir / "val_attn_coeffs.parquet")
+        val_att_weights_df.to_parquet(out_dir / "val_attn_weights.parquet")
 
         # Sanity checks
         assert ~np.any(val_results_df.event_id.isin(train_results_df.event_id))
@@ -1099,6 +1109,11 @@ class BatchResult(NamedTuple):
     w_ind_loss: torch.Tensor
     """The weighted individual losses, this includes nan-values"""
 
+    att_coeffs: list[np.ndarray[float]]
+    """The attention coefficients per layer"""
+    att_weights: list[np.ndarray[float]]
+    """The attention weights (i.e. normalized attention coefficients) per layer"""
+
 
 def _save_metrics(
     batch_result: BatchResult,
@@ -1156,7 +1171,7 @@ def _get_batch_result(batch: gdata.Batch, gnn_model: nn.Module, run_config: RunC
     cur_y = cur_batch.y if cur_batch.y.dim() > 1 else cur_batch.y[:, None]
     cur_sc_weights = einops.repeat(cur_batch.sc_weight, "i -> i j", j=run_config.n_ims)
 
-    pred_mean, pred_ln_std = gnn_model(cur_batch)
+    pred_mean, pred_ln_std, att_coeffs, att_weights = gnn_model(cur_batch)
 
     nan_mask = torch.isnan(cur_y)
 
@@ -1187,6 +1202,8 @@ def _get_batch_result(batch: gdata.Batch, gnn_model: nn.Module, run_config: RunC
         w_loss=w_loss,
         ind_loss=ind_loss,
         w_ind_loss=w_ind_loss,
+        att_coeffs=att_coeffs,
+        att_weights=att_weights,
     )
 
 
@@ -1271,13 +1288,38 @@ def get_predictions(
     w_loss_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "w_loss")
 
     results = []
-    # attn_coeffs = []
+    att_coeffs, att_weights = [], []
     for cur_batch in tqdm.tqdm(loader, disable=not verbose):
         cur_batch = cur_batch.to(run_config.device)
         cur_batch_result = _get_batch_result(cur_batch, gnn_model, run_config)
 
-        # cur_attn_coeffs_df = gnn_model.get_attention_coeff(cur_batch)
+        # Attention coefficients/weights for first convolutional layer
+        cur_att_coeffs = cur_batch_result.att_coeffs[0]
+        cur_att_weights = cur_batch_result.att_weights[0]
 
+        sc_ind = cur_batch[("site_obs", "informs", "site_int")]["edge_index"][1, :].numpy(
+                force=True
+            )
+        
+        cur_att_coeffs_df = pd.DataFrame(
+            index = np.array(cur_batch["metadata"]["sc_id"])[sc_ind],
+            data={
+                "site_int": np.array(cur_batch["metadata"]["site_int"])[sc_ind],
+                "site_obs": np.concatenate(cur_batch["metadata"]["obs_sites"]),
+            }
+        )
+        cur_att_coeffs_df[[f"att_coeff_{i}" for i in range(cur_att_coeffs.shape[1])]] = cur_att_coeffs
+
+        cur_att_weights_df = pd.DataFrame(
+            index = cur_att_coeffs_df.index,
+            data={
+                "site_int": cur_att_coeffs_df["site_int"],
+                "site_obs": cur_att_coeffs_df["site_obs"],
+            }
+        )
+        cur_att_weights_df[[f"att_weight_{i}" for i in range(cur_att_weights.shape[1])]] = cur_att_weights
+
+        # Results
         cur_result = pd.DataFrame(
             data=[
                 cur_batch["metadata"]["event"],
@@ -1286,11 +1328,7 @@ def get_predictions(
             ],
             index=["event_id", "site_int", "obs_sites"],
         ).T
-        cur_result.index = mlt.array_utils.numpy_str_join(
-            "_",
-            cur_result["event_id"].values.astype(str),
-            cur_result["site_int"].values.astype(str),
-        )
+        cur_result.index = cur_batch["metadata"]["sc_id"]
         if run_config.mag_scenario_weighting:
             cur_result.loc[:, "mag_weight"] = (
                 cur_batch["metadata"]["mag_weight"].cpu().numpy(force=True)
@@ -1370,12 +1408,14 @@ def get_predictions(
             for cur_key, cur_row in cur_result.iterrows()
         ]
 
-        # attn_coeffs.append(cur_attn_coeffs_df)
+        att_coeffs.append(cur_att_coeffs_df)
+        att_weights.append(cur_att_weights_df)
         results.append(cur_result)
 
-    # attn_coeffs_df = pd.concat(attn_coeffs, axis=0)
+    att_coeffs_df = pd.concat(att_coeffs, axis=0)
+    att_weights_df = pd.concat(att_weights, axis=0)
     results = pd.concat(results, axis=0)
-    return results
+    return results, att_coeffs_df, att_weights_df
 
 def get_mag_weight_func(
     min_weight: float, max_weight: float, mag_start: float, mag_end: float
@@ -1455,5 +1495,3 @@ def get_doc_weight_func(
             return grad * doc + bias
 
     return doc_weight_fn
-
-

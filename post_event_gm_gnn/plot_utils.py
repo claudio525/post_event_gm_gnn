@@ -51,8 +51,11 @@ def get_pSA_bias_residual_fig(
     ax2.set_ylim(*std_y_axis_limits)
     ax2.set_xlim(0.01, 10.0)
 
-    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, wspace=main_wspace)
+    fig.subplots_adjust(
+        left=left, right=right, top=top, bottom=bottom, wspace=main_wspace
+    )
     return fig, ax1, ax2
+
 
 def get_bias_residual_fig(
     figsize: tuple[float, float] = (16, 6),
@@ -87,7 +90,7 @@ def get_bias_residual_fig(
         I.e. space between ax2 and ax3
     sub_wspace : float, optional
         Space between the subplots.
-        I.e. space between ax1 and ax2 
+        I.e. space between ax1 and ax2
         and between ax3 and ax4
 
     Returns
@@ -125,7 +128,7 @@ def get_bias_residual_fig(
     ax2.set_yticklabels([])
     ax2.set_ylim(*bias_y_axis_limits)
     ax2.axhline(0, color="black", zorder=0)
-    ax2.tick_params(axis='y', which='both', length=0)
+    ax2.tick_params(axis="y", which="both", length=0)
 
     grid_residual = gridspec.GridSpecFromSubplotSpec(
         1, 2, subplot_spec=main_grid[1], wspace=sub_wspace, width_ratios=[5, 1]
@@ -143,7 +146,7 @@ def get_bias_residual_fig(
     ax4.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax4.set_yticklabels([])
     ax4.set_ylim(*std_y_axis_limits)
-    ax4.tick_params(axis='y', which='both', length=0)
+    ax4.tick_params(axis="y", which="both", length=0)
 
     # Remove general figure padding
     fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom)
@@ -152,7 +155,13 @@ def get_bias_residual_fig(
 
 
 def get_single_pSA_otherIMs_fig(
-    figsize: tuple[float, float] = (16, 6), fig_dpi: int | None = None, top: float = 1.0
+    figsize: tuple[float, float] = (16, 6),
+    fig_dpi: int | None = None,
+    left: float = 0.0,
+    right: float = 1.0,
+    top: float = 1.0,
+    bottom: float = 0.0,
+    wspace: float = 0.05,
 ):
     """
     Create figure for pSA and non-pSA IMs plots.
@@ -173,7 +182,7 @@ def get_single_pSA_otherIMs_fig(
     ax2 : matplotlib.axes.Axes
         Axis for the other IMs plot.
     """
-    fig = plt.figure(figsize=figsize, dpi=fig_dpi)   
+    fig = plt.figure(figsize=figsize, dpi=fig_dpi)
 
     grid = gridspec.GridSpec(1, 2, figure=fig, wspace=0.05, width_ratios=[5, 1])
 
@@ -189,6 +198,6 @@ def get_single_pSA_otherIMs_fig(
     ax2.set_ylim(-1.0, 1.0)
 
     # Remove general figure padding
-    fig.subplots_adjust(left=0, right=1, top=top, bottom=0)
+    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, wspace=wspace)
 
     return fig, ax1, ax2

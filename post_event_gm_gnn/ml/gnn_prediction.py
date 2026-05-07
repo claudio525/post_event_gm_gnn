@@ -327,7 +327,6 @@ def _run_prediction(
     verbose: bool = True,
     device: str = None,
 ):
-
     pred_im_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred")
     pred_im_std_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_std")
     pred_res_keys = mlt.array_utils.numpy_str_join("_", run_config.ims, "pred_res")
@@ -338,7 +337,7 @@ def _run_prediction(
         cur_batch = cur_batch.to(device or run_config.device)
 
         # Get predictions
-        torch_pred_mean, torch_pred_ln_std = model(cur_batch)
+        torch_pred_mean, torch_pred_ln_std, *_ = model(cur_batch)
         pred_std = torch.exp(torch_pred_ln_std).cpu().numpy(force=True)
         pred_mean = torch_pred_mean.cpu().numpy(force=True)
 
@@ -392,3 +391,62 @@ def _run_prediction(
     )
 
     return result_df
+
+
+def get_variable_att_model_predictions(
+    run_config: gnn_gm.RunConfig,
+    att_model: nn.Module,
+    device: str,
+    x_var: str,
+    site_dist: float | None = None,
+    soi_vs30: float | None = None,
+    vs30_diff: float | None = None,
+    ln_vs30_diff: float | None = None,
+    angular_distance: float | None = None,
+    limits: tuple[float, float] = (-1, 1),
+):
+    """
+    Get the predictions of the attention model (of the first convolutional layer)
+    for a range of values of the specified variable. 
+    The other variables are kept constant and can be specified as arguments.
+    """
+    input_tensor = torch.full(
+        (1000, len(run_config.graph_feature_keys["edge"])),
+        fill_value=torch.nan,
+        device=device,
+        dtype=torch.float32,
+    )
+    if x_var == "ln_vs30_diff":
+        variable_input = torch.linspace(-2, 2, 1000)
+    else:
+        variable_input = torch.linspace(limits[0], limits[1], 1000)
+
+    for i, var in enumerate(run_config.graph_feature_keys["edge"]):
+        if var == x_var:
+            input_tensor[:, i] = variable_input
+
+        elif var == "dist":
+            input_tensor[:, i] = features.scale_site_to_site_distances(
+                site_dist, run_config.max_dist
+            )
+        elif var == "vs30_site_int":
+            input_tensor[:, i] = features.scale_site_feature(soi_vs30, "vs30")
+        elif var == "vs30_diff":
+            input_tensor[:, i] = features.scale_vs30_diff(vs30_diff)
+        elif var == "angular_dist":
+            input_tensor[:, i] = features.scale_angular_distance(
+                np.deg2rad(angular_distance)
+            )
+        elif var == "ln_vs30_diff":
+            input_tensor[:, i] = ln_vs30_diff
+
+        else:
+            raise ValueError(f"Unexpected variable {var} in edge features")
+        
+    with torch.no_grad():
+        att_model.eval()
+        raw_att_coeff = att_model(input_tensor).numpy(force=True)
+
+    return raw_att_coeff, variable_input.numpy(force=True)
+
+

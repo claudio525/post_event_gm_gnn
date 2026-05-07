@@ -332,6 +332,12 @@ def _run_mp_helper(
     cur_train_int_sites = np.unique(
         np.concatenate([site_folds[i] for _, i in train_folds_ind])
     )
+    assert (
+        np.isin(cur_val_events, cur_train_events).sum() == 0
+    ), "Event folds are not mutually exclusive!"
+    assert (
+        np.isin(cur_val_int_sites, cur_train_int_sites).sum() == 0
+    ), "Site folds are not mutually exclusive!"
 
     obs_sites = np.setdiff1d(all_sites, cur_val_int_sites)
 

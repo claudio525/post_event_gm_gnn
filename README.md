@@ -39,7 +39,7 @@ Most data loading/saving is done relative to the `wdata` environment variable.
 
 ### Download Data
 
-Download the data file from [TODO] and unzip it.
+Download the data file from [here](https://doi.org/10.26021/canterburynz.30854846) and unzip it.
 
 This will create the following directory structure:
 
@@ -54,10 +54,11 @@ base_data_dir/
     ├── results/
     │   ├── gnn/
     │   │   └── final/
-    │   │       ├── 0725_0929_cv_v4p3FNZGMDB_v2p9_6e8s/
-    │   │       ├── 0725_1117_cv_v4p3FNZGMDB_v2p10_6e8s/
-    │   │       ├── 0728_4p3FNZGMDB_v2p10_full/
-    │   │       └── 0729_v4p3FNZGMDB_v2p10Ignore_CCCC_SHLC_full/
+    │   │       ├── 0416_1137_cv_final_v4p3FNZGMDB_v2p13_base/
+    │   │       ├── 0416_1606_cv_final_v4p3FNZGMDB_v2p14_res/
+    │   │       ├── 0416_final_4p3FNZGMDB_v2p13_base_full/
+    │   │       └── 0416_final_4p3FNZGMDB_v2p14_res_full/
+    |   |       └── 0416_final_4p3FNZGMDB_v2p14_res_ignore_CCCC_SHLC_full/
     │   └── cIM/
     │       └── 0728_3468575_canterbury_extended_500m_nzgmdbV4p3Final/
     │           └── cim_results_noAllowSelf.parquet
@@ -94,10 +95,11 @@ The `post_event_gm_gnn/results` folder contains:
 
 There are 4 model result folders:
 
-1. **`0725_0929_cv_v4p3FNZGMDB_v2p9_6e8s`** - Cross-validation results for the GNN-only model
-2. **`0725_1117_cv_v4p3FNZGMDB_v2p10_6e8s`** - Cross-validation results for the GNN-residual model
-3. **`0728_4p3FNZGMDB_v2p10_full`** - Fully trained model and predictions for the 22 February 2011 Magnitude 6.2 Christchurch earthquake
-4. **`0729_v4p3FNZGMDB_v2p10Ignore_CCCC_SHLC_full`** - Fully trained model (CCCC and SHLC sites ignored) and predictions for the 22 February 2011 Magnitude 6.2 Christchurch earthquake
+1. **`0416_1137_cv_final_v4p3FNZGMDB_v2p13_base`** - Cross-validation results for the GNN-only model
+2. **`0416_1606_cv_final_v4p3FNZGMDB_v2p14_res`** - Cross-validation results for the GNN-residual model
+3. **`0416_final_4p3FNZGMDB_v2p13_base_full`** - Fully trained GNN-only model
+4. **`0416_final_4p3FNZGMDB_v2p14_res_full`** - Fully trained GNN-residual model and predictions for the 22 February 2011 Magnitude 6.2 Christchurch earthquake
+4. **`0416_final_4p3FNZGMDB_v2p14_res_ignore_CCCC_SHLC_full`** - Fully trained model (CCCC and SHLC sites ignored) and predictions for the 22 February 2011 Magnitude 6.2 Christchurch earthquake
 
 #### Shared File Types
 
@@ -109,11 +111,16 @@ There are 4 model result folders:
 
 All model result folders contain:
 
-- **`model.pt`** - Trained GNN model
 - **`run_config.yaml`** - Run configuration used to train the model
-- **`obs_sites.npy`** - Observation sites used
-- **`train_int_sites.npy`** - Training location of interest sites
-- **`train_results.parquet`** - Training scenario results with columns:
+- **`metadata.yaml`** - Metadata
+- **`agg_metrics.pickle`** - Aggregate metrics for the model run
+
+#### Cross-Validation Model Directories
+
+CV model result directories additionally contain:
+
+- **`metrics.pickle`** - 3D LabelledDataArray with metric values per epoch and CV-fold
+- **`val_results.parquet`** - Combined validation results across all CV-folds 
   - `event_id` - Event ID
   - `site_int` - Location of interest ID
   - `obs_sites` - Observation sites
@@ -123,18 +130,14 @@ All model result folders contain:
   - `pSA_X.XX_pred_std` - Predicted IM standard deviation
   - `n_obs_sites` - Number of observation sites
   - `closest_dist` - Distance to the closest observation site
-- **`metadata.yaml`** - Metadata
-- **`agg_metrics.pickle`** - Aggregate metrics for the model run
-
-#### Cross-Validation Model Directories
-
-CV model result directories additionally contain:
-
-- **`metrics.pickle`** - 3D LabelledDataArray with metric values per epoch and CV-fold
-- **`val_results.parquet`** - Combined validation results across all CV-folds (same columns as `train_results.parquet` plus `cv_iter` indicating the CV-fold)
+  - `cv_iter` - CV-fold index
 - **`cv_XX/`** - Folder for each CV-fold containing:
+  - `model.pt` - Trained GNN model
   - `val_results.parquet` - Validation results for that fold
   - `cim_results/val_results.parquet` - GM estimates from the multivariate normal conditional IM method for that fold
+  - `obs_sites.npy` - Observation sites used
+  - `train_int_sites.npy` - Training location of interest sites
+  - `train_results.parquet` - Training scenario results (same columns as `val_results.parquet` minus `cv_iter`)
 - **`cim_results/val_results.parquet`** - Combined GM estimates from the multivariate normal conditional IM method across all CV-folds
 
 #### Full Model Directories
@@ -143,6 +146,9 @@ Full model result directories additionally contain:
 
 - **`metrics.parquet`** - DataFrame with metrics (columns) for each epoch (rows)
 - **`3468575/predictions_noAllowSelf.parquet`** - GNN predictions for the 22 February 2011 Magnitude 6.2 Christchurch earthquake
+- **`train_int_sites.npy`** - Training location of interest sites
+- **`train_results.parquet`** - Training scenario results (same columns as `val_results.parquet` minus `cv_iter`)
+
 
 ### Multivariate Normal Conditional IM Method Results
 

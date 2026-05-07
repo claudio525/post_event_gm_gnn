@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import shap
 import numpy as np
 import pandas as pd
 import torch
@@ -11,6 +12,7 @@ from qcore import src_site_dist
 from tqdm import tqdm
 
 import post_event_gm_gnn as pg
+import ml_tools as mlt
 
 device = "cpu"
 if torch.cuda.is_available():
@@ -83,9 +85,7 @@ def predict_event_3468575(
     # Prediction site data
     if non_uniform_site_dir is not None:
         region = pg.constants.CANTERBURY_REGION
-        pred_site_df = pg.data.load_non_uniform_grid(
-            non_uniform_site_dir
-        )
+        pred_site_df = pg.data.load_non_uniform_grid(non_uniform_site_dir)
         region_mask = (
             (pred_site_df["lon"] >= region[0])
             & (pred_site_df["lon"] <= region[1])
@@ -164,7 +164,6 @@ def predict_event_3468575(
 
         result_df = pd.concat(result_df, axis=0)
 
-
     result_df.to_parquet(out_ffp)
 
 
@@ -177,6 +176,66 @@ def copy_cim_cv_results(
     Copies cIM CV results from source to destination directory
     """
     pg.ml.data.copy_cim_cv_results(src_dir, dest_dir)
+
+
+@app.command("get-att-SHAP-values")
+def get_att_SHAP_values(model_dir: Path):
+    """
+    Gets attention SHAP values for a given model
+    """
+    run_config = pg.ml.RunConfig.from_yaml(model_dir / "run_config.yaml")
+    input_vars = run_config.graph_feature_keys["edge"]
+    assert input_vars == ["dist", "angular_dist", "ln_vs30_diff"]
+
+    att_models = [
+        cur_conv.convs[("site_obs", "informs", "site_int")].att_model
+        for cur_conv in torch.load(model_dir / "model.pt", map_location=device).convs
+    ]
+    # Only care about the first attention model,
+    # as that is the only one that uses user-features.
+    att_model = att_models[0]
+
+    site_df = pg.data.load_obs_nzgmdb(run_config.obs_data_ffp).site_df
+
+    dist_matrix = pg.utils.calculate_distance_matrix(site_df.index.values, site_df)
+
+    # Identify valid site-pairs
+    mask = ~np.diag(np.ones(dist_matrix.shape[0], dtype=bool)) & (
+        dist_matrix.values <= run_config.max_dist
+    )
+    site_pairs_df = dist_matrix.where(mask).stack().reset_index()
+    site_pairs_df.columns = ["site_int", "obs_site", "dist"]
+
+    # Add ln_vs30_diff feature
+    site_pairs_df["ln_vs30_diff"] = np.log(
+        site_df.loc[site_pairs_df.site_int, "vs30"].values
+    ) - np.log(site_df.loc[site_pairs_df.obs_site, "vs30"].values)
+
+    # Scale distance feature
+    site_pairs_df["dist"] = pg.ml.features.scale_site_to_site_distances(
+        site_pairs_df["dist"].values, run_config.max_dist
+    )
+
+    # Select random angular distance values
+    site_pairs_df["angular_dist"] = np.random.uniform(
+        0, np.pi, size=site_pairs_df.shape[0]
+    )
+    site_pairs_df["angular_dist"] = pg.ml.features.scale_angular_distance(
+        site_pairs_df["angular_dist"].values
+    )
+    input_df = site_pairs_df[input_vars]
+
+    def _pred_fn(x: np.ndarray):
+        x = torch.tensor(x, dtype=torch.float32, device=device)
+        with torch.no_grad():
+            return att_model(x).cpu().numpy()
+
+    # Compute SHAP values for each attention model
+    explainer = shap.KernelExplainer(_pred_fn, input_df)
+    explainer_values = explainer(input_df)
+    mlt.utils.write_pickle(
+        explainer_values, model_dir / "att_shap_explainer_values.pkl", clobber=True
+    )
 
 
 if __name__ == "__main__":

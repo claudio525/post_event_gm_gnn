@@ -82,6 +82,35 @@ def get_scalar_features(
     return scalar_features
 
 
+def scale_site_to_site_distances(
+    dist_values: float | np.ndarray | pd.DataFrame, max_dist: float
+):
+    """
+    Scales the site-to-site distances to be between -1 and 1
+    based on the allowed maximum distance.
+    """
+    scaled_dist_values = (dist_values / max_dist) * 2 - 1
+    return scaled_dist_values
+
+
+def scale_vs30_diff(vs30_diff_values: float | np.ndarray | pd.DataFrame):
+    """
+    Scales the vs30_diff values to be between -1 and 1
+    based on the pre-defined min and max values.
+    """
+    vs30_diff_min, vs30_diff_max = constants.PRE_PROCESS_CONFIG["vs30_diff"]
+    scaled_vs30_diff_values = (
+        2 * (vs30_diff_values - vs30_diff_min) / (vs30_diff_max - vs30_diff_min)
+    ) - 1
+    return scaled_vs30_diff_values
+
+
+def reverse_minmax_scale(
+    scaled_values: float | np.ndarray, original_min: float, original_max: float
+):
+    return (scaled_values + 1) * (original_max - original_min) / 2 + original_min
+
+
 def _compute_site_to_site_features(
     site_df: pd.DataFrame,
     dist_matrix: pd.DataFrame,
@@ -95,9 +124,9 @@ def _compute_site_to_site_features(
     # such that they are between -1 and 1
     # as per the maximum allowed site-to-site
     # distance when computing the site combinations
-    site_to_site_features["dist"] = (
-        (dist_matrix.astype(np.float32).copy() / max_dist) * 2
-    ) - 1
+    site_to_site_features["dist"] = scale_site_to_site_distances(
+        dist_matrix.astype(np.float32).copy(), max_dist
+    )
 
     vs30_values = site_df.vs30.values.astype(np.float32)
     vs30_diff = pd.DataFrame(
@@ -105,10 +134,14 @@ def _compute_site_to_site_features(
         index=site_df.index,
         columns=site_df.index,
     )
-    vs30_diff_min, vs30_diff_max = constants.PRE_PROCESS_CONFIG["vs30_diff"]
-    site_to_site_features["vs30_diff"] = (
-        2 * (vs30_diff - vs30_diff_min) / (vs30_diff_max - vs30_diff_min)
-    ) - 1
+    site_to_site_features["vs30_diff"] = scale_vs30_diff(vs30_diff)
+
+    ln_vs30_values = np.log(vs30_values)
+    site_to_site_features["ln_vs30_diff"] = pd.DataFrame(
+        data=ln_vs30_values[:, None] - ln_vs30_values[None, :],
+        index=site_df.index,
+        columns=site_df.index,
+    )
 
     z1p0_values = site_df.z1p0.values.astype(np.float32)
     z1p0_diff = pd.DataFrame(
@@ -153,6 +186,20 @@ def _compute_site_to_site_features(
     return site_to_site_features
 
 
+def scale_site_feature(
+    site_feature_values: float | np.ndarray | pd.DataFrame, feature_key: str
+):
+    """
+    Scales the site feature values to be between -1 and 1
+    based on the pre-defined min and max values for the given feature key.
+    """
+    cur_min, cur_max = constants.PRE_PROCESS_CONFIG[feature_key]
+    scaled_site_feature_values = (
+        2 * (site_feature_values - cur_min) / (cur_max - cur_min) - 1
+    )
+    return scaled_site_feature_values
+
+
 def _pre_process_site_features(
     site_df: pd.DataFrame, site_feature_keys: Sequence[str], verbose: bool = True
 ):
@@ -166,8 +213,7 @@ def _pre_process_site_features(
 
     site_df = site_df.loc[:, avail_site_features_keys]
     for cur_key in avail_site_features_keys:
-        cur_min, cur_max = constants.PRE_PROCESS_CONFIG[cur_key]
-        site_df[cur_key] = 2 * (site_df[cur_key] - cur_min) / (cur_max - cur_min) - 1
+        site_df[cur_key] = scale_site_feature(site_df[cur_key], cur_key)
 
     return site_df
 
@@ -247,6 +293,14 @@ def _pre_process_event_site_features(
     return record_df
 
 
+def scale_angular_distance(angular_distance_values: float | np.ndarray | pd.DataFrame):
+    """
+    Scales the angular distance values to be between -1 and 1
+    based on the fact that the angular distance is between 0 and pi.
+    """
+    return (angular_distance_values / np.pi) * 2 - 1
+
+
 def compute_angular_distance(
     station_df: pd.DataFrame,
     event_df: pd.DataFrame,
@@ -281,10 +335,8 @@ def compute_angular_distance(
                     source_to_site_vecs, source_to_site_vecs, "i k, j k -> i j"
                 )
                 / (
-                    (
-                        np.linalg.norm(source_to_site_vecs, axis=1)[:, None]
-                        * np.linalg.norm(source_to_site_vecs, axis=1)[None, :]
-                    )
+                    np.linalg.norm(source_to_site_vecs, axis=1)[:, None]
+                    * np.linalg.norm(source_to_site_vecs, axis=1)[None, :]
                 ),
                 -1.0,
                 1.0,
@@ -293,10 +345,52 @@ def compute_angular_distance(
 
         # Scale such that -1 => 0 and 1 => pi
         if pre_process:
-            cur_site_to_site_angle = (cur_site_to_site_angle / np.pi) * 2 - 1
+            cur_site_to_site_angle = scale_angular_distance(cur_site_to_site_angle)
 
         event_angular_distances[cur_event] = pd.DataFrame(
             data=cur_site_to_site_angle, index=cur_sites, columns=cur_sites
         )
 
     return event_angular_distances
+
+
+def get_reverse_scale_func(var: str, run_config: gnn_gm.RunConfig):
+    """
+    Returns a function that can be used to 
+    reverse the scaling of the given variable.
+    Useful for plotting.
+    """
+    if var == "dist":
+
+        def scale_func(x, pos):
+            return np.round(reverse_minmax_scale(x, 0.0, run_config.max_dist), 1)
+
+    elif var == "vs30_site_int":
+
+        def scale_func(x, pos):
+            return reverse_minmax_scale(
+                x,
+                constants.PRE_PROCESS_CONFIG["vs30"][0],
+                constants.PRE_PROCESS_CONFIG["vs30"][1],
+            )
+
+    elif var == "angular_dist":
+
+        def scale_func(x, pos):
+            return np.round(reverse_minmax_scale(x, 0.0, 180.0), 1)
+
+    elif var == "ln_vs30_diff":
+
+        def scale_func(x, pos):
+            return np.round(x, 1)
+
+    else:
+
+        def scale_func(x, pos):
+            return reverse_minmax_scale(
+                x,
+                constants.PRE_PROCESS_CONFIG[var][0],
+                constants.PRE_PROCESS_CONFIG[var][1],
+            )
+        
+    return scale_func    
