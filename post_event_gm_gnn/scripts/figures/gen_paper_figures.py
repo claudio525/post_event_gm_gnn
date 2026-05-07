@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 import numpy as np
+import xarray as xr
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.ticker import FuncFormatter
@@ -362,14 +363,14 @@ def bias_res_std(
         marg_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="grey",
         linewidth=pg.constants.FIG_LINEWIDTH,
-        label="MVN-Marginal",
+        label="Unconditional",
     )
     ax1.plot(
         pg.constants.PERIODS,
         cim_res_bias_std_df.loc[pg.constants.PSA_KEYS, "mean"],
         color="green",
         linewidth=pg.constants.FIG_LINEWIDTH,
-        label="MVN-CIM",
+        label="Conditional",
     )
     ax1.plot(
         pg.constants.PERIODS,
@@ -594,7 +595,7 @@ def mag_bias_res_std(
         color="black",
         linestyle="--",
         linewidth=pg.constants.FIG_LINEWIDTH,
-        label="MVN-CIM",
+        label="Conditional",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_mag_groups):
         ax1.semilogx(
@@ -649,7 +650,8 @@ def mag_bias_res_std(
             transform=ax1.transAxes,
             va="center",
             ha="left",
-            fontsize=14,
+            fontsize=12,
+            fontweight="bold",
         )
 
     if gnn_run_config.non_pSA_ims is not None:
@@ -690,7 +692,7 @@ def mag_bias_res_std(
         color="black",
         linestyle="--",
         linewidth=pg.constants.FIG_LINEWIDTH,
-        label="MVN-CIM",
+        label="Conditional",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_mag_groups):
         ax3.semilogx(
@@ -729,7 +731,8 @@ def mag_bias_res_std(
             transform=ax3.transAxes,
             va="center",
             ha="left",
-            fontsize=14,
+            fontsize=12,
+            fontweight="bold",
         )
 
     if gnn_run_config.non_pSA_ims is not None:
@@ -900,7 +903,7 @@ def rrup_bias_res_std(
         color="black",
         linestyle="--",
         linewidth=pg.constants.FIG_LINEWIDTH,
-        label="MVN-CIM",
+        label="Conditional",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
         ax1.semilogx(
@@ -955,7 +958,8 @@ def rrup_bias_res_std(
             transform=ax1.transAxes,
             va="center",
             ha="left",
-            fontsize=14,
+            fontsize=12,
+            fontweight="bold",
         )
 
     if gnn_run_config.non_pSA_ims is not None:
@@ -996,7 +1000,7 @@ def rrup_bias_res_std(
         color="black",
         linestyle="--",
         linewidth=pg.constants.FIG_LINEWIDTH,
-        label="MVN-CIM",
+        label="Conditional",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_rrup_groups):
         ax3.semilogx(
@@ -1034,7 +1038,8 @@ def rrup_bias_res_std(
             transform=ax3.transAxes,
             va="center",
             ha="left",
-            fontsize=14,
+            fontsize=12,
+            fontweight="bold",
         )
 
     if gnn_run_config.non_pSA_ims is not None:
@@ -1211,7 +1216,7 @@ def doc_bias_res_std(
         color="black",
         linestyle="--",
         linewidth=pg.constants.FIG_LINEWIDTH,
-        label="MVN-CIM",
+        label="Conditional",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
         ax1.semilogx(
@@ -1256,7 +1261,8 @@ def doc_bias_res_std(
             transform=ax1.transAxes,
             va="center",
             ha="left",
-            fontsize=14,
+            fontsize=12,
+            fontweight="bold",
         )
 
     if gnn_run_config.non_pSA_ims is not None:
@@ -1297,7 +1303,7 @@ def doc_bias_res_std(
         color="black",
         linestyle="--",
         linewidth=pg.constants.FIG_LINEWIDTH,
-        label="MVN-CIM",
+        label="Conditional",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_res_doc_groups):
         ax3.semilogx(
@@ -1335,7 +1341,8 @@ def doc_bias_res_std(
             transform=ax3.transAxes,
             va="center",
             ha="left",
-            fontsize=14,
+            fontsize=12,
+            fontweight="bold",
         )
 
     if gnn_run_config.non_pSA_ims is not None:
@@ -1598,14 +1605,14 @@ def spatial_corr_trends(
         ax1.plot(
             pg.constants.PERIODS,
             cim_corr_res_bias[pg.constants.PSA_KEYS],
-            label="MVN-CIM",
+            label="Conditional",
             c="green",
             linewidth=pg.constants.FIG_LINEWIDTH,
         )
         ax2.plot(
             pg.constants.PERIODS,
             cim_corr_res_std[pg.constants.PSA_KEYS],
-            label="MVN-CIM",
+            label="Conditional",
             c="green",
             linewidth=pg.constants.FIG_LINEWIDTH,
         )
@@ -1695,7 +1702,7 @@ def spatial_corr_trends(
         ax1.plot(
             pg.constants.PERIODS,
             cim_corr_res_bias[pg.constants.PSA_KEYS],
-            label="MVN-CIM",
+            label="Conditional",
             c="black",
             linestyle="--",
             linewidth=pg.constants.FIG_LINEWIDTH,
@@ -1772,7 +1779,7 @@ def spatial_corr_trends(
         c="black",
         linestyle="--",
         linewidth=pg.constants.FIG_LINEWIDTH,
-        label="MVN-CIM",
+        label="Conditional",
     )
     for i, (cur_key, cur_group) in enumerate(gnn_only_corr_residual_groups):
         ax2.semilogx(
@@ -1830,7 +1837,7 @@ def spatial_corr_trends(
         ax1.plot(
             pg.constants.PERIODS,
             cim_corr_res_bias[pg.constants.PSA_KEYS],
-            label="MVN-CIM",
+            label="Conditional",
             c="black",
             linestyle="--",
             linewidth=pg.constants.FIG_LINEWIDTH,
@@ -1903,7 +1910,7 @@ def spatial_corr_trends(
     ax2.plot(
         pg.constants.PERIODS,
         cim_corr_res_std[pg.constants.PSA_KEYS],
-        label="MVN-CIM",
+        label="Conditional",
         c="black",
         linestyle="--",
         linewidth=pg.constants.FIG_LINEWIDTH,
@@ -2011,7 +2018,7 @@ def spatial_corr_trends(
         ax1.plot(
             pg.constants.PERIODS,
             cim_corr_res_bias[pg.constants.PSA_KEYS],
-            label="MVN-CIM",
+            label="Conditional",
             c="black",
             linestyle="--",
             linewidth=pg.constants.FIG_LINEWIDTH,
@@ -2084,7 +2091,7 @@ def spatial_corr_trends(
         ax2.plot(
             pg.constants.PERIODS,
             cim_corr_res_std[pg.constants.PSA_KEYS],
-            label="MVN-CIM",
+            label="Conditional",
             c="black",
             linestyle="--",
             linewidth=pg.constants.FIG_LINEWIDTH,
@@ -2144,7 +2151,7 @@ def spatial_corr_trends(
         ax1.plot(
             pg.constants.PERIODS,
             cim_corr_res_bias[pg.constants.PSA_KEYS],
-            label="MVN-CIM",
+            label="Conditional",
             c="black",
             linestyle="--",
             linewidth=pg.constants.FIG_LINEWIDTH,
@@ -2217,7 +2224,7 @@ def spatial_corr_trends(
         ax2.plot(
             pg.constants.PERIODS,
             cim_corr_res_std[pg.constants.PSA_KEYS],
-            label="MVN-CIM",
+            label="Conditional",
             c="black",
             linestyle="--",
             linewidth=pg.constants.FIG_LINEWIDTH,
@@ -2336,7 +2343,7 @@ def ind_scenario_pSA(
         (emp_line,) = ax.plot(
             pg.constants.PERIODS,
             emp_gm_params.loc[cur_id, pg.constants.GMM_PRED_PSA_KEYS],
-            label="Empirical GM",
+            label="Unconditional",
             c="gray",
             linewidth=pg.constants.FIG_LINEWIDTH,
         )
@@ -2345,7 +2352,7 @@ def ind_scenario_pSA(
         (cim_line,) = ax.plot(
             pg.constants.PERIODS,
             cim_results.loc[cur_id, pg.constants.CIM_PRED_PSA_KEYS],
-            label="MVN-CIM",
+            label="Conditional",
             c="green",
             linewidth=pg.constants.FIG_LINEWIDTH,
         )
@@ -2499,7 +2506,7 @@ def ind_scenario_pSA(
 
 @app.command("hyper-var")
 def hyper_var(
-    results_dir: Path,
+    result_dirs: list[Path],
     ref_model_dir: Path,
     output_dir: Path,
     bias_limit: float = 1.0,
@@ -2517,7 +2524,7 @@ def hyper_var(
             }
         )
 
-    result_dirs = [cur_dir for cur_dir in results_dir.iterdir() if cur_dir.is_dir()]
+    # result_dirs = [cur_dir for cur_dir in results_dir.iterdir() if cur_dir.is_dir()]
 
     ref_metrics = pd.read_pickle(ref_model_dir / "metrics.pickle")
     ref_val_loss = ref_metrics.sel[:, :, "w_loss_hist_val"].median(axis=1)
@@ -2628,22 +2635,33 @@ def hyper_var(
     plt.close(fig)
 
 
-@app.command("attention-coefficients")
-def attention_coefficients(
-    x_var: str,
+@app.command("attention-coefficients-combined")
+def attention_coefficients_combined(
     gnn_only_model_dir: Path,
     gnn_res_model_dir: Path,
     output_dir: Path,
-    y_max: float,
-    site_dist: list[float] = None,
-    angular_dist: list[float] = None,
-    ln_vs30_diff: list[float] = None,
     n_xtick_bins: int = 5,
 ):
     """
     Plot attention coefficients from GNN-Only and GNN-Residual models as a function
-    of a specified variable (site-to-site distance, angular distance, or ln(Vs30) difference).
+    of site-to-site distance, angular distance, and ln(Vs30) difference.
     """
+    # Config
+    var_config = {
+        "dist": {
+            "angular_dist": 0.0,
+            "ln_vs30_diff": 0.0,
+        },
+        "angular_dist": {
+            "dist": 1.0,
+            "ln_vs30_diff": 0.0,
+        },
+        "ln_vs30_diff": {
+            "dist": 1.0,
+            "angular_dist": 0.0,
+        },
+    }
+
     for cur_env_key in os.environ.keys():
         if cur_env_key.startswith("fig_"):
             print("Using figure parameter:", cur_env_key, "=", os.environ[cur_env_key])
@@ -2656,8 +2674,8 @@ def attention_coefficients(
             }
         )
 
+    # Load the models
     run_config = pg.ml.RunConfig.from_yaml(gnn_only_model_dir / "run_config.yaml")
-
     only_att_models = [
         cur_conv.convs[("site_obs", "informs", "site_int")].att_model
         for cur_conv in torch.load(
@@ -2671,141 +2689,290 @@ def attention_coefficients(
         ).convs
     ]
 
-    n_variations = max(
-        len(site_dist) if site_dist is not None else 0,
-        len(angular_dist) if angular_dist is not None else 0,
-        len(ln_vs30_diff) if ln_vs30_diff is not None else 0,
+    ### Get the attention coefficients
+    # Site-to-site distance
+    only_raw_att_coeff, dist_inputs = pg.ml.get_variable_att_model_predictions(
+        run_config,
+        only_att_models[0],
+        device,
+        "dist",
+        angular_distance=var_config["dist"]["angular_dist"],
+        ln_vs30_diff=var_config["dist"]["ln_vs30_diff"],
+    )
+    only_exp_att_coeffs_1 = np.exp(only_raw_att_coeff)
+    res_raw_att_coeff, _ = pg.ml.get_variable_att_model_predictions(
+        run_config,
+        res_att_models[0],
+        device,
+        "dist",
+        angular_distance=var_config["dist"]["angular_dist"],
+        ln_vs30_diff=var_config["dist"]["ln_vs30_diff"],
+    )
+    res_exp_att_coeffs_1 = np.exp(res_raw_att_coeff)
+    dist_da = xr.DataArray(
+        [only_exp_att_coeffs_1, res_exp_att_coeffs_1],
+        dims=["model", "dist", "att_head"],
+        coords={
+            "model": ["only", "res"],
+            "dist": dist_inputs,
+            "att_head": np.arange(only_exp_att_coeffs_1.shape[1]),
+        },
     )
 
-    # Generate results
-    variable_inputs = []
-    only_exp_att_coeffs, res_exp_att_coeffs = [], []
-
-    for i in range(n_variations):
-        only_raw_att_coeff, variable_input = pg.ml.get_variable_att_model_predictions(
-            run_config,
-            only_att_models[0],
-            device,
-            x_var,
-            site_dist=site_dist[i] if site_dist is not None else None,
-            angular_distance=angular_dist[i] if angular_dist is not None else None,
-            ln_vs30_diff=ln_vs30_diff[i] if ln_vs30_diff is not None else None,
-        )
-        only_exp_att_coeff = np.exp(only_raw_att_coeff)
-        variable_inputs.append(variable_input)
-        only_exp_att_coeffs.append(only_exp_att_coeff)
-
-        res_raw_att_coeff, _ = pg.ml.get_variable_att_model_predictions(
-            run_config,
-            res_att_models[0],
-            device,
-            x_var,
-            site_dist=site_dist[i] if site_dist is not None else None,
-            angular_distance=angular_dist[i] if angular_dist is not None else None,
-            ln_vs30_diff=ln_vs30_diff[i] if ln_vs30_diff is not None else None,
-        )
-        res_exp_att_coeff = np.exp(res_raw_att_coeff)
-        res_exp_att_coeffs.append(res_exp_att_coeff)
-
-    # Normalise
-    res_exp_att_coeffs = np.array(res_exp_att_coeffs)
-    res_exp_att_coeffs = res_exp_att_coeffs / res_exp_att_coeffs.max()
-    only_exp_att_coeffs = np.array(only_exp_att_coeffs)
-    only_exp_att_coeffs = only_exp_att_coeffs / only_exp_att_coeffs.max()
-
-    scale_func = pg.ml.features.get_reverse_scale_func(x_var, run_config)
-    fig, axs = mlt.plotting.get_fig_axes(
-        n_variations, 2, -1, ind_figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI
+    # Angular distance
+    only_raw_att_coeff, angular_inputs = pg.ml.get_variable_att_model_predictions(
+        run_config,
+        only_att_models[0],
+        device,
+        "angular_dist",
+        site_dist=var_config["angular_dist"]["dist"],
+        ln_vs30_diff=var_config["angular_dist"]["ln_vs30_diff"],
+        limits=(-1, -0.5)
+    )
+    only_exp_att_coeffs_1 = np.exp(only_raw_att_coeff)
+    res_raw_att_coeff, _ = pg.ml.get_variable_att_model_predictions(
+        run_config,
+        res_att_models[0],
+        device,
+        "angular_dist",
+        site_dist=var_config["angular_dist"]["dist"],
+        ln_vs30_diff=var_config["angular_dist"]["ln_vs30_diff"],
+        limits=(-1, -0.5)
+    )
+    res_exp_att_coeffs_1 = np.exp(res_raw_att_coeff)
+    angular_da = xr.DataArray(
+        [only_exp_att_coeffs_1, res_exp_att_coeffs_1],
+        dims=["model", "angular_dist", "att_head"],
+        coords={
+            "model": ["only", "res"],
+            "angular_dist": angular_inputs,
+            "att_head": np.arange(only_exp_att_coeffs_1.shape[1]),
+        },
     )
 
-    for i in range(n_variations):
-        axs[i].plot(
-            variable_input,
-            only_exp_att_coeffs[i],
-            color="blue",
-            label=[
-                "GNN-Only" if i == 0 else None for i in range(run_config.n_att_heads[0])
-            ],
-        )
-        axs[i].plot(
-            variable_input,
-            res_exp_att_coeffs[i],
-            color="purple",
-            label=[
-                "GNN-Residual" if i == 0 else None
-                for i in range(run_config.n_att_heads[0])
-            ],
-        )
+    # ln(Vs30) difference
+    only_raw_att_coeff, ln_vs30_diff_inputs = pg.ml.get_variable_att_model_predictions(
+        run_config,
+        only_att_models[0],
+        device,
+        "ln_vs30_diff",
+        site_dist=var_config["ln_vs30_diff"]["dist"],
+        angular_distance=var_config["ln_vs30_diff"]["angular_dist"],
+    )
+    only_exp_att_coeffs_1 = np.exp(only_raw_att_coeff)
+    res_raw_att_coeff, _ = pg.ml.get_variable_att_model_predictions(
+        run_config,
+        res_att_models[0],
+        device,
+        "ln_vs30_diff",
+        site_dist=var_config["ln_vs30_diff"]["dist"],
+        angular_distance=var_config["ln_vs30_diff"]["angular_dist"],
+    )
+    res_exp_att_coeffs_1 = np.exp(res_raw_att_coeff)
+    ln_vs30_diff_da = xr.DataArray(
+        [only_exp_att_coeffs_1, res_exp_att_coeffs_1],
+        dims=["model", "ln_vs30_diff", "att_head"],
+        coords={
+            "model": ["only", "res"],
+            "ln_vs30_diff": ln_vs30_diff_inputs,
+            "att_head": np.arange(only_exp_att_coeffs_1.shape[1]),
+        },
+    )
 
-        axs[i].set_xlim([-1, 1])
-        axs[i].grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    # Compute maximum per attention head
+    only_max = np.max(
+        [
+            dist_da.sel(model="only").max(dim=("dist")).values,
+            angular_da.sel(model="only").max(dim=("angular_dist")).values,
+            ln_vs30_diff_da.sel(model="only").max(dim=("ln_vs30_diff")).values,
+        ],
+        axis=0,
+    )
+    res_max = np.max(
+        [
+            dist_da.sel(model="res").max(dim=("dist")).values,
+            angular_da.sel(model="res").max(dim=("angular_dist")).values,
+            ln_vs30_diff_da.sel(model="res").max(dim=("ln_vs30_diff")).values,
+        ],
+        axis=0,
+    )
+
+    # Normalise by maximum
+    dist_da.loc[dict(model="only")] = dist_da.sel(model="only") / only_max
+    dist_da.loc[dict(model="res")] = dist_da.sel(model="res") / res_max
+    angular_da.loc[dict(model="only")] = angular_da.sel(model="only") / only_max
+    angular_da.loc[dict(model="res")] = angular_da.sel(model="res") / res_max
+    ln_vs30_diff_da.loc[dict(model="only")] = (
+        ln_vs30_diff_da.sel(model="only") / only_max
+    )
+    ln_vs30_diff_da.loc[dict(model="res")] = ln_vs30_diff_da.sel(model="res") / res_max
+
+    def _post_axis(ax, x_var, ax_label):
+        scale_fn = pg.ml.features.get_reverse_scale_func(x_var, run_config)
 
         if x_var == "dist":
-            axs[i].set_xlabel("Site-to-Site Distance (km)")
+            ax.set_xlabel("Site-to-Site Distance (km)")
         elif x_var == "angular_dist":
-            axs[i].set_xlabel("Angular Distance (degrees)")
+            ax.set_xlabel("Angular Distance (degrees)")
         elif x_var == "ln_vs30_diff":
-            axs[i].set_xlabel("ln(Vs30) Difference")
-
-        axs[i].xaxis.set_major_formatter(FuncFormatter(scale_func))
-        axs[i].set_ylabel("Normalised Exp(Attention Coefficient)")
-        axs[i].set_ylim([0, 1.0])
-        axs[i].yaxis.set_major_locator(mticker.MaxNLocator(5))
-        axs[i].yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
-        axs[i].xaxis.set_major_locator(mticker.MaxNLocator(n_xtick_bins))
-        axs[i].xaxis.set_minor_locator(mticker.AutoMinorLocator(2))
-
-        if i == 1:
-            axs[i].legend()
-
-        if i % 2 == 1:
-            axs[i].yaxis.set_ticklabels([])
-            axs[i].set_ylabel("")
-
-        if i < n_variations - 2:
-            axs[i].xaxis.set_ticklabels([])
-            axs[i].set_xlabel("")
+            ax.set_xlabel("ln(Vs30) Difference")
+        ax.set_xlim([-1, 1])
+        ax.xaxis.set_major_formatter(FuncFormatter(scale_fn))
+        ax.set_ylabel("Normalised Exp(Attention Coefficient)")
+        ax.set_ylim([0, 1.0])
+        ax.yaxis.set_major_locator(mticker.MaxNLocator(5))
+        ax.yaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+        ax.xaxis.set_major_locator(mticker.MaxNLocator(n_xtick_bins))
+        ax.xaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        # if var_ix == 1:
+        #     ax.yaxis.set_ticklabels([])
+        #     ax.set_ylabel("")
 
         site_dist_label = (
-            f"Site-to-Site Distance: {site_dist[i]} km\n"
-            if site_dist is not None
+            f"Site-to-Site Distance: {var_config[x_var]['dist']} km\n"
+            if x_var != "dist"
             else ""
         )
         angular_dist_label = (
-            f"Angular Distance: {angular_dist[i]}°\n"
-            if angular_dist is not None
+            f"Angular Distance: {var_config[x_var]['angular_dist']}°\n"
+            if x_var != "angular_dist"
             else ""
         )
         ln_vs30_diff_label = (
-            f"ln(Vs30) Difference: {ln_vs30_diff[i]:.2f}\n"
-            if ln_vs30_diff is not None
+            f"ln(Vs30) Difference: {var_config[x_var]['ln_vs30_diff']:.2f}\n"
+            if x_var != "ln_vs30_diff"
             else ""
         )
-        axs[i].text(
+        ax.text(
             0.975,
             0.975,
             f"{site_dist_label}{angular_dist_label}{ln_vs30_diff_label}",
-            transform=axs[i].transAxes,
+            transform=ax.transAxes,
             horizontalalignment="right",
             verticalalignment="top",
             fontweight="bold",
             zorder=10,
         )
 
-    plt.subplots_adjust(
-        left=0.06, right=0.99, top=0.985, bottom=0.125, wspace=0.03, hspace=0.1
+        ax.text(
+            -0.075,
+            1.0,
+            ax_label,
+            transform=ax.transAxes,
+            va="center",
+            ha="left",
+            fontsize=12,
+            fontweight="bold",
+        )
+
+    fig, axs = mlt.plotting.get_fig_axes(
+        3, 1, -1, ind_figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI
     )
-    # fig.tight_layout()
+
+    # Distance
+    only_dist_mean = dist_da.sel(model="only").mean(dim="att_head")
+    only_dist_std = dist_da.sel(model="only").std(dim="att_head")
+    axs[0].plot(dist_da.dist, only_dist_mean, color="blue", label="GNN-Only", zorder=0)
+    axs[0].fill_between(
+        dist_da.dist,
+        only_dist_mean - only_dist_std,
+        only_dist_mean + only_dist_std,
+        color="blue",
+        alpha=0.2,
+        zorder=0,
+    )
+
+    res_dist_mean = dist_da.sel(model="res").mean(dim="att_head")
+    res_dist_std = dist_da.sel(model="res").std(dim="att_head")
+    axs[0].plot(
+        dist_da.dist, res_dist_mean, color="purple", label="GNN-Residual", zorder=0
+    )
+    axs[0].fill_between(
+        dist_da.dist,
+        res_dist_mean - res_dist_std,
+        res_dist_mean + res_dist_std,
+        color="purple",
+        alpha=0.2,
+        zorder=0,
+    )
+    axs[0].legend()
+    _post_axis(axs[0], "dist", "a)")
+
+    # ln(Vs30) difference
+    only_ln_vs30_diff_mean = ln_vs30_diff_da.sel(model="only").mean(dim="att_head")
+    only_ln_vs30_diff_std = ln_vs30_diff_da.sel(model="only").std(dim="att_head")
+    axs[1].plot(
+        ln_vs30_diff_da.ln_vs30_diff,
+        only_ln_vs30_diff_mean,
+        color="blue",
+        zorder=0,
+    )
+    axs[1].fill_between(
+        ln_vs30_diff_da.ln_vs30_diff,
+        only_ln_vs30_diff_mean - only_ln_vs30_diff_std,
+        only_ln_vs30_diff_mean + only_ln_vs30_diff_std,
+        color="blue",
+        alpha=0.2,
+        zorder=0,
+    )
+
+    res_vs30_diff_mean = ln_vs30_diff_da.sel(model="res").mean(dim="att_head")
+    res_vs30_diff_std = ln_vs30_diff_da.sel(model="res").std(dim="att_head")
+    axs[1].plot(
+        ln_vs30_diff_da.ln_vs30_diff,
+        res_vs30_diff_mean,
+        color="purple",
+        zorder=0,
+    )
+    axs[1].fill_between(
+        ln_vs30_diff_da.ln_vs30_diff,
+        res_vs30_diff_mean - res_vs30_diff_std,
+        res_vs30_diff_mean + res_vs30_diff_std,
+        color="purple",
+        alpha=0.2,
+        zorder=0,
+    )
+    _post_axis(axs[1], "ln_vs30_diff", "b)")
+
+    # Angular distance
+    only_angular_mean = angular_da.sel(model="only").mean(dim="att_head")
+    only_angular_std = angular_da.sel(model="only").std(dim="att_head")
+    axs[2].plot(angular_da.angular_dist, only_angular_mean, color="blue", zorder=0)
+    axs[2].fill_between(
+        angular_da.angular_dist,
+        only_angular_mean - only_angular_std,
+        only_angular_mean + only_angular_std,
+        color="blue",
+        alpha=0.2,
+        zorder=0,
+    )
+
+    res_angular_mean = angular_da.sel(model="res").mean(dim="att_head")
+    res_angular_std = angular_da.sel(model="res").std(dim="att_head")
+    axs[2].plot(angular_da.angular_dist, res_angular_mean, color="purple", zorder=0)
+    axs[2].fill_between(
+        angular_da.angular_dist,
+        res_angular_mean - res_angular_std,
+        res_angular_mean + res_angular_std,
+        color="purple",
+        alpha=0.2,
+        zorder=0,
+    )
+    _post_axis(axs[2], "angular_dist", "c)")
+    axs[2].set_xlim(-1, -0.5)
+
+    plt.subplots_adjust(
+        left=0.075, right=0.985, top=0.985, bottom=0.045, wspace=0.03, hspace=0.175
+    )
     fig.savefig(
-        output_dir / f"attention_coefficients_{x_var}.{pg.constants.FIG_FORMAT}"
+        output_dir / f"attention_coefficients_combined.{pg.constants.FIG_FORMAT}"
     )
     plt.close(fig)
 
 
 @app.command("att-feature-importance-plot")
-def att_feature_importance_plot(
-    model_dir: Path, out_dir: Path, prefix: str | None = None, hide_xlabels: bool = True
-):
+def att_feature_importance_plot(gnn_only_dir: Path, gnn_res_dir: Path, out_dir: Path):
     """
     Generate a bar plot showing the normalized mean absolute
     SHAP values for each feature and attention coefficient.
@@ -2822,43 +2989,59 @@ def att_feature_importance_plot(
             }
         )
 
-    gnn_run_config = pg.ml.RunConfig.from_yaml(model_dir / "run_config.yaml")
+    only_shap_values = pd.read_pickle(gnn_only_dir / "att_shap_explainer_values.pkl")
+    res_shap_values = pd.read_pickle(gnn_res_dir / "att_shap_explainer_values.pkl")
 
-    shap_values = pd.read_pickle(model_dir / "att_shap_explainer_values.pkl")
-    shap_values.feature_names = [
+    only_shap_values = np.abs(only_shap_values.values).mean(axis=0)
+    only_shap_values = (only_shap_values / only_shap_values.sum(axis=0)).mean(axis=1)
+
+    res_shap_values = np.abs(res_shap_values.values).mean(axis=0)
+    res_shap_values = (res_shap_values / res_shap_values.sum(axis=0)).mean(axis=1)
+
+    # Re-order 
+    only_shap_values = only_shap_values[[0, 2, 1]]
+    res_shap_values = res_shap_values[[0, 2, 1]]
+
+    # Plotting
+    feature_names = [
         "Site-to-Site Distance",
-        "Angular Distance",
         "ln(Vs30) Difference",
+        "Angular Distance",
     ]
-
-    att_coeff_values = np.abs(shap_values.values).mean(axis=0)
-    att_coeff_values = (att_coeff_values / att_coeff_values.sum(axis=0)).mean(axis=1)
-
+    x = np.arange(3)
+    width = 0.25
     fig, ax = plt.subplots(figsize=pg.constants.FIG_SIZE, dpi=pg.constants.FIG_DPI)
 
-    ax.bar(
-        shap_values.feature_names[::-1],
-        att_coeff_values[::-1],
-        edgecolor="black",
+    only_rects = ax.bar(
+        x - 0.5 * width,
+        only_shap_values,
+        width,
+        label="GNN-Only",
+        color="blue",
+        edgecolor="k",
+        zorder=10
     )
-    ax.text(
-        0.03,
-        0.97,
-        ("GNN-Residual" if gnn_run_config.use_emp_gm_model else "GNN-Only"),
-        transform=ax.transAxes,
-        fontweight="bold",
-        va="top",
-        ha="left",
+    ax.bar_label(only_rects, padding=3, fmt="{:.2f}")
+    res_rects = ax.bar(
+        x + 0.5 * width,
+        res_shap_values,
+        width,
+        label="GNN-Residual",
+        color="purple",
+        edgecolor="k",
+        zorder=10
     )
-    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.bar_label(res_rects, padding=3, fmt="{:.2f}")
+
+    ax.set_xticks(x, feature_names)
+
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--", zorder=0)
     ax.set_ylabel("Feature Importance")
     ax.set_ylim(0, 1.0)
-    if hide_xlabels:
-        ax.set_xticklabels([])
+    ax.legend()
 
-    prefix = f"{prefix}_" if prefix is not None else ""
     fig.tight_layout()
-    fig.savefig(out_dir / f"{prefix}att_feature_importance.{pg.constants.FIG_FORMAT}")
+    fig.savefig(out_dir / f"att_feature_importance.{pg.constants.FIG_FORMAT}")
     plt.close(fig)
 
 
@@ -2910,11 +3093,21 @@ def normalised_residual_std(
 
     y_min, y_max = 0.7, 1.3
     fig, ax1, ax2 = pg.plot_utils.get_single_pSA_otherIMs_fig(
-        figsize=pg.constants.FIG_SIZE, fig_dpi=pg.constants.FIG_DPI,
-        left=0.06, right=0.99, bottom=0.125, top=0.985,
+        figsize=pg.constants.FIG_SIZE,
+        fig_dpi=pg.constants.FIG_DPI,
+        left=0.06,
+        right=0.99,
+        bottom=0.125,
+        top=0.985,
     )
 
-    ax1.axhline(1.0, c="black", linestyle="--", linewidth=pg.constants.FIG_GROUP_LINEWIDTH, zorder=0)
+    ax1.axhline(
+        1.0,
+        c="black",
+        linestyle="--",
+        linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
+        zorder=0,
+    )
 
     ax1.plot(
         only_run_config.pSA_periods,
@@ -2933,7 +3126,7 @@ def normalised_residual_std(
     ax1.plot(
         only_run_config.pSA_periods,
         cim_norm_res_df[only_run_config.pSA_ims].std(),
-        label="MVN-CIM",
+        label="Conditional",
         linewidth=pg.constants.FIG_LINEWIDTH,
         color="green",
     )
@@ -2941,17 +3134,24 @@ def normalised_residual_std(
     ax1.set_ylim(y_min, y_max)
     ax1.set_ylabel("Normalised Residual Standard Deviation")
 
-    ax2.axhline(1.0, c="black", linestyle="--", linewidth=pg.constants.FIG_GROUP_LINEWIDTH, zorder=0)
+    ax2.axhline(
+        1.0,
+        c="black",
+        linestyle="--",
+        linewidth=pg.constants.FIG_GROUP_LINEWIDTH,
+        zorder=0,
+    )
     ax2.scatter(
         only_run_config.non_pSA_ims,
         gnn_only_norm_res_df[only_run_config.non_pSA_ims].std().values,
-        color="blue"
+        color="blue",
     )
     ax2.xaxis.set_tick_params(rotation=90)
     ax2.set_ylim(y_min, y_max)
 
     fig.savefig(output_dir / f"normalised_residual_std.{pg.constants.FIG_FORMAT}")
     plt.close(fig)
+
 
 if __name__ == "__main__":
     app()

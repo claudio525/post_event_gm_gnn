@@ -403,6 +403,7 @@ def get_variable_att_model_predictions(
     vs30_diff: float | None = None,
     ln_vs30_diff: float | None = None,
     angular_distance: float | None = None,
+    limits: tuple[float, float] = (-1, 1),
 ):
     """
     Get the predictions of the attention model (of the first convolutional layer)
@@ -418,7 +419,7 @@ def get_variable_att_model_predictions(
     if x_var == "ln_vs30_diff":
         variable_input = torch.linspace(-2, 2, 1000)
     else:
-        variable_input = torch.linspace(-1, 1, 1000)
+        variable_input = torch.linspace(limits[0], limits[1], 1000)
 
     for i, var in enumerate(run_config.graph_feature_keys["edge"]):
         if var == x_var:

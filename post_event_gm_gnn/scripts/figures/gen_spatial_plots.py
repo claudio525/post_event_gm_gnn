@@ -350,7 +350,7 @@ def combine_spatial_figures(
 
     im1 = f"pSA({fig_1_ffp.stem.rsplit('_', 1)[-1].replace('p', '.')}s)"
     ax1.imshow(plt.imread(fig_1_ffp), aspect="equal")
-    ax1.text(0.02, 0.98, "MVN-CIM", transform=ax1.transAxes, verticalalignment='top', horizontalalignment='left', fontsize=8)
+    ax1.text(0.02, 0.98, "Conditional", transform=ax1.transAxes, verticalalignment='top', horizontalalignment='left', fontsize=8)
     ax1.text(0.98, 0.98, im1, transform=ax1.transAxes, verticalalignment='top', horizontalalignment='right', fontsize=8)
     ax1.axis("off")
 

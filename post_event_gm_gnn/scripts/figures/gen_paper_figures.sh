@@ -4,10 +4,10 @@
 set -e
 
 # Shared Inputs
-scripts_dir="/Users/claudy/dev/work/code/post_event_gm_gnn/post_event_gm_gnn/scripts/figures"
+scripts_dir="/path/to/post_event_gm_gnn/post_event_gm_gnn/scripts/figures"
 nzgmdb_ffp="${wdata}/gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table_rotd50_flat.csv"
 
-out_dir="/Users/claudy/dev/tmp_share/post_event_gnn/paper_figures_final"
+out_dir=""
 gnn_only="${wdata}/post_event_gm_gnn/results/gnn/0416_1137_cv_final_v4p3FNZGMDB_v2p13_base"
 gnn_only_full="${wdata}/post_event_gm_gnn/results/gnn/0416_final_4p3FNZGMDB_v2p13_base_full"
 gnn_residual="${wdata}/post_event_gm_gnn/results/gnn/0416_1606_cv_final_v4p3FNZGMDB_v2p14_res"
@@ -37,54 +37,48 @@ std_limit=0.75
 corr_bias_limit=1.0
 corr_std_limit=0.75
 
-# ### General Bias & Residual Standard Deviation
-# echo "Generating general bias and residual standard deviation figures..."
-# python ${scripts_dir}/gen_paper_figures.py bias-res-std $gnn_only $gnn_residual $gnn_residual/cim_results $nzgmdb_emp_gm_params $out_dir --bias-limit $general_bias_limit --std-limit $general_std_limit
+### General Bias & Residual Standard Deviation
+echo "Generating general bias and residual standard deviation figures..."
+python ${scripts_dir}/gen_paper_figures.py bias-res-std $gnn_only $gnn_residual $gnn_residual/cim_results $nzgmdb_emp_gm_params $out_dir --bias-limit $general_bias_limit --std-limit $general_std_limit
 
-# ### Magnitude -- GNN Only
-# echo "Generating magnitude bias and residual standard deviation figures for GNN Only..."
-# python ${scripts_dir}/gen_paper_figures.py mag-bias-res-std $gnn_only $gnn_only/cim_results $out_dir --plot-labels "a)," --legend-ax 3 --output-name gnn_only_mag_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
-# ### Magnitude -- GNN Residual
-# echo "Generating magnitude bias and residual standard deviation figures for GNN Residual..."
-# python ${scripts_dir}/gen_paper_figures.py mag-bias-res-std $gnn_residual $gnn_residual/cim_results $out_dir --plot-labels "b)," --legend-ax 3 --output-name gnn_residual_mag_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
+### Magnitude -- GNN Only
+echo "Generating magnitude bias and residual standard deviation figures for GNN Only..."
+python ${scripts_dir}/gen_paper_figures.py mag-bias-res-std $gnn_only $gnn_only/cim_results $out_dir --plot-labels "a),b)" --legend-ax 3 --output-name gnn_only_mag_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
+### Magnitude -- GNN Residual
+echo "Generating magnitude bias and residual standard deviation figures for GNN Residual..."
+python ${scripts_dir}/gen_paper_figures.py mag-bias-res-std $gnn_residual $gnn_residual/cim_results $out_dir --plot-labels "c),d)" --legend-ax 3 --output-name gnn_residual_mag_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
 
-# ### R_Rup -- GNN Only
-# echo "Generating R_Rup bias and residual standard deviation figures for GNN Only..."
-# python ${scripts_dir}/gen_paper_figures.py rrup-bias-res-std $gnn_only $gnn_only/cim_results $out_dir --plot-labels "a)," --legend-ax 3 --output-name gnn_only_rrup_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
-# ### R_Rup -- GNN Residual
-# echo "Generating R_Rup bias and residual standard deviation figures for GNN Residual..."
-# python ${scripts_dir}/gen_paper_figures.py rrup-bias-res-std $gnn_residual $gnn_residual/cim_results $out_dir --plot-labels "b)," --legend-ax 3 --output-name gnn_residual_rrup_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
+### R_Rup -- GNN Only
+echo "Generating R_Rup bias and residual standard deviation figures for GNN Only..."
+python ${scripts_dir}/gen_paper_figures.py rrup-bias-res-std $gnn_only $gnn_only/cim_results $out_dir --plot-labels "a),b)" --legend-ax 3 --output-name gnn_only_rrup_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
+### R_Rup -- GNN Residual
+echo "Generating R_Rup bias and residual standard deviation figures for GNN Residual..."
+python ${scripts_dir}/gen_paper_figures.py rrup-bias-res-std $gnn_residual $gnn_residual/cim_results $out_dir --plot-labels "c),d)" --legend-ax 3 --output-name gnn_residual_rrup_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
 
-# ### DoC -- GNN Only
-# echo "Generating DoC bias and residual standard deviation figures for GNN Only..."
-# python ${scripts_dir}/gen_paper_figures.py doc-bias-res-std $gnn_only $gnn_only/cim_results $out_dir --plot-labels "a)," --legend-ax 3 --output-name gnn_only_doc_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
-# ### DoC -- GNN Residual
-# echo "Generating DoC bias and residual standard deviation figures for GNN Residual..."
-# python ${scripts_dir}/gen_paper_figures.py doc-bias-res-std $gnn_residual $gnn_residual/cim_results $out_dir --plot-labels "b)," --legend-ax 3 --output-name gnn_residual_doc_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
+### DoC -- GNN Only
+echo "Generating DoC bias and residual standard deviation figures for GNN Only..."
+python ${scripts_dir}/gen_paper_figures.py doc-bias-res-std $gnn_only $gnn_only/cim_results $out_dir --plot-labels "a),b)" --legend-ax 3 --output-name gnn_only_doc_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
+### DoC -- GNN Residual
+echo "Generating DoC bias and residual standard deviation figures for GNN Residual..."
+python ${scripts_dir}/gen_paper_figures.py doc-bias-res-std $gnn_residual $gnn_residual/cim_results $out_dir --plot-labels "c),d)" --legend-ax 3 --output-name gnn_residual_doc_bias_residual_std --bias-limit $bias_limit --std-limit $std_limit
 
-# # ## Spatial Correlation
-# echo "Generating spatial correlation trends figures..."
-# python ${scripts_dir}/gen_paper_figures.py spatial-corr-trends $gnn_only $gnn_residual $nzgmdb_emp_gm_params $out_dir --plot-labels "a),b)" --bias-limit $corr_bias_limit --std-limit $corr_std_limit
+# ## Spatial Correlation
+echo "Generating spatial correlation trends figures..."
+python ${scripts_dir}/gen_paper_figures.py spatial-corr-trends $gnn_only $gnn_residual $nzgmdb_emp_gm_params $out_dir --plot-labels "a),b)" --bias-limit $corr_bias_limit --std-limit $corr_std_limit
 
-# ### Attention Weights
-# export fig_size="4, 3"
-# echo "Generating attention weight figures..."
-# # Site-to-site distance
-# python ${scripts_dir}/gen_paper_figures.py attention-coefficients dist $gnn_only_full $gnn_residual_full $out_dir 25 --angular-dist 0 --angular-dist 90 --ln-vs30-diff 0 --ln-vs30-diff 1.0
-# # Angular distance
-# python ${scripts_dir}/gen_paper_figures.py attention-coefficients angular_dist $gnn_only_full $gnn_residual_full $out_dir 25 --site-dist 1 --site-dist 5 --ln-vs30-diff 0 --ln-vs30-diff 1.0
-# # ln(Vs30) difference
-# python ${scripts_dir}/gen_paper_figures.py attention-coefficients ln_vs30_diff $gnn_only_full $gnn_residual_full $out_dir 25 --site-dist 1 --site-dist 5 --angular-dist 0 --angular-dist 90
-# export fig_size=$default_fig_size
+### Combined Attention Coefficients Plot
+export fig_size="8, 3"
+echo "Generating combined attention coefficients figure..."
+python ${scripts_dir}/gen_paper_figures.py attention-coefficients-combined $gnn_only_full $gnn_residual_full $out_dir
+export fig_size=$default_fig_size
 
-# # ### Feature Importance
-# export fig_size="8, 2"
-# python ${scripts_dir}/gen_paper_figures.py att-feature-importance-plot $gnn_only_full $out_dir --prefix gnn_only
-# python ${scripts_dir}/gen_paper_figures.py att-feature-importance-plot $gnn_residual_full $out_dir --prefix gnn_residual
-# export fig_size=$default_fig_size
+### Feature Importance
+export fig_size="8, 2.5"
+python ${scripts_dir}/gen_paper_figures.py att-feature-importance-plot $gnn_only_full $gnn_residual_full $out_dir
+export fig_size=$default_fig_size
 
-# ### Predicteed Standard Deciation
-# python ${scripts_dir}/gen_paper_figures.py normalised-residual-std $gnn_only $gnn_residual $out_dir
+### Predicted Standard Deviation
+python ${scripts_dir}/gen_paper_figures.py normalised-residual-std $gnn_only $gnn_residual $out_dir
 
 ### ------------------- Spatial Figures ------------------------------
 
@@ -101,36 +95,42 @@ export gmt_show_cb_label="false"
 
 ims="pSA_0.1 pSA_1.0 pSA_5.0"
 
-# # GM Maps
-# echo "Generating spatial GM maps..."
-# python ${scripts_dir}/gen_spatial_plots.py "gen-event-prediction-plots" "--region-key" "chch" "${gnn_residual_full}" "${gnn_residual_full_predictions_file}" "${out_dir}" "${grid_emp_gm_params}" "${out_dir}" "${cim_results_file}" "${out_dir}" "${nzgmdb_ffp}" "3468575" ${=ims}
+# GM Maps
+echo "Generating spatial GM maps..."
+python ${scripts_dir}/gen_spatial_plots.py "gen-event-prediction-plots" "--region-key" "chch" "${gnn_residual_full}" "${gnn_residual_full_predictions_file}" "${out_dir}" "${grid_emp_gm_params}" "${out_dir}" "${cim_results_file}" "${out_dir}" "${nzgmdb_ffp}" "3468575" ${=ims}
 
-# # Plot event CIM-GNN residuals
-# echo "Generating spatial CIM-GNN residuals..."
-# python ${scripts_dir}/gen_spatial_plots.py "plot-event-cim-gnn-residuals" "--region-key" "chch" "${gnn_residual_full}" "${gnn_residual_full_predictions_file}" "${cim_results_file}" "${out_dir}" ${=ims}
+# Plot event CIM-GNN residuals
+echo "Generating spatial CIM-GNN residuals..."
+python ${scripts_dir}/gen_spatial_plots.py "plot-event-cim-gnn-residuals" "--region-key" "chch" "${gnn_residual_full}" "${gnn_residual_full_predictions_file}" "${cim_results_file}" "${out_dir}" ${=ims}
 
-# # Combine spatial figures
-# echo "Combining spatial figures..."
-# python ${scripts_dir}/gen_spatial_plots.py combine-spatial-figures ${out_dir}/cim_3468575_pSA_0p1.png ${out_dir}/gnn_3468575_pSA_0p1.png ${out_dir}/cim_gnn_res_3468575_pSA_0p1.png ${out_dir}/combined_pSA_0p1.png --dpi 900
-# python ${scripts_dir}/gen_spatial_plots.py combine-spatial-figures ${out_dir}/cim_3468575_pSA_1p0.png ${out_dir}/gnn_3468575_pSA_1p0.png ${out_dir}/cim_gnn_res_3468575_pSA_1p0.png ${out_dir}/combined_pSA_1p0.png --dpi 900
-# python ${scripts_dir}/gen_spatial_plots.py combine-spatial-figures ${out_dir}/cim_3468575_pSA_5p0.png ${out_dir}/gnn_3468575_pSA_5p0.png ${out_dir}/cim_gnn_res_3468575_pSA_5p0.png ${out_dir}/combined_pSA_5p0.png --dpi 900
+# Combine spatial figures
+echo "Combining spatial figures..."
+python ${scripts_dir}/gen_spatial_plots.py combine-spatial-figures ${out_dir}/cim_3468575_pSA_0p1.png ${out_dir}/gnn_3468575_pSA_0p1.png ${out_dir}/cim_gnn_res_3468575_pSA_0p1.png ${out_dir}/combined_pSA_0p1.png --dpi 900
+python ${scripts_dir}/gen_spatial_plots.py combine-spatial-figures ${out_dir}/cim_3468575_pSA_1p0.png ${out_dir}/gnn_3468575_pSA_1p0.png ${out_dir}/cim_gnn_res_3468575_pSA_1p0.png ${out_dir}/combined_pSA_1p0.png --dpi 900
+python ${scripts_dir}/gen_spatial_plots.py combine-spatial-figures ${out_dir}/cim_3468575_pSA_5p0.png ${out_dir}/gnn_3468575_pSA_5p0.png ${out_dir}/cim_gnn_res_3468575_pSA_5p0.png ${out_dir}/combined_pSA_5p0.png --dpi 900
 
 
 ### ------------------- Other ------------------------------
 
-# # Magnitude-Rrup Scatter Plot
-# echo "Generating magnitude vs R_Rup scatter plot..."
-# python ${scripts_dir}/gen_paper_figures.py mag-rrup-scatter ${nzgmdb_ffp} ${out_dir}
+# Magnitude-Rrup Scatter Plot
+echo "Generating magnitude vs R_Rup scatter plot..."
+python ${scripts_dir}/gen_paper_figures.py mag-rrup-scatter ${nzgmdb_ffp} ${out_dir}
 
-# # Event-Site Map 
-# echo "Generating event-site map..."
-# python ${scripts_dir}/gen_spatial_plots.py event-site-map --emp-gm-params-ffp "${grid_emp_gm_params}" --region-key "chch_extended_we" --site-int-lon "172.67" --site-int-lat "-43.515" --event-lon "172.67131" --event-lat "-43.57222" "3468575" "${nzgmdb_ffp}" "${out_dir}/event_site_map.png"
+# Event-Site Map 
+echo "Generating event-site map..."
+python ${scripts_dir}/gen_spatial_plots.py event-site-map --emp-gm-params-ffp "${grid_emp_gm_params}" --region-key "chch_extended_we" --site-int-lon "172.67" --site-int-lat "-43.515" --event-lon "172.67131" --event-lat "-43.57222" "3468575" "${nzgmdb_ffp}" "${out_dir}/event_site_map.png"
 
-# # 2011 Christchurch event CCCC & SHLC plots
-# # echo "Generating CCCC and SHLC plots for the 2011 Christchurch event..."
-# export fig_size="4, 4"
-# gnn_residual_full_no_CCCC_SHLC_predictions_file="${gnn_residual_full_no_CCCC_SHLC}/3468575/predictions_noAllowSelf.parquet"
-# python ${scripts_dir}/gen_paper_figures.py ind-scenario-pSA 3468575 ${gnn_residual_full_no_CCCC_SHLC_predictions_file} ${cim_results_file} ${nzgmdb_emp_gm_params} ${nzgmdb_ffp} ${out_dir}
-# export fig_size=$default_fig_size
+# 2011 Christchurch event CCCC & SHLC plots
+# echo "Generating CCCC and SHLC plots for the 2011 Christchurch event..."
+export fig_size="4, 4"
+gnn_residual_full_no_CCCC_SHLC_predictions_file="${gnn_residual_full_no_CCCC_SHLC}/3468575/predictions_noAllowSelf.parquet"
+python ${scripts_dir}/gen_paper_figures.py ind-scenario-pSA 3468575 ${gnn_residual_full_no_CCCC_SHLC_predictions_file} ${cim_results_file} ${nzgmdb_emp_gm_params} ${nzgmdb_ffp} ${out_dir}
+export fig_size=$default_fig_size
 
+### Hyperparameter Variation
+echo "Generating hyperparameter variation plots..."
+python ${scripts_dir}/gen_paper_figures.py hyper-var ${wdata}/post_event_gm_gnn/results/gnn/0422_0740_cv_hyperVar_batchLarge ${wdata}/post_event_gm_gnn/results/gnn/0422_1007_cv_hyperVar_batchSmall ${wdata}/post_event_gm_gnn/results/gnn/0422_1309_cv_hyperVar_fcUnitsLarge ${wdata}/post_event_gm_gnn/results/gnn/0422_1551_cv_hyperVar_fcUnitsSmall ${wdata}/post_event_gm_gnn/results/gnn/0422_1832_cv_hyperVar_nConvLayersLarge ${wdata}/post_event_gm_gnn/results/gnn/0422_2118_cv_hyperVar_nConvLayersSmall ${wdata}/post_event_gm_gnn/results/gnn/0416_1606_cv_final_v4p3FNZGMDB_v2p14_res ${out_dir} --bias-limit 0.7
 
+### F-min filter
+echo "Generating f-min filter plot..."
+python ${scripts_dir}/gen_paper_figures.py fmin-filter ${nzgmdb_ffp} ${gnn_only} ${out_dir}

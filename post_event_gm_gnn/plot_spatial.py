@@ -127,7 +127,7 @@ def plot_im_values(
     )
 
     # Add map scale
-    fig.basemap(map_scale="jBR+w2k+o0.5c/0.5c+l")
+    fig.basemap(map_scale="jBR+w2k+o0.5c/0.75c+l")
 
     fig.savefig(
         output_ffp,

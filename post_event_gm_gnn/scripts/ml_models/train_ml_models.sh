@@ -5,7 +5,7 @@ set -e
 
 # Inputs
 n_procs=12
-code_dir="/home/claudy/dev/work/code/post_event_gm_gnn"
+code_dir="/path/to/post_event_gm_gnn"
 scripts_dir="${code_dir}/post_event_gm_gnn/scripts/ml_models"
 
 gnn_only_config_ffp="${code_dir}/post_event_gm_gnn/scripts/ml_models/gnn_configs/gnn_config_v2p13_base.yaml"
